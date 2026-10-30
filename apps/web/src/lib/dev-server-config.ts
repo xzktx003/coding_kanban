@@ -5,12 +5,20 @@ import type { ProxyOptions } from "vite";
 const cancelAbandonedRead: NonNullable<ProxyOptions["configure"]> = (proxy) => {
   proxy.on("proxyReq", (outgoing, request, response) => {
     const url = new URL(request.url ?? "/", "http://localhost");
+    const views = url.searchParams.getAll("view");
+    let auxiliaryRead = false;
+    try {
+      const pathname = decodeURIComponent(url.pathname);
+      auxiliaryRead = (views.length === 1 && views[0] === "recent" &&
+        ["/api/session/api/cc/session-messages", "/api/session/api/acp/session"].includes(pathname)) ||
+        (!url.search && ["/api/session/api/cc/session-message-detail", "/api/session/api/cc/session-message-image", "/api/session/api/acp/session-detail", "/api/session/api/acp/session-image"].includes(pathname));
+    } catch { /* Invalid encoded paths cannot opt into read cancellation. */ }
     if (
       request.method !== "POST" ||
       !(
         url.pathname === "/api/session/api/codex/thread/item-detail" ||
         (url.pathname === "/api/session/api/codex/thread/turns/list" &&
-          url.searchParams.get("view") === "chat")
+          url.searchParams.get("view") === "chat") || auxiliaryRead
       )
     )
       return;

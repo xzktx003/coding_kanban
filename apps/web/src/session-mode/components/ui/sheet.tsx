@@ -1,5 +1,5 @@
 import {
-  sessionPortalContainer,
+  useSessionPortalContainer,
   useSessionInteractionVisible,
   isSessionInteractionVisible,
 } from "@session/session-dom";
@@ -7,7 +7,7 @@ import {
 
 import * as React from "react";
 import { XIcon } from "lucide-react";
-import { Dialog as SheetPrimitive } from "radix-ui";
+import * as SheetPrimitive from "@radix-ui/react-dialog";
 
 import { cn } from "@session/lib/utils";
 
@@ -30,9 +30,10 @@ function SheetClose({
 function SheetPortal({
   ...props
 }: React.ComponentProps<typeof SheetPrimitive.Portal>) {
+  const container = useSessionPortalContainer();
   return (
     <SheetPrimitive.Portal
-      container={sessionPortalContainer()}
+      container={container}
       data-slot="sheet-portal"
       {...props}
     />

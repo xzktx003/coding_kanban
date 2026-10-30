@@ -8,7 +8,7 @@ import { BackgroundAgentSummary } from "@session/features/subagents/BackgroundAg
 import { pluginInputDrafts } from "@session/features/plugins/pluginInputs";
 import type { NativeInputMention } from "@agent-orchestrator/shared";
 import { useCodexThreadInput } from "@session/hooks/useCodexThreadInput";
-import { composeContextText } from "@agent-orchestrator/shared";
+import { composeContextText } from "@agent-orchestrator/shared/composer-context";
 import {
   composerDrafts,
   useComposerDraft,
@@ -16,10 +16,7 @@ import {
 } from "./v2/drafts";
 import { ContextAttachments, addFileContexts } from "./v2/ContextAttachments";
 import { ComposerSheet } from "./v2/ComposerSheet";
-import { RichDraftEditor } from "./v2/RichDraftEditor";
-import { DrawingEditor } from "./v2/DrawingEditor";
 import { ComposerCommands } from "./v2/ComposerCommands";
-import { ModelReasonSelector } from "./ModelReasonSelector";
 import { isLargePaste, insertAtSelection } from "./v2/content";
 import { Pencil, Code2, Search } from "lucide-react";
 import {
@@ -29,20 +26,21 @@ import {
 import { useCodexSendBlockReason } from "@session/hooks/useCodexSendBlockReason";
 import { createSideChat } from "@session/services/conversationActions";
 import { useFollowupSettingsStore } from "@session/stores/useFollowupSettingsStore";
-import { FollowupQueueContent, hasVisibleFollowupQueue } from "./FollowupQueue";
+import { DeferredFollowupQueueContent as FollowupQueueContent } from "./DeferredFollowupQueue";
+import { hasVisibleFollowupQueue } from "./followupQueueState";
 import { ComposerRail, ComposerRailItem } from "./ComposerRail";
 import { useFollowups } from "@session/hooks/useFollowups";
 import { ModelChangeNotice } from "./ModelChangeNotice";
-import { ConversationMenu } from "./ConversationMenu";
+import { DeferredConversationMenu as ConversationMenu } from "./DeferredConversationMenu";
 
 import { useQuestions } from "@session/features/async-questions/useQuestions";
 import { useAsyncQuestionStore } from "@session/features/async-questions/store";
-import { SideChatPanel } from "./SideChatPanel";
-import { ReviewDialog } from "./ReviewDialog";
+import { DeferredSideChatPanel } from "./DeferredSideChatPanel";
 import { RunningTurnChanges } from "./RunningTurnChanges";
 import { ComposerEnterSettings } from "./ComposerEnterSettings";
 import { NativeComposerIcon } from "./NativeComposerIcon";
-import { NativeModelSelector } from "./NativeModelSelector";
+import { DeferredNativeModelSelector as NativeModelSelector } from "./DeferredNativeModelSelector";
+import { DeferredComposerPanel } from "./DeferredComposerPanel";
 import { NativeAgentSettings } from "./NativeAgentSettings";
 import { goalDrafts, useGoalDraft } from "./goalDrafts";
 import {
@@ -67,8 +65,6 @@ import {
   captureThreadModelSelection,
   flushThreadModelSettings,
 } from "@session/stores/useThreadModelStore";
-import { CloudTasksPanel } from "@session/features/codex-host/CloudTasksPanel";
-import { CodexHostPanel } from "@session/features/codex-host/CodexHostPanel";
 import "./composer-native.css";
 import { NativeSubmitButton } from "./NativeSubmitButton";
 import { nativeComposerPlaceholder } from "./nativeComposerPlaceholder";
@@ -88,13 +84,13 @@ import {
   CornerDownRight,
   ClipboardCheck,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, useCallback, useEffect, useRef, useState } from "react";
 import type { ThreadGoal } from "@session/bindings/v2";
-import { useThreadGoal } from "@session/components/codex/hooks";
-import { useCodexStore } from "@session/components/codex/stores";
-import { ContextWindowWidget } from "@session/components/codex/widget";
+import { useThreadGoal } from "@session/components/codex/hooks/useThreadGoal";
+import { useCodexStore } from "@session/components/codex/stores/useCodexStore";
+import { ContextWindowWidget } from "@session/components/codex/widget/ContextWindowWidget";
 import { deriveContextWindowUsage } from "@session/components/codex/widget/ContextWindowWidget";
-import { FileMentionPopover } from "@session/components/common";
+import { FileMentionPopover } from "@session/components/common/FileMentionPopover";
 import { Button } from "@session/components/ui/button";
 import { codexService } from "@session/services/codexService";
 import { useAgentCenterStore } from "@session/stores";
@@ -122,6 +118,21 @@ import { useComposerFileDrop } from "./composerDrop";
 import { SlashCommandDialogs } from "./SlashCommandDialogs";
 import { SlashCommandPopover } from "./SlashCommandsSelector";
 import type { SlashDialog } from "./slashCommands";
+import { matchesSessionShortcut } from "@session/services/sessionKeyboardShortcuts";
+import { isSessionInteractionVisible } from "@session/session-dom";
+import { composerPrimaryAction, hasPendingComposerInput } from "./composerPrimaryAction";
+import { type BrowserDictationControl, type BrowserDictationPhase } from "@session/BrowserDictationButton";
+import { resumeInterruptedTurn, savedResumeReceipt, reconcileResumeReceipt, type ResumeReceipt } from "@session/services/resumeInterruptedTurn";
+import { captureCodexOperationScope, isCodexOperationScopeCurrent } from "@session/services/codexOperationScope";
+import { NativeQueueSettingsNotice } from "./NativeQueueSettingsNotice";
+import { ExecutionLocationPicker } from "@session/features/workspace-execution/ExecutionLocationPicker";
+import { RealtimeVoiceButton, type RealtimeVoiceControl } from "@session/features/realtime-voice/RealtimeVoiceButton";
+import type { VoicePhase } from "@session/features/realtime-voice/controller";
+
+const DrawingEditor = lazy(() => import("./v2/DrawingEditor").then((module) => ({ default: module.DrawingEditor })));
+const RichDraftEditor = lazy(() => import("./v2/RichDraftEditor").then((module) => ({ default: module.RichDraftEditor })));
+const ModelReasonSelector = lazy(() => import("./ModelReasonSelector").then((module) => ({ default: module.ModelReasonSelector })));
+const ReviewDialog = lazy(() => import("./ReviewDialog").then((module) => ({ default: module.ReviewDialog })));
 
 interface ComposerProps {
   targetLabel?: React.ReactNode;
@@ -143,15 +154,24 @@ export function Composer({
     submit: () => Promise<void>;
   } | null>(null);
   const preferences = useFollowupSettingsStore();
-  const [reviewOpen, setReviewOpen] = useState(false);
+  const [reviewOpen, setReviewOpenState] = useState(false);
+  const reviewScope = useRef<ReturnType<typeof captureCodexOperationScope> | null>(null);
+  const setReviewOpen = (open: boolean) => { if (open) reviewScope.current = captureCodexOperationScope(); setReviewOpenState(open); };
+  const dictationControl = useRef<BrowserDictationControl | null>(null);
+  const [dictationPhase, setDictationPhase] = useState<BrowserDictationPhase>("idle");
+  const voiceControl = useRef<RealtimeVoiceControl | null>(null);
+  const [voiceState, setVoiceState] = useState<{ owner: string; phase: VoicePhase } | null>(null);
+  const [resuming, setResuming] = useState<Record<string, boolean>>({});
+  const [resumeReceipts, setResumeReceipts] = useState<Record<string, ResumeReceipt>>({});
   const [detailsOwner, setDetailsOwner] = useState<string | null>(null);
 
   const submitMode = useRef<FollowupMode | null>(null);
   const [deliveryNotice, setDeliveryNotice] = useState<{
     owner: string;
     text: string;
+    resume?: boolean;
   } | null>(null);
-  const [slashDialog, setSlashDialog] = useState<SlashDialog | null>(null);
+  const [slashRequest, setSlashRequest] = useState<{ dialog: SlashDialog; owner: string; scope: ReturnType<typeof captureCodexOperationScope> } | null>(null);
   const { currentThreadId, inputFocusTrigger } = useCodexStore(
     useShallow((s) => ({
       currentThreadId: s.currentThreadId,
@@ -160,6 +180,10 @@ export function Composer({
   );
   const cwd = useWorkspaceStore((s) => s.cwd);
   const owner = sessionDraftKey("codex", currentThreadId, cwd);
+  const voicePhase = voiceState?.owner === owner ? voiceState.phase : "idle";
+  const handleVoicePhase = useCallback((phase: VoicePhase) => setVoiceState(previous => previous?.owner === owner && previous.phase === phase ? previous : { owner, phase }), [owner]);
+  const slashDialog = slashRequest?.owner === owner ? slashRequest.dialog : null;
+  const setSlashDialog = (dialog: SlashDialog | null) => setSlashRequest(dialog ? { dialog, owner, scope: captureCodexOperationScope() } : null);
   const { enabled: goalEnabled, setEnabled: setGoalEnabled } =
     useGoalDraft(owner);
   const { collaborationMode, setCollaborationMode, settingsStorage, settingsLoading, retrySettings } =
@@ -183,15 +207,11 @@ export function Composer({
     null,
   );
   const [commandsOwner, setCommandsOwner] = useState<string | null>(null);
-  const [hostOwner, setHostOwner] = useState<string | null>(null);
-  const [cloudOwner, setCloudOwner] = useState<string | null>(null);
   const [modelOwner, setModelOwner] = useState<string | null>(null);
   useEffect(() => {
     setSlashDialog(null);
     setReviewOpen(false);
     setDetailsOwner(null);
-    setHostOwner(null);
-    setCloudOwner(null);
     setModelOwner(null);
     setGoalReplacement(null);
   }, [owner]);
@@ -213,10 +233,6 @@ export function Composer({
   const attachments = useImageAttachments(owner);
   const images = attachments.paths;
   const threadInput = useCodexThreadInput(currentThreadId);
-  const nativeChild = useCodexStore((s) =>
-    s.threads.find((t) => t.id === currentThreadId),
-  );
-  const hostCwd = nativeChild?.cwd ?? cwd;
   const directInputBlocked = threadInput.blocked;
   const fileDrop = useComposerFileDrop(owner, {
     addImages: attachments.addFiles,
@@ -289,6 +305,37 @@ export function Composer({
   // Native snapshots and ordered notifications own the saved goal; draft mode
   // only controls the next submission, never its status or budget.
   const threadGoal = useThreadGoal();
+  const interruptedTurn = useCodexStore((state) => {
+    if (!currentThreadId || state.threadStatusMap[currentThreadId]?.type !== "idle" || !state.historyLoadedMap[currentThreadId] || state.historyLoadingMap[currentThreadId] || state.historyErrorMap[currentThreadId]) return null;
+    const timing = state.turnTimingMap[currentThreadId];
+    return timing?.status === "interrupted" ? timing.turnId : null;
+  });
+  const resumeAvailable = !!interruptedTurn && !threadGoal && !goalEnabled && !hasPendingComposerInput(queueSnapshot.state.items);
+  const resumeReceipt = resumeReceipts[owner];
+  const resumeUnknown = resumeReceipt?.sourceTurnId === interruptedTurn && resumeReceipt.status === "unknown";
+  const resumeAccepted = resumeReceipt?.sourceTurnId === interruptedTurn && resumeReceipt.status === "accepted";
+  useEffect(() => {
+    if (deliveryNotice?.owner === owner && deliveryNotice.resume && resumeReceipt?.status === "accepted" && (running || !interruptedTurn)) setDeliveryNotice(null);
+  }, [owner, running, interruptedTurn, resumeReceipt, deliveryNotice]);
+  const primary = composerPrimaryAction({ dictation: dictationPhase, realtime: voicePhase, running, hasContent, resumeAvailable, mode: preferences.mode });
+  const voiceCanSend = !!inputValue.trim() && !images.length && !richDraft.contexts.length && !goalEnabled && !contextBusy && !pendingFiles[owner] && !fileDrop.pending && !attachments.blocked;
+  const voiceAction = primary === "voice-send" || primary === "voice-end" || primary === "voice-wait";
+  const voiceLabel = primary === "voice-send" ? "发送到语音对话" : primary === "voice-end" ? "结束语音对话" : "正在连接或结束语音";
+  useEffect(() => {
+    if (!currentThreadId || !interruptedTurn) return;
+    let live = true;
+    try {
+      void savedResumeReceipt(currentThreadId, interruptedTurn).then((saved) => {
+      if (live && saved) {
+        setResumeReceipts((state) => ({ ...state, [owner]: saved }));
+        if (saved.status === "unknown") void reconcileResumeReceipt(saved).then((result) => {
+          if (live) setResumeReceipts((state) => ({ ...state, [owner]: result }));
+        }).catch(() => {});
+      }
+      }).catch(() => {});
+    } catch { /* Explicit Resume shows storage/scope errors; never auto-writes. */ }
+    return () => { live = false; };
+  }, [currentThreadId, interruptedTurn, owner]);
   const hasContextUsage = useCodexStore(
     (s) =>
       !!currentThreadId &&
@@ -302,6 +349,60 @@ export function Composer({
   });
   const wrapperRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
+  const handleVoiceAction = async () => {
+    if (voicePhase !== "active" || !voiceControl.current || sendingRef.current.has(owner)) return;
+    const control = voiceControl.current;
+    if (!hasContent) { await control.stop(); return; }
+    if (!voiceCanSend) { setDeliveryNotice({ owner, text: "语音文字只支持正文；请先移除附件或结束语音，草稿已保留。" }); return; }
+    const draft = readDraft(owner), scope = captureCodexOperationScope();
+    if (draft.text.length > 200_000) { setDeliveryNotice({ owner, text: "语音文字最多 200,000 字符，草稿已保留。" }); return; }
+    sendingRef.current.add(owner);
+    setSendingOwners(previous => ({ ...previous, [owner]: true }));
+    try {
+      await control.sendText(draft.text.trim());
+      if (!isCodexOperationScopeCurrent(scope)) return;
+      useSessionDraftStore.getState().clearSubmitted(owner, draft);
+      setDeliveryNotice({ owner, text: "已发送到语音对话" });
+    } catch (error) { if (isCodexOperationScopeCurrent(scope)) setDeliveryNotice({ owner, text: error instanceof Error ? error.message : "语音文字结果待核对，草稿已保留。" }); }
+    finally { sendingRef.current.delete(owner); setSendingOwners(previous => ({ ...previous, [owner]: false })); }
+  };
+  const handleResume = async () => {
+    if (!currentThreadId || !interruptedTurn || !resumeAvailable || (!resumeUnknown && blocked) || resuming[owner] || sendingRef.current.has(owner)) return;
+    const target = currentThreadId, source = interruptedTurn, capturedOwner = owner;
+    const scope = captureCodexOperationScope();
+    const selection = captureThreadModelSelection(target);
+    setResuming((state) => ({ ...state, [capturedOwner]: true }));
+    try {
+      let result: ResumeReceipt;
+      if (resumeUnknown && resumeReceipt) result = await reconcileResumeReceipt(resumeReceipt);
+      else {
+        const parameters = followupParameters(target, selection.settings);
+        await flushThreadModelSettings(target, selection);
+        if (!isCodexOperationScopeCurrent(scope)) throw new Error("账号或运行服务已变化，请重新确认继续操作");
+        result = await resumeInterruptedTurn(target, source, parameters);
+      }
+      setResumeReceipts((state) => ({ ...state, [capturedOwner]: result }));
+      setDeliveryNotice({ owner: capturedOwner, resume: true, text: result.status === "unknown" ? "继续任务的回执待核对；再次点击只核对状态，不会重发" : result.status === "rejected" ? result.error ?? "未能继续任务，请核对当前轮次" : "已接受继续任务，正在同步运行状态" });
+    } catch (error) {
+      setDeliveryNotice({ owner: capturedOwner, text: error instanceof Error ? error.message : "无法继续任务" });
+    } finally { setResuming((state) => ({ ...state, [capturedOwner]: false })); }
+  };
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!isSessionInteractionVisible() || !matchesSessionShortcut(event, "focus")) return;
+      const target = event.target;
+      if (target instanceof Element && target.closest('[role="dialog"], [role="alertdialog"], .session-rich-draft, .session-files-editor')) return;
+      // Only the current public composer owns this command, never a retained
+      // hidden surface or another window's draft.
+      if (activeDraftOwner() !== owner || !wrapperRef.current?.isConnected) return;
+      event.preventDefault();
+      event.stopPropagation();
+      editorRef.current?.focus();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [owner]);
 
   // Desktop keeps the previous refocus behaviour. On touch devices, changing
   // tabs must not summon the soft keyboard; the user can focus the editor by
@@ -327,6 +428,10 @@ export function Composer({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (dictationPhase === "recording") { void dictationControl.current?.finishAndSend(); return; }
+    if (dictationPhase === "starting" || dictationPhase === "transcribing") return;
+    if (voicePhase === "active") { void handleVoiceAction(); return; }
+    if (voicePhase === "starting" || voicePhase === "stopping") return;
     const submitter = (e.nativeEvent as SubmitEvent)
       .submitter as HTMLButtonElement | null;
     const requestedMode: FollowupMode =
@@ -759,12 +864,13 @@ export function Composer({
           )}
         </ComposerRailItem>
       </ComposerRail>
+      {currentThreadId && queueSnapshot.state.authority === "native" && queueSnapshot.state.items.some((item) => item.authority === "native" && item.status === "queued") && <NativeQueueSettingsNotice key={currentThreadId} threadId={currentThreadId} />}
       {deliveryNotice?.owner === owner && (
-        <p role="status" className="sr-only">
+        <p role="status" className="session-composer-delivery-notice px-4 py-1 text-xs text-muted-foreground">
           {deliveryNotice.text}
         </p>
       )}
-      <SideChatPanel />
+      <DeferredSideChatPanel />
       {goalReplacement?.owner === owner && (
         <GoalConfirmation
           kind="replace"
@@ -790,10 +896,13 @@ export function Composer({
         />
       )}
       {reviewOpen && (
+        <DeferredComposerPanel label="代码审查" onClose={() => setReviewOpen(false)}>
         <ReviewDialog
           threadId={currentThreadId}
           onClose={() => setReviewOpen(false)}
+          targetScope={reviewScope.current ?? undefined}
         />
+        </DeferredComposerPanel>
       )}
       <form
         ref={formRef}
@@ -883,6 +992,7 @@ export function Composer({
                       triggerContainer={triggerContainer}
                       onActionSelected={close}
                       parentMenuId={parentMenuId}
+                      ownsGlobalShortcuts
                     />
                   )}
                   actions={(close, conversationTrigger) => (
@@ -898,30 +1008,6 @@ export function Composer({
                       >
                         <NativeComposerIcon name="chat" />
                         模型与提供商设置
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        className="justify-start"
-                        onClick={() => {
-                          close();
-                          setCloudOwner(owner);
-                        }}
-                      >
-                        <NativeComposerIcon name="chat" />
-                        Codex 云任务
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        className="justify-start"
-                        onClick={() => {
-                          close();
-                          setHostOwner(owner);
-                        }}
-                      >
-                        <Code2 size={16} />
-                        VS Code 上下文
                       </Button>
                       <Button
                         type="button"
@@ -1123,15 +1209,37 @@ export function Composer({
                   <NativeComposerIcon name="microphone" />
                   <DictationButton
                     key={owner}
-                    onTranscript={(text) => {
+                    controlRef={dictationControl}
+                    onPhaseChange={setDictationPhase}
+                    disabled={voicePhase === "active" || voicePhase === "starting" || voicePhase === "stopping"}
+                    onTranscript={(text, intent) => {
                       const value = readDraft(owner).text;
                       useSessionDraftStore
                         .getState()
                         .setText(owner, value ? `${value} ${text}` : text);
+                      if (intent?.send && activeDraftOwner() === owner) {
+                        const submitted = readDraft(owner);
+                        requestAnimationFrame(() => {
+                          const current = readDraft(owner);
+                          if (activeDraftOwner() === owner && current.revision === submitted.revision && current.text === submitted.text) formRef.current?.requestSubmit();
+                        });
+                      }
                     }}
                   />
                 </span>
-                {running && !hasContent && (
+                {currentThreadId && <RealtimeVoiceButton key={owner} threadId={currentThreadId} owner={owner} controlRef={voiceControl} onPhaseChange={handleVoicePhase} onStarting={() => dictationControl.current?.cancel()} disabled={sending || !!resuming[owner]} />}
+                {voiceAction && <NativeSubmitButton type="button" aria-label={voiceLabel} title={voiceLabel} disabled={sending || primary === "voice-wait" || (primary === "voice-send" && !voiceCanSend)} loading={sending || primary === "voice-wait"} onClick={() => void handleVoiceAction()} size="icon" className="session-composer-send"><NativeComposerIcon name={primary === "voice-end" ? "stop" : "send"} /></NativeSubmitButton>}
+                {(primary === "dictation-finish" || primary === "dictation-wait") && (
+                  <NativeSubmitButton type="button" aria-label={primary === "dictation-finish" ? "结束听写并发送" : "正在准备听写内容"} title="结束听写并发送" disabled={blocked || primary === "dictation-wait"} loading={primary === "dictation-wait"} onClick={() => void dictationControl.current?.finishAndSend()} size="icon" className="session-composer-send">
+                    <NativeComposerIcon name="send" />
+                  </NativeSubmitButton>
+                )}
+                {primary === "resume" && (
+                  <NativeSubmitButton type="button" aria-label={resumeAccepted ? "正在同步任务状态" : resumeUnknown ? "核对继续任务状态" : "继续任务"} title={resumeUnknown ? "核对继续任务状态" : "继续任务"} disabled={(!resumeUnknown && blocked) || !!resuming[owner] || resumeAccepted} loading={!!resuming[owner]} onClick={() => void handleResume()} size="icon" className="session-composer-send">
+                    <NativeComposerIcon name="send" />
+                  </NativeSubmitButton>
+                )}
+                {primary === "stop" && (
                   <NativeSubmitButton
                     type="button"
                     aria-label={stopping ? "正在停止" : "停止生成"}
@@ -1146,7 +1254,7 @@ export function Composer({
                     <NativeComposerIcon name="stop" />
                   </NativeSubmitButton>
                 )}
-                {(!running || hasContent) && (
+                {(primary === "send" || primary === "queue" || primary === "steer") && (
                   <NativeSubmitButton
                     aria-label={submitLabel}
                     title={submitLabel}
@@ -1164,6 +1272,10 @@ export function Composer({
           </div>
         </div>
       </form>
+      <div className="flex min-w-0 items-center px-1 pt-1">
+        <ExecutionLocationPicker owner={owner} disabled={sending || !!resuming[owner]} />
+        {currentThreadId && <span className="truncate text-[11px] text-muted-foreground">用于新会话</span>}
+      </div>
       {statusText && (
         <span
           className="session-native-composer-status"
@@ -1274,52 +1386,14 @@ export function Composer({
           {!statusText && <p>暂无待处理状态。</p>}
         </ComposerSheet>
       )}
-      {hostOwner === owner && (
-        <ComposerSheet
-          title="VS Code 上下文"
-          description="从本会话的编辑工作区添加活动文件和选区。"
-          onClose={() => setHostOwner(null)}
-        >
-          {hostCwd ? (
-            <CodexHostPanel
-              owner={{
-                cwd: hostCwd,
-                threadId: currentThreadId,
-                draftOwner: owner,
-              }}
-            />
-          ) : (
-            <p role="status">先选择本会话的项目，再连接编辑器上下文。</p>
-          )}
-        </ComposerSheet>
-      )}
-      {cloudOwner === owner && (
-        <ComposerSheet
-          title="Codex 云任务"
-          description="检查当前账号与环境能力，再明确创建或委派任务。"
-          onClose={() => setCloudOwner(null)}
-        >
-          {hostCwd ? (
-            <CloudTasksPanel
-              owner={{
-                cwd: hostCwd,
-                threadId: currentThreadId,
-                draftOwner: owner,
-              }}
-            />
-          ) : (
-            <p role="status">先选择本会话项目，再使用云任务。</p>
-          )}
-        </ComposerSheet>
-      )}
       {modelOwner === owner && (
         <ComposerSheet
           title="模型与提供商设置"
           onClose={() => setModelOwner(null)}
         >
-          <NativeAgentSettings>
+          <DeferredComposerPanel label="模型与提供商设置" onClose={() => setModelOwner(null)}><NativeAgentSettings>
             <ModelReasonSelector mode="panel" threadId={currentThreadId} />
-          </NativeAgentSettings>
+          </NativeAgentSettings></DeferredComposerPanel>
         </ComposerSheet>
       )}
       {richDraft.expanded && (
@@ -1352,12 +1426,12 @@ export function Composer({
               <NativeSubmitButton
                 type="button"
                 className="session-v2-primary session-expanded-submit"
-                disabled={sending || blocked || !hasContent}
-                loading={sending}
-                aria-label={submitLabel}
-                onClick={() => formRef.current?.requestSubmit()}
+                disabled={voiceAction ? sending || primary === "voice-wait" || (primary === "voice-send" && !voiceCanSend) : primary === "resume" ? ((!resumeUnknown && blocked) || !!resuming[owner] || resumeAccepted) : sending || blocked || primary === "dictation-wait" || (!hasContent && primary !== "dictation-finish")}
+                loading={sending || !!resuming[owner] || primary === "dictation-wait"}
+                aria-label={voiceAction ? voiceLabel : primary === "resume" ? (resumeUnknown ? "核对继续任务状态" : "继续任务") : primary === "dictation-finish" ? "结束听写并发送" : submitLabel}
+                onClick={() => voiceAction ? void handleVoiceAction() : primary === "resume" ? void handleResume() : formRef.current?.requestSubmit()}
               >
-                {submitLabel}
+                {voiceAction ? voiceLabel : primary === "resume" ? (resumeUnknown ? "核对继续任务状态" : "继续任务") : primary === "dictation-finish" ? "结束听写并发送" : submitLabel}
               </NativeSubmitButton>
             </>
           }
@@ -1384,7 +1458,7 @@ export function Composer({
                 );
               }}
             />
-            <RichDraftEditor
+            <DeferredComposerPanel label="展开编辑器" onClose={() => composerDrafts.setExpanded(owner, false)}><RichDraftEditor
               value={inputValue}
               onSelection={(start, end) => {
                 expandedSelection.current = { start, end };
@@ -1392,11 +1466,12 @@ export function Composer({
               onChange={setInputValue}
               plain={richDraft.plain}
               onPlainChange={(plain) => composerDrafts.setPlain(owner, plain)}
-            />
+            /></DeferredComposerPanel>
           </div>
         </ComposerSheet>
       )}
       {drawing?.owner === owner && (
+        <DeferredComposerPanel label="绘图编辑" onClose={() => setDrawing(null)}>
         <DrawingEditor
           key={owner + ":" + drawing.id}
           owner={owner}
@@ -1404,6 +1479,7 @@ export function Composer({
           attachments={attachments}
           onClose={() => setDrawing(null)}
         />
+        </DeferredComposerPanel>
       )}
       {commandsOwner === owner && (
         <ComposerCommands
@@ -1414,10 +1490,10 @@ export function Composer({
       {(slashDialog === "model" || slashDialog === "effort") && (
         <ComposerSheet
           title="模型与思考强度"
-          description="只影响新提交的消息；已排队消息保留原配置。"
+          description="保存下次发送选择；原生待发队列使用线程当前设置，可在队列旁显式应用。"
           onClose={() => setSlashDialog(null)}
         >
-          <ModelReasonSelector mode="panel" />
+          <DeferredComposerPanel label="模型与思考强度" onClose={() => setSlashDialog(null)}><ModelReasonSelector mode="panel" threadId={currentThreadId} /></DeferredComposerPanel>
         </ComposerSheet>
       )}
       <SlashCommandDialogs
@@ -1426,6 +1502,7 @@ export function Composer({
         threadId={currentThreadId}
         cwd={cwd}
         draftOwner={owner}
+        targetScope={slashRequest?.scope}
       />
     </div>
   );

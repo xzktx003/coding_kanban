@@ -1,13 +1,17 @@
-import { ChevronDown, ChevronUp } from 'lucide-react';
-import { useLayoutEffect, useRef, useState } from 'react';
-import { AddToTodo, CopyButton } from '@session/components/common';
-import { Markdown } from '@session/components/Markdown';
-import { Button } from '@session/components/ui/button';
+import { useTranscriptRowBoolean } from "@session/components/agent/TranscriptRowState";
+import { ChevronDown, ChevronUp } from "lucide-react";
+import { useLayoutEffect, useRef, useState } from "react";
+import { AddToTodo, CopyButton } from "@session/components/common";
+import { Markdown } from "@session/components/Markdown";
+import { Button } from "@session/components/ui/button";
 
 const MAX_COLLAPSED_HEIGHT = 128;
 
-export function UserMessage({ text }: { text: string }) {
-  const [collapsed, setCollapsed] = useState(true);
+export function UserMessage({ text, images = [] }: { text: string; images?: readonly string[] }) {
+  const [collapsed, setCollapsed] = useTranscriptRowBoolean(
+    "user-collapse",
+    true,
+  );
   const [overflows, setOverflows] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
 
@@ -29,14 +33,21 @@ export function UserMessage({ text }: { text: string }) {
             onClick={() => setCollapsed((c) => !c)}
             className="absolute top-1 right-1 z-10 h-5 w-5 text-muted-foreground"
           >
-            {collapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+            {collapsed ? (
+              <ChevronDown className="h-4 w-4" />
+            ) : (
+              <ChevronUp className="h-4 w-4" />
+            )}
           </Button>
         )}
         <div
           ref={contentRef}
-          className={collapsed && overflows ? 'overflow-hidden max-h-32' : undefined}
+          className={
+            collapsed && overflows ? "overflow-hidden max-h-32" : undefined
+          }
         >
-          <Markdown value={text} />
+          {images.length > 0 && <div className="flex flex-wrap gap-2">{images.map((src, index) => <img key={index} src={src} alt="用户图片" loading="lazy" decoding="async" className="max-h-48 max-w-full rounded-md object-contain" />)}</div>}
+          {text && <Markdown value={text} />}
         </div>
         {overflows && collapsed && (
           <div className="absolute bottom-0 left-0 right-0 h-10 flex items-end justify-center rounded-b-md bg-gradient-to-t from-blue-50 dark:from-blue-950 to-transparent pb-1">
@@ -63,10 +74,10 @@ export function UserMessage({ text }: { text: string }) {
           </div>
         )}
       </div>
-      <div className="invisible group-hover:visible flex flex-col gap-0.5 shrink-0 pt-0.5">
+      {text && <div className="invisible group-hover:visible flex flex-col gap-0.5 shrink-0 pt-0.5">
         <AddToTodo text={text} className="h-4 w-4 text-muted-foreground" />
         <CopyButton text={text} className="h-4 w-4 text-muted-foreground" />
-      </div>
+      </div>}
     </div>
   );
 }

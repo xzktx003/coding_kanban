@@ -1,6 +1,10 @@
+vi.mock("./nativeOperationContext",()=>({readNativeOperationContext:async()=>({namespace:"private-fixture-native-domain",scopeToken:"a".repeat(64)})}));
 import { beforeEach, expect, it, vi } from "vitest";
 const api = vi.hoisted(() => ({ threadFork: vi.fn(), turnStart: vi.fn() }));
 vi.mock("./apiAdapt", () => api);
+vi.mock("./apiAdapt/codex", () => api);
+vi.mock("./apiAdapt/git", () => api);
+vi.mock("./apiAdapt/skills", () => api);
 import { codexService } from "./codexService";
 import { useCodexStore } from "../components/codex/stores";
 import { MutationNotStartedError } from "./MutationNotStartedError";
@@ -25,13 +29,39 @@ it("passes the selected native inclusive or exclusive turn boundary and defers i
     threadId: "owner",
     lastTurnId: "last",
     deferGoalContinuation: true,
-  });
+  },{expectedScope:"a".repeat(64)});
   await codexService.threadFork("owner", { beforeTurnId: "before" });
   expect(api.threadFork).toHaveBeenLastCalledWith({
     threadId: "owner",
     beforeTurnId: "before",
     deferGoalContinuation: true,
+  },{expectedScope:"a".repeat(64)});
+});
+it("forks into the captured worktree directory and refuses a mismatched native result before publishing it", async () => {
+  api.threadFork.mockResolvedValueOnce({
+    thread: { id: "worktree-fork", cwd: "/project/worktrees/new", turns: [] },
   });
+  const result = await codexService.threadFork("owner", {
+    cwd: "/project/worktrees/new",
+  } as any);
+  expect(api.threadFork).toHaveBeenLastCalledWith({
+    threadId: "owner",
+    cwd: "/project/worktrees/new",
+    deferGoalContinuation: true,
+  },{expectedScope:"a".repeat(64)});
+  expect(result.cwd).toBe("/project/worktrees/new");
+  api.threadFork.mockResolvedValueOnce({
+    thread: { id: "wrong-cwd", cwd: "/owner", turns: [] },
+  });
+  await expect(
+    codexService.threadFork("owner", { cwd: "/project/worktrees/new" } as any),
+  ).rejects.toThrow(/工作目录.*核对/);
+  expect(useCodexStore.getState().threads.some((thread) => thread.id === "wrong-cwd")).toBe(false);
+});
+it("rejects malformed explicit fork directories before writing", async () => {
+  for (const cwd of ["", "relative/path", "/project\nother", "/project/../other"])
+    await expect(codexService.threadFork("owner", { cwd } as any)).rejects.toBeInstanceOf(MutationNotStartedError);
+  expect(api.threadFork).not.toHaveBeenCalled();
 });
 it("rejects ambiguous boundaries or an inclusive in-progress source before invoking the protocol", async () => {
   await expect(

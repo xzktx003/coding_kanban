@@ -26,8 +26,8 @@ const api = vi.hoisted(() => ({
   listConfigProviders: vi.fn(),
   listProviderPresets: vi.fn(),
 }));
-vi.mock("@session/services/apiAdapt", async (original) => ({
-  ...(await original<typeof import("@session/services/apiAdapt")>()),
+vi.mock("@session/services/apiAdapt/codex", async (original) => ({
+  ...(await original<typeof import("@session/services/apiAdapt/codex")>()),
   ...api,
 }));
 vi.mock("sonner", () => ({ toast: { message: vi.fn(), error: vi.fn(), success: vi.fn() } }));

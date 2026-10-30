@@ -7,7 +7,7 @@
     "dev": "pnpm --filter @agent-orchestrator/shared build && pnpm run dev:app",
     "dev:app": "node ../../scripts/watch-server.mjs",
     "build": "pnpm --filter @agent-orchestrator/shared build && pnpm --filter @agent-orchestrator/session-runtime build && tsc -p tsconfig.json",
-    "test": "tsx --test --test-concurrency=4 src/**/*.test.ts",
+    "test": "tsx --test --test-concurrency=4 src/*.test.ts src/**/*.test.ts",
     "format": "prettier --write 'src/**/*.ts'"
   },
   "dependencies": {

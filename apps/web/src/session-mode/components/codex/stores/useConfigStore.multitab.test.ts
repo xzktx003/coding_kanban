@@ -75,12 +75,20 @@ it("writes only the fields a setter actually changes", async () => {
     `${PREFIX}reasoningEffort`,
   ]);
 
-  // `setAccessMode` derives `approvalPolicy`, so both belong to this intent.
+  // Choosing a sandbox also clears a previously selected named permission
+  // profile. These three fields belong to the same explicit permission intent.
+  store.getState().setPermissions("fixture-named-profile");
   writes.mockClear();
   store.getState().setAccessMode("workspace-write");
   expect(new Set(writes.mock.calls.map(([key]) => key))).toEqual(
-    new Set([`${PREFIX}sandbox`, `${PREFIX}approvalPolicy`]),
+    new Set([`${PREFIX}sandbox`, `${PREFIX}permissions`, `${PREFIX}approvalPolicy`]),
   );
+  expect(writes).toHaveBeenCalledTimes(3);
+  expect(store.getState()).toMatchObject({
+    sandbox: "workspace-write", permissions: null,
+    approvalPolicy: "on-request", reasoningEffort: "xhigh",
+  });
+  expect(localStorage.getItem(`${PREFIX}permissions`)).toBe("null");
   writes.mockRestore();
 });
 

@@ -49,7 +49,7 @@ export function SessionListItem({
   const isWorktree = (session.cwd ?? "").includes("/.codexia/worktrees/");
   const pinned = usePinStore((s) => s.pinned);
   const togglePin = usePinStore((s) => s.togglePin);
-  const isPinned = pinned.some((p) => p.id === session.session_id);
+  const isPinned = pinned.some((p) => p.kind === "cc" && p.id === session.session_id);
 
   return (
     <div

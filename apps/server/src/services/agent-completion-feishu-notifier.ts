@@ -15,6 +15,8 @@ import {
 export interface FeishuCompletionEvent {
   userQuestion?: string;
   sessionModeThreadId?: string;
+  sessionModeScope?: string;
+  sessionModeNamespace?: string;
   codexThreadId?: string;
   transcriptAgentKind?: string;
   transcriptSessionId?: string;

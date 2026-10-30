@@ -8,6 +8,7 @@ export function nativeThreadSettings(value: unknown, fallback?: unknown): Settin
   const native = { ...defined(fallback), ...defined(value) };
   const nativePermissionMetadata = projectNativePermissionMetadata(value);
   return {
+    ...(native.permissions === null || typeof native.permissions === "string" ? { permissions: native.permissions } : {}),
     ...(nativePermissionMetadata ? { nativePermissionMetadata } : {}),
     ...(typeof native.model === "string" && native.model ? { model: native.model } : {}),
     ...(typeof native.modelProvider === "string" && native.modelProvider ? { modelProvider: native.modelProvider } : {}),

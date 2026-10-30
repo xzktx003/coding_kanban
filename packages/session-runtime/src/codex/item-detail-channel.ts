@@ -91,10 +91,13 @@ export function registerLocalItemDetailChannel(
   app: FastifyInstance,
   dataDir: string,
   env: NodeJS.ProcessEnv = process.env,
+  // Programmatic owned-fixture injection. Production callers omit this; no
+  // environment variable or HTTP field can enable a private native launch.
+  readerOptions: Pick<CodexOptions, "launch"> = {},
 ) {
   registerItemDetailChannel(
     app,
-    { env, resolveEnv: () => resolveCodexEnv(dataDir, env) },
+    { env, resolveEnv: () => resolveCodexEnv(dataDir, env), ...readerOptions },
     "/api/session/api/codex/thread/item-detail",
   );
 }

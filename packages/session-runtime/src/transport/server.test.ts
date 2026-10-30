@@ -17,6 +17,15 @@ test("standalone runtime health, isolated legacy settings and strict malformed-i
   const health = await runtime.app.inject({ method: "GET", url: "/health" });
   assert.equal(health.json().instance, "test-instance");
   assert.equal(health.json().runtime, "typescript");
+  assert.deepEqual(health.json().ownedAgents, {
+    cc: { connections: 0, activeTurns: 0, pendingRequests: 0 },
+    acp: { connections: 0, activePrompts: 0, pendingRequests: 0, uncertainSessions: 0 },
+  });
+  await runtime.claude.newSession({ cwd: dataHome });
+  const withClient = (await runtime.app.inject({method:"GET",url:"/health"})).json();
+  assert.equal(withClient.ownedAgents.cc.connections,1);
+  assert.equal(withClient.ownedAgents.cc.activeTurns,0);
+  assert.equal(JSON.stringify(withClient.ownedAgents).includes(dataHome),false);
   assert.deepEqual(
     (await runtime.app.inject({ method: "GET", url: "/api/settings" })).json(),
     { version: 1, workspace: { projects: [], historyProjects: [] } },

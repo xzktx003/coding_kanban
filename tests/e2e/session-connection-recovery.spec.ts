@@ -28,13 +28,15 @@ test("network recovery clears connection and sync warnings without losing the dr
     return page.getByRole("button", { name: "立即重试", exact: true }).isVisible();
   }, { timeout: 15_000 }).toBe(true);
   expect(failures).toBeGreaterThanOrEqual(5);
-  await expect(page.getByText("会话服务连接中断，正在自动重连。草稿已保留。", { exact: false })).toBeVisible();
-  await expect(page.getByText("同步待重试", { exact: true })).toBeVisible();
+  const outage = page.getByRole("alert").filter({ hasText: "会话服务连接中断" });
+  await expect(outage).toBeVisible();
+  await expect(outage).toContainText("正在自动重连。草稿已保留。");
+  await expect(page.getByRole("button", { name: /同步待重试/ })).toBeVisible();
   await expect(editor).toContainText("断线期间保留的草稿");
   offline = false;
   await page.getByRole("button", { name: "立即重试", exact: true }).click();
   await page.clock.runFor(100);
-  await expect(page.getByText("同步待重试", { exact: true })).toBeHidden();
+  await expect(page.getByRole("button", { name: /同步待重试/ })).toBeHidden();
   await expect(page.getByRole("button", { name: "立即重试", exact: true })).toBeHidden();
   await expect(editor).toContainText("断线期间保留的草稿");
 });

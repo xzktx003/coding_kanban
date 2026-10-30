@@ -107,6 +107,13 @@ async function fixture() {
       await page.route("**/api/**", async (route) => {
         const request = route.request(),
           url = new URL(request.url());
+        if (url.pathname === "/api/session/lifecycle/context")
+          return route.fulfill({
+            json: {
+              scopeToken: "submission-fixture-scope",
+              namespace: "submission-fixture-domain",
+            },
+          });
         if (url.pathname.endsWith("/thread/access"))
           return route.fulfill({
             json: { state: "owned", reason: "", generation: 1 },

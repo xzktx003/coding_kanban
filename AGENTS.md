@@ -23,7 +23,7 @@
 - `pnpm codex:status`：读取启动环境，只读核对 Codex 宿主、网关、私有 broker 及已部署 companion 内容；区分旧代码、不可达、等待浏览器激活和 broker 就绪，不启动、停止或发送任务，broker 就绪不代表模型对话已验证。见 `docs/codex-workbench-mode.md`。
 - 命令详情网关使用运行包的独立只读库；后端 `build` 会编译该依赖，但不会替换活跃运行进程。关闭会话模式时不加载详情库；自定义运行服务没有默认库产物时保留网关和旧服务，通过既有只读接口明确返回支持状态。见 `docs/session-command-details.md`。
 - `thread/turns/list?view=chat` 使用同包独立只读通道，原生只允许 initialize／initialized／thread/turns/list；每页保留原生游标，不 resume/acquire、不重试发送。工具正文在接收时丢弃，密集工具按投影字节有界留存；共享 RPC 的 32 MiB、聊天 16 MiB 和既有流式预算不得放宽。旧运行层继续复用，完整读取仍走原协议。故障恢复及最低验证见 `docs/session-codex-connection-recovery.md`。
-- `pnpm dev:restart`：先检查两个端口的归属并完成编译，再按 `.env` 启动/恢复前后端；前端绑定 `0.0.0.0`。会话运行服务绑定 loopback，随后端热更新复用。
+- `pnpm dev:restart`：先检查两个端口的归属并完成编译，再按 `.env` 启动/恢复前后端；前端绑定 `0.0.0.0`。会话运行服务绑定 loopback，随后端热更新复用。运行层替换只向已核实的看板 runtime PID 发信号，不向进程组或共享官方 daemon 发信号。新启动默认连接官方 daemon；允许按配置调用官方 daemon start，不创建私有 app-server，不自动停止/重启/升级共享服务。旧私有运行层仍受活跃任务和未知状态保护，详见 `docs/startup.md`。
 - `pnpm check`：共享包、TS 运行层、后端和前端类型检查及生产构建；`pnpm session:check`：TS 运行层检查。
 - `pnpm test`：终端单测、迁移的会话 Vitest 单测及脚本测试；后端测试并发限制为 4，避免共享主机上的 tmux 测试争用。
 - `pnpm session:test`、`pnpm session:clippy`：TS 运行层测试与类型检查（clippy 为兼容命令名），测试使用独立的应用/CLI 数据目录。
@@ -67,7 +67,11 @@
 
 - Node 网关与运行服务管理位于 `apps/server/src`；独立 TS 会话运行层位于 `packages/session-runtime/src`。已替换的自有 Rust 源码与 Cargo 构建文件已移除；原生 Codex/Claude/ACP、PTY/SQLite/Whisper 属于外部依赖。
 - 应用数据由 `SESSION_DATA_HOME` 隔离；原生 CLI 登录目录沿用，禁止静默导入用户 Codexia 数据。
+- Claude/ACP 最近页使用现有历史入口的 `?view=recent`，响应最多2MiB/256行，保留真实向前游标与源身份；`metadataOnly` 不读正文。ACP按本地SQLite源更新增量投影完整chunk/tool基线，不能盲截原始delta；大预览必须标记截断并保留按需只读详情。原raw接口保持兼容，恢复不得connect/load/resume Agent，见 `docs/designs/session-mode-implementation-20261029/auxiliary-history.md`。
+- 已运行旧服务的Claude/ACP历史由独立 `@agent-orchestrator/session-runtime/auxiliary-history` 只读库兼容。网关须先核实固定数据目录、原进程/端口/代次及原生文件环境，读取前后复核；ACP源只读，派生缓存独立且创建前拒绝源交叠，CC别名不猜测。来源不明501、身份无法核实409，不回退raw或自动重启服务。仅显式raw消费者沿用原接口，见 `docs/designs/session-mode-implementation-20261029/auxiliary-history-compatibility.md`。
+- Claude 刷新恢复只读 `session-snapshot`，`activeSessionIds` 不能代替后端 owner；明确发送先核对原运行实例/目录，只有 404 才按手势捕获配置恢复。canonical/native 别名同时约束历史、事件和活动保护；新建 UUID 使用 SDK sessionId，旧映射只存小身份元数据。巨型待审批参数按 runtime/session/request/execution/revision 精确分片读取，每片 JSON ≤64KiB、源单项8MiB/合计16MiB；超预算保留拒绝入口，不以预览代替完整审批。见 `docs/designs/session-mode-implementation-20261029/claude-live-recovery.md`。
 - 不得因端口占用、过期 PID 或热更新而停止其他工作树/仓库的进程；运行服务重启不得重复创建仍存活的 Agent 服务。
+- 运行层`/health.ownedAgents`仅暴露Claude/ACP连接、活动、待请求与未知状态计数，不留正文。自动过期替换遇自有连接或计数缺失须延后；显式`--restart-runtime`可按已授权维护结束精确归属的自有任务，活动未知须准确说明。相同cwd/entrypoint的其他进程只能列为只读候选，不能据此自动清理独立`SESSION_DATA_HOME`。
 
 ## 测试约定
 
@@ -178,7 +182,7 @@
 - 开发入口的 React 性能时间线留存保护须保留；验证会话内存时同时记录 JS 堆与 renderer RSS，不能只凭堆稳定判定标签页稳定。普通应用 measure/mark 与生产性能 API 不得被清空。
 - 必须保留浏览器接收前的 `view=chat` 工具正文裁剪、事件驱动的历史恢复、相同快照不通知订阅者，以及有界流式正文和大字符串引用释放。不得恢复静默/空闲完整历史轮询，或用前端隐藏工具行替代网关裁剪。
 - 内存优化不能丢失序号连续性、审批/提问、完成回复、未读状态和子 Agent 元数据；不得停止 Agent 或强制刷新页面掩盖增长。
-- 关注集合与正文可见消费者必须分开：不可见正文在 60 秒宽限期后可回收，休眠中的事件/历史/设备缓存不得重新持有正文；重显只读恢复，后台任务状态与回执确认必须独立于正文挂载。修改该机制须运行 `session-idle-memory` 及恢复/审批回归。
+- 关注集合与正文可见消费者必须分开：按末节当前批准策略，默认在既有预算内保温，可见优先、压力或超预算回收；显式false保留约60秒离屏释放。休眠中的事件/历史/设备缓存不得直接重填正文，再热须有原预算、冷却与精确只读reader准入；后台任务状态与回执确认独立于正文挂载。修改该机制须运行 `session-idle-memory` 及恢复/审批回归。
 - 完成提示音必须复用单个音频上下文，每声结束断开节点，空闲关闭；音频时钟挂起须有墙钟清理。不得改回每轮创建 AudioContext 或仅 stop 不 close；这类原生分配不计入 JS 堆。
 - 按约定运行相关单测与原生 HTTP/EventSource 浏览器回归，记录传输量和内存测量边界；修改限制须提供等效或更好的实测证据，不能删除保护断言或单纯放宽阈值。纯文档修改只需核对路径、命令和记录一致性。
 
@@ -195,3 +199,16 @@
 - surface 适配只能调整自有样式与观察，不得移动原生 iframe/父节点或替换 MessagePort；隐藏模式停止观察，保留 iframe。真实宿主验收使用隔离 HOME/fixture，不得停止正式 Agent。
 - Codex 宿主显式 `--auto-open-new-chats` 打开两个独立原生新聊天，禁止与 fixture 参数混用。连接副本模式只复制用户授权的登录配置到全新私有 HOME，不导入历史；`--shared-codex-home` 仅在用户明确授权后创建私有链接视图，共用授权的登录配置和持久历史，同时隔离 IPC、app-server control、临时目录、日志和缓存，且不得接管默认 CLI socket。项目历史 Resume 必须使用精确 thread UUID 和受限列号；公共 composer 只能向会话 store 当前选中的单个 thread 提交，不得广播。原生新资源首发后的内部路由不等于编辑器 URI 更新，刷新验收须单独核对原生历史恢复。
 - 项目历史 Resume 后，公共 composer 只有在 Session 当前 thread 与捕获的 native target 完全一致时，才经同源 gateway/companion 向官方插件当前 app-server 的精确 thread、项目和 editor 列发送；不得广播、回退到另一 Session writer 或覆盖 thread 原生设置。宿主只向自有 code-server 的 Node extensionHost 注入 `preload.cjs`，精确观察官方 custom editor provider 注册并在捕获后恢复钩子；官方 VSIX 保持不修改。伴随扩展桥接须按官方版本门控，发送前核对对应列中的原生 custom editor、thread cwd 和空闲状态；Session 队列存在 queued/sending/uncertain 条目、原生会话忙碌或回执未知时保留草稿并拒绝重复投递，空暂停队列不阻止原生发送。回执持久化不得保存正文。协议、验证与未完成的 queue/steer/replace 边界见 `docs/codex-workbench-mode.md`。
+
+
+### 开发source map契约
+
+- serve-only外部source map复用Vite自身map与同源`.map`路由，不额外缓存map正文、不删除调试信息。当前固定Vite7.3.1；升级先跑 `scripts/vite-external-sourcemaps.test.mjs`、文档连续性与React留存保护回归，未知结构明确失败。此优化不改变生产构建或自动刷新规则，也不能替代两秒真实输入验收，见 `docs/startup.md`。
+
+- 会话标签新浏览器窗口仅以 `sessionWindow=<UUID>` 明确启用独立设备现场：固定只读 runtime/native 范围及精确 ID/cwd 核对完成后才挂 App/composer。普通页面持久键不变；新页的 selection/layout/workspace/draft owner 使用窗口身份，关注/项目 journals 仍共享。不得据 `window.open(...,noopener)` 返回 null 认定失败或重复打开，不得复用旧 ACP pointer 抢明确目标，见 `docs/designs/session-mode-implementation-20261029/new-window.md`。
+
+
+### 当前批准的关注预热默认值
+
+- 本期完整多会话方案的用户Q5/Q8及 `docs/designs/session-mode-multisession-development-plan-20261029.md` §5.3要求：无持久偏好的设备默认启用有界关注近期页预热/保温（`warmFollowedSessions: true`）；聚焦、可见优先，资源不足可回收，不是永久保留全部历史。2026-10-30本轮用户再次明确“统一为：预算允许时持续保温”；已有true/false均保留，显式保存的false继续尊重。
+- 不得依据更早体验优化方案恢复“默认false/一律60秒后回收”，也不得为通过内存长测关闭默认保温。当前标准RSS红灯继续独立记录；修改该批准行为须有新的明确用户决定及对应验收，测试夹具必须真实核对所有已关注正文的预热前置条件。

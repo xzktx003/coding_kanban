@@ -3,7 +3,7 @@ const api = vi.hoisted(() => ({
   respondToCommandExecutionApproval: vi.fn().mockResolvedValue(undefined),
   respondToFileChangeApproval: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock("@session/services", () => api);
+vi.mock("@session/services/apiAdapt/codex", () => api);
 import { useApprovalStore, type ApprovalRequest } from "./useApprovalStore";
 import { resetRpcLifecycle } from "./rpcLifecycle";
 const value: ApprovalRequest = {

@@ -1,13 +1,22 @@
+import { useProviderTranscriptVisibility } from "@session/hooks/useProviderTranscriptVisibility";
+import {
+  providerTranscriptKey,
+  useProviderTranscriptStore,
+} from "@session/services/sessionProviderTranscriptState";
+import { refreshAcpTranscript } from "@session/services/acpTranscriptRead";
+import { ProviderTranscriptControls } from "@session/components/agent/ProviderTranscriptControls";
 import { fileSrc } from "@session/hooks/runtime";
 import { useSessionReadReceipt } from "@session/hooks/useSessionReadReceipt";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { VirtualTranscriptList } from "@session/components/agent/VirtualTranscriptList";
 import { Button } from "@session/components/ui/button";
 import { acpRespondPermission } from "@session/services/apiAdapt/acp";
 import { useWorkspaceStore } from "@session/stores";
 import { useAcpStore } from "@session/stores/useAcpStore";
 import { AcpToolCall } from "./AcpToolCall";
-import { useAcpEvents } from "./useAcpEvents";
 import { authenticateAcpSession } from "./authenticateSession";
+import { AcpReadonlyHistoryPanel } from "./AcpReadonlyHistoryPanel";
+import { ProviderHistoryDetail } from "@session/components/history/ProviderHistoryDetail";
 
 export default function AcpSession() {
   const {
@@ -46,31 +55,74 @@ export default function AcpSession() {
     : null;
   const responding = !!permissionKey && busyKey === permissionKey;
   const agentId = useAcpStore((s) => s.agentId);
+  const historySessionId = useAcpStore((s) => s.historySessionId);
+  const runtimeInstance = useAcpStore((s) => s.runtimeInstance);
+  const detailHistoryId =
+    historySessionId ?? (!runtimeInstance ? sessionId : null);
+  const inheritedHistory = useAcpStore((s) => s.inheritedHistory);
+  const transcriptOwner =
+    sessionId && connectionId
+      ? providerTranscriptKey("acp", sessionId, agentId, connectionId)
+      : null;
+  const restoreTranscript = useCallback(
+    () =>
+      sessionId && connectionId
+        ? refreshAcpTranscript({
+            agentId,
+            connectionId,
+            sessionId,
+            historySessionId: historySessionId ?? undefined,
+          })
+        : Promise.resolve(),
+    [agentId, connectionId, sessionId, historySessionId],
+  );
+  const loadEarlierTranscript = useCallback(() => {
+    const cursor =
+      transcriptOwner &&
+      useProviderTranscriptStore.getState().entries[transcriptOwner]
+        ?.nextCursor;
+    return cursor && sessionId && connectionId
+      ? refreshAcpTranscript(
+          {
+            agentId,
+            connectionId,
+            sessionId,
+            historySessionId: historySessionId ?? undefined,
+          },
+          undefined,
+          "interactive",
+          cursor,
+        )
+      : Promise.resolve();
+  }, [transcriptOwner, agentId, connectionId, sessionId, historySessionId]);
+  const transcriptVisible = useProviderTranscriptVisibility(
+    transcriptOwner,
+    "acp",
+    sessionId,
+    scrollRef,
+    entries.length > 0,
+    restoreTranscript,
+  );
   useSessionReadReceipt(
     "acp",
-    sessionId ? `${agentId}:${sessionId}` : null,
+    sessionId
+      ? `${agentId}:${historySessionId ?? `${connectionId}:${sessionId}`}`
+      : null,
     bottomRef,
   );
 
-  useAcpEvents(connectionId);
-
   useEffect(() => {
-    following.current = true;
     setShowLatest(false);
-    bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
-  }, [sessionId]);
+  }, [sessionId, connectionId, historySessionId]);
   useEffect(() => {
     if (following.current)
       bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
     else setShowLatest(true);
   }, [entries]);
 
-  const readPosition = () => {
-    const el = scrollRef.current;
-    if (!el) return;
-    following.current = el.scrollHeight - el.scrollTop - el.clientHeight <= 4;
-    if (following.current) setShowLatest(false);
-  };
+  const onFollowingChange = useCallback((following: boolean) => {
+    if (following) setShowLatest(false);
+  }, []);
 
   const authenticate = async (methodId: string) => {
     if (!connectionId || !cwd) return;
@@ -113,14 +165,28 @@ export default function AcpSession() {
     }
   };
 
-  if (!connectionId) return null;
+  if (!connectionId && !inheritedHistory) return null;
 
   return (
-    <div className="flex flex-col min-h-0 h-full">
+    <div
+      className="flex flex-col min-h-0 h-full"
+      data-provider-transcript-owner={transcriptOwner ?? undefined}
+      data-provider-transcript-visible={transcriptVisible}
+    >
+      <ProviderTranscriptControls
+        owner={transcriptOwner}
+        onEarlier={loadEarlierTranscript}
+        onRetry={restoreTranscript}
+      />
+      {inheritedHistory && (
+        <AcpReadonlyHistoryPanel
+          source={inheritedHistory}
+          target={{ agentId, connectionId, sessionId }}
+        />
+      )}
       <div
         ref={scrollRef}
         data-acp-history
-        onScroll={readPosition}
         className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2 text-sm"
       >
         {!sessionId && authMethods.length > 0 && (
@@ -143,36 +209,69 @@ export default function AcpSession() {
           </div>
         )}
 
-        {entries.map((entry) => {
-          if (entry.role === "tool") {
-            return <AcpToolCall key={entry.id} entry={entry} />;
-          }
-          const tone =
-            entry.role === "user"
-              ? "bg-muted"
-              : entry.role === "thought"
-                ? "text-muted-foreground italic"
-                : entry.role === "error"
-                  ? "text-destructive"
-                  : "";
-          return (
-            <div
-              key={entry.id}
-              className={`min-w-0 max-w-full whitespace-pre-wrap [overflow-wrap:anywhere] rounded-md px-2 py-1 ${tone}`}
-            >
-              {entry.role === "user" &&
-                entry.images?.map((path, i) => (
-                  <img
-                    key={i}
-                    src={path.startsWith("data:") ? path : fileSrc(path)}
-                    alt="用户图片"
-                    className="max-h-48 rounded-md my-2"
-                  />
-                ))}
-              {entry.text}
-            </div>
-          );
-        })}
+        <VirtualTranscriptList
+          owner={`acp:${agentId}:${historySessionId ?? `${connectionId}:${sessionId}`}`}
+          items={entries}
+          getKey={(entry) => entry.id}
+          scrollRef={scrollRef}
+          followingRef={following}
+          onFollowingChange={onFollowingChange}
+          renderRow={(entry) => {
+            const detail =
+              entry.truncated &&
+              (entry.historyDetail && detailHistoryId ? (
+                <ProviderHistoryDetail
+                  provider="acp"
+                  sessionId={detailHistoryId}
+                  itemId={entry.historyDetail.itemId}
+                  images={entry.historyImages}
+                  ownerKey={JSON.stringify([agentId, connectionId])}
+                  active={transcriptVisible}
+                  sourceRow={entry}
+                  sourceOwner={transcriptOwner ?? undefined}
+                  onConfirmSource={(_, signal, cursor) => refreshAcpTranscript({ agentId, connectionId: connectionId!, sessionId: sessionId!, historySessionId: historySessionId ?? undefined }, signal, "interactive", cursor)}
+                />
+              ) : (
+                <p className="py-1 text-xs text-muted-foreground">
+                  此消息仅显示预览，完整内容暂不可读取。
+                </p>
+              ));
+            if (entry.role === "tool") {
+              return (
+                <div key={entry.id}>
+                  <AcpToolCall entry={entry} />
+                  {detail}
+                </div>
+              );
+            }
+            const tone =
+              entry.role === "user"
+                ? "bg-muted"
+                : entry.role === "thought"
+                  ? "text-muted-foreground italic"
+                  : entry.role === "error"
+                    ? "text-destructive"
+                    : "";
+            return (
+              <div
+                key={entry.id}
+                className={`min-w-0 max-w-full whitespace-pre-wrap [overflow-wrap:anywhere] rounded-md px-2 py-1 ${tone}`}
+              >
+                {entry.role === "user" &&
+                  entry.images?.map((path, i) => (
+                    <img
+                      key={i}
+                      src={path.startsWith("data:") ? path : fileSrc(path)}
+                      alt="用户图片"
+                      className="max-h-48 rounded-md my-2"
+                    />
+                  ))}
+                {entry.text}
+                {detail}
+              </div>
+            );
+          }}
+        />
         <div ref={bottomRef} data-session-latest style={{ height: 1 }} />
       </div>
 

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const api = vi.hoisted(() => ({ threadRead: vi.fn(), threadGoalGet: vi.fn() }));
-vi.mock("./apiAdapt", () => api);
+vi.mock("./apiAdapt/codex", () => api);
 vi.mock("../lib/eventStream", () => ({ openEventStream: () => () => {} }));
 import { useCodexStore } from "../components/codex/stores";
 import { useAgentCenterStore } from "../stores/useAgentCenterStore";

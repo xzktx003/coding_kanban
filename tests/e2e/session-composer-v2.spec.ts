@@ -20,7 +20,20 @@ async function paste(page: Page, text: string) {
 test("large paste and selected reply survive reload, freeze in queue, and undo preserves configuration", async ({
   page,
 }) => {
-  const f = await setup(page);
+  const f = await setup(page, true, async (fixture) => {
+    // Quote a settled reply while a later turn is running. Streaming commentary
+    // deliberately has no completed-message action bar.
+    const turn = fixture.threads[0].turns[0];
+    turn.status = "completed";
+    turn.items.find((item) => item.type === "agentMessage")!.phase = "final_answer";
+    turn.completedAt = Math.floor(Date.now() / 1000);
+    fixture.threads[0].turns.push({
+      id: "active-after-reply",
+      status: "inProgress",
+      startedAt: Math.floor(Date.now() / 1000),
+      items: [],
+    });
+  });
   try {
     const logs = "完整日志\n".repeat(50) + "最后一行不要丢失";
     await editor(page).fill("原问题");
@@ -29,28 +42,34 @@ test("large paste and selected reply survive reload, freeze in queue, and undo p
       page.getByRole("button", { name: /粘贴的文本.*行/ }).first(),
     ).toBeVisible();
     await expect(editor(page)).toHaveText("原问题");
-    await page
-      .getByText(
-        "我会检查状态恢复与事件同步，并保留正在运行的会话和未发送草稿。",
-        { exact: true },
-      )
-      .evaluate((el) => {
-        const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
-        let n: Node | null;
-        while ((n = walk.nextNode())) {
-          const at = (n.textContent ?? "").indexOf("状态恢复");
-          if (at >= 0) {
-            const r = document.createRange();
-            r.setStart(n, at);
-            r.setEnd(n, at + 4);
-            const selection = getSelection()!;
-            selection.removeAllRanges();
-            selection.addRange(r);
-            document.dispatchEvent(new Event("selectionchange"));
-            break;
-          }
+    // The cold preview explicitly says it is preparing the full transcript and
+    // has no message actions. Quote the committed completed-message surface.
+    const selectedReply = page.locator(".codex-assistant:not([data-streaming]) .codex-assistant-content").getByText(
+      "我会检查状态恢复与事件同步，并保留正在运行的会话和未发送草稿。",
+      { exact: true },
+    );
+    // A real pointer gesture blurs Lexical before selecting reply text.
+    await selectedReply.click();
+    await selectedReply.evaluate((el) => {
+      const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      let n: Node | null;
+      while ((n = walk.nextNode())) {
+        const at = (n.textContent ?? "").indexOf("状态恢复");
+        if (at >= 0) {
+          const r = document.createRange();
+          r.setStart(n, at);
+          r.setEnd(n, at + 4);
+          const selection = getSelection()!;
+          selection.removeAllRanges();
+          selection.addRange(r);
+          document.dispatchEvent(new Event("selectionchange"));
+          break;
         }
-      });
+      }
+    });
+    await expect(
+      page.locator('.session-reference-actions[data-selection="true"]'),
+    ).toBeVisible();
     await page
       .getByRole("button", { name: "引用选区", exact: true })
       .first()
@@ -58,7 +77,7 @@ test("large paste and selected reply survive reload, freeze in queue, and undo p
     await page.reload();
     await expect(editor(page)).toHaveText("原问题");
     await expect(page.locator(".session-context-chip")).toHaveCount(2);
-    await page.getByRole("button", { name: "排队消息", exact: true }).click();
+    await page.getByRole("button", { name: "加入队列", exact: true }).click();
     await expect
       .poll(async () => (await f.queue.get("ux-0")).items.length)
       .toBe(1);
@@ -198,9 +217,7 @@ test("sketch exports a real PNG, restores editable marks and keeps original imag
       uploads.push(Buffer.from(r.request().postDataJSON().data, "base64"));
       await r.fulfill({ json: { path: "/fixture/drawing.png" } });
     });
-    await page
-      .getByRole("button", { name: "附加文件", exact: true })
-      .click();
+    await page.getByRole("button", { name: "附加文件", exact: true }).click();
     await page.getByRole("button", { name: "画草图", exact: true }).click();
     const canvas = page.getByRole("img", { name: "绘图画布", exact: true });
     await expect(canvas).toBeVisible();
@@ -217,9 +234,7 @@ test("sketch exports a real PNG, restores editable marks and keeps original imag
     await page
       .getByRole("button", { name: "返回并保留草稿", exact: true })
       .click();
-    await page
-      .getByRole("button", { name: "附加文件", exact: true })
-      .click();
+    await page.getByRole("button", { name: "附加文件", exact: true }).click();
     await page.getByRole("button", { name: "画草图", exact: true }).click();
     await expect(
       page.getByRole("button", { name: "撤销上一笔", exact: true }),
@@ -294,7 +309,12 @@ test("mobile viewport, soft keyboard and full editor keep strength and controls 
         expect(c.h).toBeGreaterThanOrEqual(44);
         expect(c.right).toBeLessThanOrEqual(width);
       }
-      await expect(page.locator(".session-model-effort").first()).toBeVisible();
+      await expect(
+        page
+          .locator(".session-codex-composer")
+          .getByRole("button", { name: /^模型：/ })
+          .first(),
+      ).toBeVisible();
     }
     await page.setViewportSize({ width: 844, height: 390 });
     await expect(
@@ -308,9 +328,13 @@ test("mobile viewport, soft keyboard and full editor keep strength and controls 
     ).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(page.locator(".session-composer-menu")).toBeHidden();
-    await expect(page.locator(".session-native-composer-status")).toHaveText("本轮结束后发送");
+    await expect(page.locator(".session-native-composer-status")).toHaveText(
+      "本轮结束后发送",
+    );
     const landscapeSend = (await page
-      .locator('.session-agent-view .session-native-composer[data-owner-thread="ux-0"]')
+      .locator(
+        '.session-agent-view .session-native-composer[data-owner-thread="ux-0"]',
+      )
       .getByRole("button", { name: "加入队列", exact: true })
       .boundingBox())!;
     expect(landscapeSend.y + landscapeSend.height).toBeLessThanOrEqual(390);
@@ -333,24 +357,19 @@ test("settings commands preserve draft and do not start a turn", async ({
   const f = await setup(page);
   try {
     await editor(page).fill("保留这个需求");
-    await page
-      .getByRole("button", { name: "附加文件", exact: true })
-      .click();
-    await page.getByRole("button", { name: "斜杠命令", exact: true }).click();
+    await page.getByRole("button", { name: "附加文件", exact: true }).click();
+    await page.getByRole("button", { name: "快捷命令", exact: true }).click();
     await page
       .getByRole("textbox", { name: "搜索", exact: true })
       .fill("/plan");
     await page.getByRole("button", { name: /\/plan/ }).click();
     await expect(editor(page)).toHaveText("保留这个需求");
-    await expect(
-      page.getByRole("button", { name: "取消计划模式", exact: true }),
-    ).toHaveText("计划模式");
     await openComposerStatus(page);
     await expect(
       page.getByRole("dialog", { name: "输入状态与消息队列", exact: true }),
     ).toBeVisible();
-    await expect(page.locator('[aria-label="取消计划模式"]')).toHaveText(
-      "计划模式",
+    await expect(page.locator('[aria-label="取消规划模式"]')).toHaveText(
+      "规划模式",
     );
     await page.getByRole("button", { name: "关闭面板", exact: true }).click();
     await editor(page).fill("保留这个需求 /effort");
@@ -490,9 +509,7 @@ test("mobile pinch does not leave an accidental stroke and simulated keyboard ke
   const page = await context.newPage(),
     f = await setup(page);
   try {
-    await page
-      .getByRole("button", { name: "附加文件", exact: true })
-      .click();
+    await page.getByRole("button", { name: "附加文件", exact: true }).click();
     await page.getByRole("button", { name: "画草图", exact: true }).click();
     const bounds = (await page
       .getByRole("dialog", { name: "画草图", exact: true })
@@ -546,7 +563,7 @@ test("mobile pinch does not leave an accidental stroke and simulated keyboard ke
       /session-keyboard-open/,
     );
     const send = (await page
-      .getByRole("button", { name: "排队消息", exact: true })
+      .getByRole("button", { name: "加入队列", exact: true })
       .boundingBox())!;
     expect(send.y + send.height).toBeLessThanOrEqual(500);
     await page.screenshot({
@@ -565,9 +582,9 @@ test("queue edit undo is reachable inside the dialog and retains the original co
   const f = await setup(page);
   try {
     await editor(page).fill("第一条");
-    await page.getByRole("button", { name: "排队消息", exact: true }).click();
+    await page.getByRole("button", { name: "加入队列", exact: true }).click();
     await editor(page).fill("第二条");
-    await page.getByRole("button", { name: "排队消息", exact: true }).click();
+    await page.getByRole("button", { name: "加入队列", exact: true }).click();
     await openComposerStatus(page);
     const dialog = page.getByRole("dialog", { name: "输入状态与消息队列" });
     await dialog
@@ -627,9 +644,12 @@ test("desktop and phone acceptance captures keep attachments and nested panels w
     if (await dismiss.count()) await dismiss.first().click();
     for (const width of [1440, 768, 430, 390, 375, 360, 320]) {
       await page.setViewportSize({ width, height: 900 });
-      await expect(page.locator(".session-model-effort").first()).toContainText(
-        "High",
-      );
+      await expect(
+        page
+          .locator(".session-codex-composer")
+          .getByRole("button", { name: /^模型：/ })
+          .first(),
+      ).toHaveAttribute("aria-label", /high/);
       expect(
         await page.evaluate(
           () => document.documentElement.scrollWidth <= innerWidth,
@@ -664,9 +684,7 @@ test("desktop and phone acceptance captures keep attachments and nested panels w
     await page
       .getByRole("button", { name: "返回并保留草稿", exact: true })
       .click();
-    await page
-      .getByRole("button", { name: "附加文件", exact: true })
-      .click();
+    await page.getByRole("button", { name: "附加文件", exact: true }).click();
     await page.getByRole("button", { name: "画草图", exact: true }).click();
     await page.screenshot({
       path: "docs/designs/composer-v2/acceptance-drawing-phone.png",
@@ -676,10 +694,10 @@ test("desktop and phone acceptance captures keep attachments and nested panels w
       .click();
     await page.setViewportSize({ width: 844, height: 390 });
     await expect(
-      page.getByRole("button", { name: "排队消息", exact: true }),
+      page.getByRole("button", { name: "加入队列", exact: true }),
     ).toBeVisible();
     const send = (await page
-      .getByRole("button", { name: "排队消息", exact: true })
+      .getByRole("button", { name: "加入队列", exact: true })
       .boundingBox())!;
     expect(send.y + send.height).toBeLessThanOrEqual(390);
     await page.screenshot({

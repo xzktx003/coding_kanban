@@ -1,3 +1,4 @@
+import { useSessionTypography } from "@session/hooks/useSessionTypography";
 import React, { type ReactNode, useEffect, useState } from "react";
 import {
   type Accent,
@@ -30,6 +31,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 }
 
 export function ThemeRoot({ children }: { children: ReactNode }) {
+  useSessionTypography();
   const {
     theme,
     accent,

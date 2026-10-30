@@ -1,0 +1,1636 @@
+{
+  "baseline": "f6699ba064059009529a50b0c126cbed4402f093",
+  "status": "approved; implementation in progress; no blanket acceptance claimed",
+  "feature_count": 174,
+  "scenario_count": 55,
+  "features": [
+    {
+      "id": "CMP-01",
+      "feature": "新建/后续输入 placeholder：F:mPi 按 image markup、Goal、Plan、follow-up type、custom override 顺序选文案；退出模式恢复对应文案。",
+      "disposition": "完善",
+      "batch": "D",
+      "acceptance": "统一普通/后续/Goal/Plan/图像标注placeholder；排除云或其他产品特有override"
+    },
+    {
+      "id": "CMP-02",
+      "feature": "普通编辑器与紧凑/单行：F:bFa 的 `layoutState.layout=Zs?'single-line':'multiline'`，提交/附件可改变状态；F:ewa 随 props 渲染。",
+      "disposition": "适配",
+      "batch": "D/G",
+      "acceptance": "保留手机固定高度；桌面按原包可达状态比较紧凑/多行"
+    },
+    {
+      "id": "CMP-03",
+      "feature": "焦点与隐藏输入：F:bFa 的 `disableAutoFocus`、focus target 与 `inputInert`；C:pd 排除 hidden/inert 只是另一个 Orbit 分支，不能混用当主输入证据。",
+      "disposition": "保留并验收",
+      "batch": "B/G",
+      "acceptance": "可见/焦点/owner守卫，切窗口不串焦点"
+    },
+    {
+      "id": "CMP-04",
+      "feature": "普通文本、选区、撤销：F:bFa 持有 composerController/onUserInput/selection 回调，F:gMa 操作原 editor doc。",
+      "disposition": "保留并验收",
+      "batch": "D/G",
+      "acceptance": "文字/选区/编辑undo独立于管理动作undo"
+    },
+    {
+      "id": "CMP-05",
+      "feature": "IME 与 Enter：F:gMa 屏蔽 composing/keyCode229/repeat；原 Enter 偏好经 `composerEnterBehavior` 读取。",
+      "disposition": "保留并验收",
+      "batch": "D/G",
+      "acceptance": "IME/keyCode229/repeat与Enter偏好"
+    },
+    {
+      "id": "CMP-06",
+      "feature": "手机 Return：官方按实际宿主/editor keymap 决策；F:gMa 全局 body Enter 也受语音状态约束。",
+      "disposition": "保留适配",
+      "batch": "G",
+      "acceptance": "手机Return换行，外接键盘按明确组合提交"
+    },
+    {
+      "id": "CMP-07",
+      "feature": "三种发送键偏好 enter/cmdIfMultiline/cmdAlways；离开菜单保持偏好。F:gMa 的 background submit 要避开代码块/特定 CtrlEnter。",
+      "disposition": "完善",
+      "batch": "D",
+      "acceptance": "三种Enter偏好和单次反向Queue/Steer，与网页快捷键共存"
+    },
+    {
+      "id": "CMP-08",
+      "feature": "空闲有内容主动作 Send；F:ewa 非 loading、交互允许、submitDisabled=false 才可发送；空消息解释 tooltip nonce。",
+      "disposition": "完善",
+      "batch": "D",
+      "acceptance": "Send与阻断原因，元数据未知不假装可写"
+    },
+    {
+      "id": "CMP-09",
+      "feature": "运行空草稿 Stop；F:ewa `D==='stop'&&!ve`，stopping 变 loading，Esc 文案取决确认可见。",
+      "disposition": "保留并验收",
+      "batch": "C/D",
+      "acceptance": "精确Stop、stopping、失败恢复"
+    },
+    {
+      "id": "CMP-10",
+      "feature": "运行有草稿 Queue/Steer 唯一主动作；F:ewa 根据 `isQueueingEnabled` 切按钮语义。",
+      "disposition": "保留并验收",
+      "batch": "D/G",
+      "acceptance": "运行有草稿唯一Queue/Steer主动作"
+    },
+    {
+      "id": "CMP-11",
+      "feature": "Resume：F:ewa 在 resume pending 或 `existingThread && resumeEnabled && !running && !hasGoal && empty-message` 时渲染 Resume，调用独立 onResume。",
+      "disposition": "新增/完善",
+      "batch": "A/D",
+      "acceptance": "显式Resume空输入新turn，独立durable receipt，非历史resume"
+    },
+    {
+      "id": "CMP-12",
+      "feature": "主动作优先级：F:ewa 听写 finish-send→realtime send/end→Stop→Resume→voice start→normal Send；互斥渲染。",
+      "disposition": "完善",
+      "batch": "D/F",
+      "acceptance": "听写finish-send/Stop/Resume/Send互斥优先级"
+    },
+    {
+      "id": "CMP-13",
+      "feature": "提交时捕获原目标、上下文、参数；F:bFa 向实际 submit controller 交出上下文，与 editor 执行分离。",
+      "disposition": "保留并验收",
+      "batch": "B/D/G",
+      "acceptance": "捕获目标/设置/草稿版本，晚ACK不清新编辑"
+    },
+    {
+      "id": "CMP-14",
+      "feature": "确切失败 vs delivery unknown：Q:We 将 outcome-unknown 与普通 paused 错误分开；未证回执不自动重投。",
+      "disposition": "保留并验收",
+      "batch": "B/C/D",
+      "acceptance": "明确失败/unknown分离，归档不能绕过未知回执"
+    },
+    {
+      "id": "CMP-15",
+      "feature": "Queue waiting→pending/sending→accepted，运行中显式 steer 不 interrupt；Q:We `pending/sending && !paused` 显示 spinner。",
+      "disposition": "保留并验收",
+      "batch": "C/D",
+      "acceptance": "服务端队列revision与运行态分开"
+    },
+    {
+      "id": "CMP-16",
+      "feature": "显式 Stop 后队列暂停与 Resume：Q:Be 的 interrupted header，首条 `canSendNow===false` 隐藏继续按钮。",
+      "disposition": "完善",
+      "batch": "C/D",
+      "acceptance": "显式Stop/停止归档后的队列暂停原因及明确恢复"
+    },
+    {
+      "id": "CMP-17",
+      "feature": "每条队列送达未知：Q:We outcome-unknown tooltip 要用户查会话，不安全自动 retry。",
+      "disposition": "保留并验收",
+      "batch": "C/D",
+      "acceptance": "送达未知只读核对，禁止自动重发"
+    },
+    {
+      "id": "CMP-18",
+      "feature": "队列 edit/delete/reorder，发送中禁 edit/delete；Q:We 用 dnd transform、hover handle，Q:Be 控制 reorderability。",
+      "disposition": "保留并验收",
+      "batch": "D/G",
+      "acceptance": "队列编辑/删除/拖动，sending状态禁写"
+    },
+    {
+      "id": "CMP-19",
+      "feature": "队列 prompt 非模态全文预览与复制；Q:We 对文本+附件摘要最多80字符 aria，正文保持可读。",
+      "disposition": "保留并验收",
+      "batch": "D/G",
+      "acceptance": "非模态预览/复制/附件组合及键盘"
+    },
+    {
+      "id": "CMP-20",
+      "feature": "队列菜单 toggle queueing、side chat、send now；Q:We SendNow 要 `canSendNow` 且运行附件守卫。",
+      "disposition": "保留并验收",
+      "batch": "D",
+      "acceptance": "queue/side chat/send-now和冻结设置"
+    },
+    {
+      "id": "CMP-21",
+      "feature": "桌面列表与手机展示：Q:Be 全队列滚动、30dvh、paused header；具体 floating presentation 有条件。",
+      "disposition": "保留适配",
+      "batch": "D/G",
+      "acceptance": "手机compact shelf，完整队列仍可访问"
+    },
+    {
+      "id": "CMP-22",
+      "feature": "Rail 进入/退出与组合：F:Iya 由 portal/sandbox/WSL/transcript/queue/Goal/subagent/status/header 多条件决定 mount/offset。",
+      "disposition": "完善",
+      "batch": "D/G",
+      "acceptance": "rail阻塞提示与Goal/queue/diff/notice全组合"
+    },
+    {
+      "id": "CMP-23",
+      "feature": "Running changes 行主区与独立 View changes，当前 turn diff 结束后消失/保留依据上层。",
+      "disposition": "保留并验收",
+      "batch": "D/E",
+      "acceptance": "运行变更主入口与View changes分别可达"
+    },
+    {
+      "id": "CMP-24",
+      "feature": "Goal rail 与其他 item 共存；F:bFa 的 `threadGoal` 参与 rail，Goal draft 改 placeholder 和权限位。",
+      "disposition": "保留并验收",
+      "batch": "C/D",
+      "acceptance": "Goal与rail共存；设置目标不额外发turn"
+    },
+    {
+      "id": "CMP-25",
+      "feature": "Goal 替换/clear、退出 portal，F:ewa 的 `hasGoal/onClearGoal` 进入主控件。",
+      "disposition": "保留并验收",
+      "batch": "C/D",
+      "acceptance": "Goal替换/clear身份和旧清理守卫，不声称native CAS"
+    },
+    {
+      "id": "CMP-26",
+      "feature": "附加菜单 `@`：F:W4t actual tooltip/aria 与 F:bFa toggleContextSuggestions，image markup 时改走 addFiles。",
+      "disposition": "完善",
+      "batch": "D/E",
+      "acceptance": "附加菜单与引用/标注上下文切换"
+    },
+    {
+      "id": "CMP-27",
+      "feature": "文件/文件夹：F:bFa/Yba 保留 addedFiles、uploadedFileAttachments、pendingFiles、selectedText 分型和 host ID。",
+      "disposition": "修复",
+      "batch": "E",
+      "acceptance": "设备上传与项目文件/目录选择拆开，保留真实路径"
+    },
+    {
+      "id": "CMP-28",
+      "feature": "图片上传、删除、失败与 pending 防重复，F:bFa 的 Ca/images 与 imageCommentGroups 独立传入 Yba。",
+      "disposition": "保留并验收",
+      "batch": "D/E/G",
+      "acceptance": "图片上传/删除/restore、失败、晚返回归属"
+    },
+    {
+      "id": "CMP-29",
+      "feature": "图像标注与 sketch composer：F:bFa imageMarkupAttachment、imageCommentGroups、sketchComposer，markup ready 参与 submitReady。",
+      "disposition": "完善",
+      "batch": "D/E",
+      "acceptance": "图像标注与草图payload/坐标/owner对齐"
+    },
+    {
+      "id": "CMP-30",
+      "feature": "文本粘贴附件、还原正文：F:bFa `pastedTextAttachments/pendingPastes/handleShowPastedTextInTextField`。",
+      "disposition": "保留并验收",
+      "batch": "D/E",
+      "acceptance": "大粘贴上下文与还原正文，预算边界"
+    },
+    {
+      "id": "CMP-31",
+      "feature": "选中文本、响应注释、共享线程、MCP app context、appshot、Chrome selection、PR checks/conflict 等多个附件类型：F:bFa 明确传给 Yba。",
+      "disposition": "按子能力适配",
+      "batch": "A/D/E/F",
+      "acceptance": "保留本地文件/手动引用/线程/MCP上下文及普通仓库PR checks/conflict/托管平台引用；只排除IDE自动选区、Codex云任务/云工作区及其他产品专属分支"
+    },
+    {
+      "id": "CMP-32",
+      "feature": "drop 及 Shift overlay：F:bFa interaction 有 `showShiftOverlay`、drop portal、submit block；处理根据 placement。",
+      "disposition": "技术确认后完善",
+      "batch": "A/D/E",
+      "acceptance": "网页文件拖入/Shift行为；只有本地Codex可达且适用于网页的语义纳入"
+    },
+    {
+      "id": "CMP-33",
+      "feature": "文件上下文快照更新/恢复/undo：官方附件 source/order tracking 由控制器管理。",
+      "disposition": "保留并验收",
+      "batch": "E",
+      "acceptance": "上下文快照/来源变化/恢复/undo"
+    },
+    {
+      "id": "CMP-34",
+      "feature": "IDE 自动上下文：F:hDa 真实命令 ID `ide-context`，仅 `ideContextStatus==='connected'` enabled，选中时 `setIsAutoContextOn(!current)`，不要求清空输入。F:ewa 收 `isAutoContextOn/ideContextStatus`。",
+      "disposition": "排除IDE实现/清理入口",
+      "batch": "D",
+      "acceptance": "移除无效/ide；自有项目文件上下文继续保留"
+    },
+    {
+      "id": "CMP-35",
+      "feature": "`/init` 安全前置：F:vDa 对精确 cwd 的 AGENTS.md 走 `paths-exist`，存在则 toast 并 return，不提交任务。",
+      "disposition": "修复",
+      "batch": "A/D",
+      "acceptance": "精确cwd的AGENTS.md预检；存在/未知不直接发init"
+    },
+    {
+      "id": "CMP-36",
+      "feature": "本地/工作树位置切换：U:Uu 依据既有会话/跟随/工作树、busy与handoff决定能否改变 run location；U:Qd allowWorktree=`!followUp&&!response`。",
+      "disposition": "新增/完善",
+      "batch": "A/E",
+      "acceptance": "新聊天/分支的真实本地/worktree执行位置"
+    },
+    {
+      "id": "CMP-37",
+      "feature": "Worktree toggle/命令：U:qd `composer.toggleWorktreeMode`、slash id worktree、requiresEmptyComposer=false，受工作区/可用性/feature flags 门控。",
+      "disposition": "新增/完善",
+      "batch": "A/E",
+      "acceptance": "网页worktree选择/命令；不用IDE或桌面command bridge"
+    },
+    {
+      "id": "CMP-38",
+      "feature": "本地 environment dropdown：U:Qd 仅 `!followUp&&eligible&&workspaceKnown`，disabled/loading/error/reset；打开精确 configPath/workspaceRoot，没环境时转 `/settings/local-environments`。",
+      "disposition": "新增/完善",
+      "batch": "A/E",
+      "acceptance": "本地environment选择/配置/错误，基于项目与已验证能力"
+    },
+    {
+      "id": "CMP-39",
+      "feature": "分支 dropdown：U:Qd `cn=...&&!follower&&!outsideEditor`；按 hostId:cwd key，existingWorkspace时readOnly。",
+      "disposition": "新增/完善",
+      "batch": "A/E",
+      "acceptance": "分支选择与目标cwd绑定；运行中不偷偷换目录"
+    },
+    {
+      "id": "CMP-40",
+      "feature": "项目选择：U:Qd 为 openProjectPicker command 计算 enabled 并聚焦composer；选中的项目与 run location 共同决定 cwd。",
+      "disposition": "保留并验收",
+      "batch": "E/G",
+      "acceptance": "已有项目导航/关注集合/输入目标联动"
+    },
+    {
+      "id": "CMP-41",
+      "feature": "模型默认/当前/未知/搜索：F:hCa 使用真实 authMethod/cwd/host/catalog状态、capabilities、当前model；F:lCa 包含 simple/advanced/default/locked/fallback。",
+      "disposition": "完善",
+      "batch": "A/D",
+      "acceptance": "真实catalog与unknown/locked/default/custom模型呈现"
+    },
+    {
+      "id": "CMP-42",
+      "feature": "Power/effort：F:lCa 原模型支持的effort、locked model、fallback power selection决定slider和radio；选择完成与打开menu不同。",
+      "disposition": "保留并验收",
+      "batch": "D",
+      "acceptance": "effort/power/canonical ID组合"
+    },
+    {
+      "id": "CMP-43",
+      "feature": "Fast/service tier：F:lCa props selectedServiceTier/options/loading 与 onSelectServiceTier；F:hCa 根据账号/host选择目录来源。",
+      "disposition": "保留并验收",
+      "batch": "D",
+      "acceptance": "service tiers/Fast只来自实际支持信息"
+    },
+    {
+      "id": "CMP-44",
+      "feature": "权限 preset：P:vn 是真正 export，再按条件走旧tn或新yn；yn 读取 permission profiles、server default、requirements。不能把三个旧preset当全量权限。",
+      "disposition": "新增/完善",
+      "batch": "A/D",
+      "acceptance": "真实permission profiles/server default/requirements"
+    },
+    {
+      "id": "CMP-45",
+      "feature": "Full Access确认/Cancel：P:Ht 根据code/work/cyber分支展示风险与外部link，确认后才写权限；取消回原选择。",
+      "disposition": "完善",
+      "batch": "A/D",
+      "acceptance": "Full Access/Ultra确认与实际fallback"
+    },
+    {
+      "id": "CMP-46",
+      "feature": "Plan是collaboration mode，不只是权限标签；F:bFa 有 activeCollaborationMode，F:mPi 改placeholder。",
+      "disposition": "保留并验收",
+      "batch": "D",
+      "acceptance": "Plan为collaboration mode，不混权限"
+    },
+    {
+      "id": "CMP-47",
+      "feature": "模型切换通知/升级/关闭：F:hCa 选择完成/菜单结束由独立回调，非所有store变化都等于用户选择。",
+      "disposition": "完善",
+      "batch": "D",
+      "acceptance": "显式用户模型选择/公告/关闭优先级"
+    },
+    {
+      "id": "CMP-48",
+      "feature": "听写状态：F:ewa 从voiceControls读取 starting/dictating/transcribing/canRetry/micBusy，并在语音优先主动作中finish-send；F:gMa submit中先stopDictation('send')。",
+      "disposition": "完善",
+      "batch": "F",
+      "acceptance": "听写finish-send、保留音频retry和owner冻结"
+    },
+    {
+      "id": "CMP-49",
+      "feature": "听写取消启动：官方voice模型有abort/cancel/preserve入口，主`gMa/ewa`优先级处理starting。C:dd的Escape细节是Orbit分支，不直接归普通VSCode。",
+      "disposition": "修复",
+      "batch": "F",
+      "acceptance": "starting可取消，晚授权停止tracks，文案与能力一致"
+    },
+    {
+      "id": "CMP-50",
+      "feature": "听写切目标/隐藏/卸载归属：原控制器按session和active输入守卫；C:dd另含hidden/inert防跨输入，仅作为共享设计参考。",
+      "disposition": "保留并验收",
+      "batch": "F/G",
+      "acceptance": "跨会话/隐藏/卸载的音频和草稿归属"
+    },
+    {
+      "id": "CMP-51",
+      "feature": "Realtime voice：F:ewa 用visiblePhase选择send/end/start，remote project unsupported禁用，mic/speaker控制另行。",
+      "disposition": "技术确认后实现",
+      "batch": "A/F",
+      "acceptance": "普通Codex本地realtime客户端；不自建云后端、不移植Orbit房间；不支持时列技术阻塞"
+    },
+    {
+      "id": "CMP-52",
+      "feature": "展开编辑：原包普通editor controller可多行/代码块，但没有证明存在项目同样全屏 sheet。",
+      "disposition": "保留并验收",
+      "batch": "D/E/G",
+      "acceptance": "展开编辑/代码/选区/返回草稿"
+    },
+    {
+      "id": "CMP-53",
+      "feature": "展开编辑提交/Stop：与主输入同frozen owner/submitLabel/queue-steer；运行草稿仍显式Stop。",
+      "disposition": "保留并验收",
+      "batch": "D/G",
+      "acceptance": "展开输入沿同捕获目标/Stop/Queue/Steer规则"
+    },
+    {
+      "id": "CMP-54",
+      "feature": "错误可恢复性：原包按钮blockedReason、附件error、模型catalog retry、队列unknown分属不同轴，不能统一“已中断”。",
+      "disposition": "完善",
+      "batch": "B/D",
+      "acceptance": "错误按权限/附件/连接/投递域投影，不统一成已中断"
+    },
+    {
+      "id": "T01",
+      "feature": "用户正文/Markdown",
+      "disposition": "保留并验收",
+      "batch": "D/G",
+      "acceptance": "原生消息/活动分组状态与当前实现逐组合对照，不重复开发已有能力"
+    },
+    {
+      "id": "T02",
+      "feature": "用户附件与引用",
+      "disposition": "保留并验收",
+      "batch": "D/G",
+      "acceptance": "原生消息/活动分组状态与当前实现逐组合对照，不重复开发已有能力"
+    },
+    {
+      "id": "T03",
+      "feature": "助手流式正文",
+      "disposition": "完善",
+      "batch": "D",
+      "acceptance": "有界渐进Markdown与最终语法一致，资源不退步"
+    },
+    {
+      "id": "T04",
+      "feature": "助手最终正文/行动条",
+      "disposition": "保留并验收",
+      "batch": "D/G",
+      "acceptance": "原生消息/活动分组状态与当前实现逐组合对照，不重复开发已有能力"
+    },
+    {
+      "id": "T05",
+      "feature": "commentary 与 final_answer分层",
+      "disposition": "完善",
+      "batch": "D",
+      "acceptance": "latest为默认，可展开全部过程"
+    },
+    {
+      "id": "T06",
+      "feature": "公开reasoning摘要",
+      "disposition": "保留并验收",
+      "batch": "D/G",
+      "acceptance": "原生消息/活动分组状态与当前实现逐组合对照，不重复开发已有能力"
+    },
+    {
+      "id": "T07",
+      "feature": "turn工作时长/折叠",
+      "disposition": "保留并验收",
+      "batch": "D/G",
+      "acceptance": "原生消息/活动分组状态与当前实现逐组合对照，不重复开发已有能力"
+    },
+    {
+      "id": "T08",
+      "feature": "命令执行与解析动作",
+      "disposition": "保留并验收",
+      "batch": "D/G",
+      "acceptance": "原生消息/活动分组状态与当前实现逐组合对照，不重复开发已有能力"
+    },
+    {
+      "id": "T09",
+      "feature": "连续命令分组",
+      "disposition": "保留并验收",
+      "batch": "D/G",
+      "acceptance": "原生消息/活动分组状态与当前实现逐组合对照，不重复开发已有能力"
+    },
+    {
+      "id": "T10",
+      "feature": "工具活动聚合",
+      "disposition": "保留并验收",
+      "batch": "D/G",
+      "acceptance": "原生消息/活动分组状态与当前实现逐组合对照，不重复开发已有能力"
+    },
+    {
+      "id": "T11",
+      "feature": "文件变更单项",
+      "disposition": "保留并验收",
+      "batch": "D/E/G",
+      "acceptance": "自有文件/diff/图片/分支/复制/计划操作保持，原包对照及失败恢复"
+    },
+    {
+      "id": "T12",
+      "feature": "turn文件汇总/diff入口",
+      "disposition": "保留并验收",
+      "batch": "D/E/G",
+      "acceptance": "自有文件/diff/图片/分支/复制/计划操作保持，原包对照及失败恢复"
+    },
+    {
+      "id": "T13",
+      "feature": "撤销/恢复patch",
+      "disposition": "保留并验收",
+      "batch": "D/E/G",
+      "acceptance": "自有文件/diff/图片/分支/复制/计划操作保持，原包对照及失败恢复"
+    },
+    {
+      "id": "T14",
+      "feature": "代码审查结果",
+      "disposition": "保留并验收",
+      "batch": "D/E/G",
+      "acceptance": "自有文件/diff/图片/分支/复制/计划操作保持，原包对照及失败恢复"
+    },
+    {
+      "id": "T15",
+      "feature": "web search/search open/find",
+      "disposition": "保留并验收",
+      "batch": "D/G",
+      "acceptance": "原生消息/活动分组状态与当前实现逐组合对照，不重复开发已有能力"
+    },
+    {
+      "id": "T16",
+      "feature": "image-view",
+      "disposition": "保留并验收",
+      "batch": "D/G",
+      "acceptance": "原生消息/活动分组状态与当前实现逐组合对照，不重复开发已有能力"
+    },
+    {
+      "id": "T17",
+      "feature": "生成图片占位与画廊",
+      "disposition": "完善",
+      "batch": "A/D",
+      "acceptance": "生成图片失败/额度真实字段与画廊共存"
+    },
+    {
+      "id": "T18",
+      "feature": "生成图片编辑/下载",
+      "disposition": "保留并验收",
+      "batch": "D/E/G",
+      "acceptance": "自有文件/diff/图片/分支/复制/计划操作保持，原包对照及失败恢复"
+    },
+    {
+      "id": "T19",
+      "feature": "context compaction",
+      "disposition": "保留并验收",
+      "batch": "D/G",
+      "acceptance": "原生消息/活动分组状态与当前实现逐组合对照，不重复开发已有能力"
+    },
+    {
+      "id": "T20",
+      "feature": "普通MCP调用",
+      "disposition": "保留并验收",
+      "batch": "D/G",
+      "acceptance": "原生消息/活动分组状态与当前实现逐组合对照，不重复开发已有能力"
+    },
+    {
+      "id": "T21",
+      "feature": "MCP App交互widget",
+      "disposition": "新增/完善",
+      "batch": "A/F",
+      "acceptance": "完整MCP App资源/身份/握手/工具权限/卸载"
+    },
+    {
+      "id": "T22",
+      "feature": "动态工具注册表",
+      "disposition": "按子能力适配",
+      "batch": "D/F",
+      "acceptance": "本地动态工具注册表/网页链接/普通仓库托管平台操作保留；只排除依赖Codex云任务或云工作区的专属目标"
+    },
+    {
+      "id": "T23",
+      "feature": "隐藏工具/协议噪声",
+      "disposition": "定位并修复",
+      "batch": "A/D",
+      "acceptance": "控制事件噪声只进入诊断，序号/元数据保留"
+    },
+    {
+      "id": "T24",
+      "feature": "命令审批",
+      "disposition": "完善与组合验收",
+      "batch": "A/D/F/G",
+      "acceptance": "所有适用native请求类型/allowed decisions、精确身份、失败和unknown"
+    },
+    {
+      "id": "T25",
+      "feature": "文件变更审批",
+      "disposition": "完善与组合验收",
+      "batch": "A/D/F/G",
+      "acceptance": "所有适用native请求类型/allowed decisions、精确身份、失败和unknown"
+    },
+    {
+      "id": "T26",
+      "feature": "临时权限请求",
+      "disposition": "完善与组合验收",
+      "batch": "A/D/F/G",
+      "acceptance": "所有适用native请求类型/allowed decisions、精确身份、失败和unknown"
+    },
+    {
+      "id": "T27",
+      "feature": "同步request_user_input",
+      "disposition": "完善与组合验收",
+      "batch": "A/D/F/G",
+      "acceptance": "所有适用native请求类型/allowed decisions、精确身份、失败和unknown"
+    },
+    {
+      "id": "T28",
+      "feature": "异步问题/回答消息",
+      "disposition": "完善与组合验收",
+      "batch": "A/D/F/G",
+      "acceptance": "所有适用native请求类型/allowed decisions、精确身份、失败和unknown"
+    },
+    {
+      "id": "T29",
+      "feature": "MCP form elicitation",
+      "disposition": "完善与组合验收",
+      "batch": "A/D/F/G",
+      "acceptance": "所有适用native请求类型/allowed decisions、精确身份、失败和unknown"
+    },
+    {
+      "id": "T30",
+      "feature": "MCP form键盘Escape",
+      "disposition": "完善",
+      "batch": "D",
+      "acceptance": "有焦点表单Escape取消，IME/unknown期间守卫"
+    },
+    {
+      "id": "T31",
+      "feature": "MCP表单图片/文件选择",
+      "disposition": "完善与组合验收",
+      "batch": "A/D/F/G",
+      "acceptance": "所有适用native请求类型/allowed decisions、精确身份、失败和unknown"
+    },
+    {
+      "id": "T32",
+      "feature": "URL/auth/tool审批elicitation",
+      "disposition": "完善与组合验收",
+      "batch": "A/D/F/G",
+      "acceptance": "所有适用native请求类型/allowed decisions、精确身份、失败和unknown"
+    },
+    {
+      "id": "T33",
+      "feature": "自动审批审核",
+      "disposition": "完善与组合验收",
+      "batch": "A/D/F/G",
+      "acceptance": "所有适用native请求类型/allowed decisions、精确身份、失败和unknown"
+    },
+    {
+      "id": "T34",
+      "feature": "hook消息/统计",
+      "disposition": "保留并验收",
+      "batch": "D/G",
+      "acceptance": "原生消息/活动分组状态与当前实现逐组合对照，不重复开发已有能力"
+    },
+    {
+      "id": "T35",
+      "feature": "模型改派通知",
+      "disposition": "保留并验收",
+      "batch": "D/G",
+      "acceptance": "原生消息/活动分组状态与当前实现逐组合对照，不重复开发已有能力"
+    },
+    {
+      "id": "T36",
+      "feature": "子Agent工具活动",
+      "disposition": "保留并验收",
+      "batch": "D/G",
+      "acceptance": "子Agent观察/权限/状态与主输入独立，不扩大停止范围"
+    },
+    {
+      "id": "T37",
+      "feature": "子Agent原生进展消息",
+      "disposition": "保留并验收",
+      "batch": "D/G",
+      "acceptance": "子Agent观察/权限/状态与主输入独立，不扩大停止范围"
+    },
+    {
+      "id": "T38",
+      "feature": "子Agent侧栏与读写边界",
+      "disposition": "保留并验收",
+      "batch": "D/G",
+      "acceptance": "子Agent观察/权限/状态与主输入独立，不扩大停止范围"
+    },
+    {
+      "id": "T39",
+      "feature": "加载历史失败提示",
+      "disposition": "完善与组合验收",
+      "batch": "B/D/G",
+      "acceptance": "历史/恢复/阅读/身份跨窗组合，工具正文仍在浏览器前裁剪"
+    },
+    {
+      "id": "T40",
+      "feature": "更早消息分页",
+      "disposition": "完善与组合验收",
+      "batch": "B/D/G",
+      "acceptance": "历史/恢复/阅读/身份跨窗组合，工具正文仍在浏览器前裁剪"
+    },
+    {
+      "id": "T41",
+      "feature": "断线/恢复提示",
+      "disposition": "完善与组合验收",
+      "batch": "B/D/G",
+      "acceptance": "历史/恢复/阅读/身份跨窗组合，工具正文仍在浏览器前裁剪"
+    },
+    {
+      "id": "T42",
+      "feature": "历史failed与错误通知去重",
+      "disposition": "完善与组合验收",
+      "batch": "B/D/G",
+      "acceptance": "历史/恢复/阅读/身份跨窗组合，工具正文仍在浏览器前裁剪"
+    },
+    {
+      "id": "T43",
+      "feature": "历史interrupted呈现",
+      "disposition": "完善与组合验收",
+      "batch": "B/D/G",
+      "acceptance": "历史/恢复/阅读/身份跨窗组合，工具正文仍在浏览器前裁剪"
+    },
+    {
+      "id": "T44",
+      "feature": "长历史/大输出与详情",
+      "disposition": "完善与组合验收",
+      "batch": "B/D/G",
+      "acceptance": "历史/恢复/阅读/身份跨窗组合，工具正文仍在浏览器前裁剪"
+    },
+    {
+      "id": "T45",
+      "feature": "消息copy富文本",
+      "disposition": "保留并验收",
+      "batch": "D/E/G",
+      "acceptance": "自有文件/diff/图片/分支/复制/计划操作保持，原包对照及失败恢复"
+    },
+    {
+      "id": "T46",
+      "feature": "从回复分支并引用选区",
+      "disposition": "保留并验收",
+      "batch": "D/E/G",
+      "acceptance": "自有文件/diff/图片/分支/复制/计划操作保持，原包对照及失败恢复"
+    },
+    {
+      "id": "T47",
+      "feature": "编辑用户消息/回退",
+      "disposition": "保留并验收",
+      "batch": "D/E/G",
+      "acceptance": "自有文件/diff/图片/分支/复制/计划操作保持，原包对照及失败恢复"
+    },
+    {
+      "id": "T48",
+      "feature": "计划Markdown/展开",
+      "disposition": "保留并验收",
+      "batch": "D/E/G",
+      "acceptance": "自有文件/diff/图片/分支/复制/计划操作保持，原包对照及失败恢复"
+    },
+    {
+      "id": "T49",
+      "feature": "计划文档open/download/copy",
+      "disposition": "保留并验收",
+      "batch": "D/E/G",
+      "acceptance": "自有文件/diff/图片/分支/复制/计划操作保持，原包对照及失败恢复"
+    },
+    {
+      "id": "T50",
+      "feature": "todo-list计划进度",
+      "disposition": "保留并验收",
+      "batch": "D/E/G",
+      "acceptance": "自有文件/diff/图片/分支/复制/计划操作保持，原包对照及失败恢复"
+    },
+    {
+      "id": "T51",
+      "feature": "文件引用与memory citation",
+      "disposition": "保留并验收",
+      "batch": "D/E/G",
+      "acceptance": "自有文件/diff/图片/分支/复制/计划操作保持，原包对照及失败恢复"
+    },
+    {
+      "id": "T52",
+      "feature": "Sources完整聚合面板",
+      "disposition": "新增/完善",
+      "batch": "E",
+      "acceptance": "完整Sources侧栏，复用文件跳转和只读详情"
+    },
+    {
+      "id": "T53",
+      "feature": "会话内查找与导航",
+      "disposition": "完善与组合验收",
+      "batch": "B/D/G",
+      "acceptance": "历史/恢复/阅读/身份跨窗组合，工具正文仍在浏览器前裁剪"
+    },
+    {
+      "id": "T54",
+      "feature": "多窗口正文身份",
+      "disposition": "完善与组合验收",
+      "batch": "B/D/G",
+      "acceptance": "历史/恢复/阅读/身份跨窗组合，工具正文仍在浏览器前裁剪"
+    },
+    {
+      "id": "LG01",
+      "feature": "关闭标签与实际任务解耦",
+      "disposition": "保留并验收",
+      "batch": "B/C/E/G",
+      "acceptance": "管理外壳与自有文件/手机/窗口能力；其他模式不扩展"
+    },
+    {
+      "id": "LG02",
+      "feature": "跨设备关注标签集合",
+      "disposition": "保留并验收",
+      "batch": "B/C/E/G",
+      "acceptance": "管理外壳与自有文件/手机/窗口能力；其他模式不扩展"
+    },
+    {
+      "id": "LG03",
+      "feature": "手机列表长按菜单",
+      "disposition": "保留并验收",
+      "batch": "B/C/E/G",
+      "acceptance": "管理外壳与自有文件/手机/窗口能力；其他模式不扩展"
+    },
+    {
+      "id": "LG04",
+      "feature": "三模式与二级导航",
+      "disposition": "保留并验收",
+      "batch": "B/C/E/G",
+      "acceptance": "管理外壳与自有文件/手机/窗口能力；其他模式不扩展"
+    },
+    {
+      "id": "LG05",
+      "feature": "项目选择与输入目标联动",
+      "disposition": "保留并验收",
+      "batch": "B/C/E/G",
+      "acceptance": "管理外壳与自有文件/手机/窗口能力；其他模式不扩展"
+    },
+    {
+      "id": "LG06",
+      "feature": "列表内重命名",
+      "disposition": "完善/修复",
+      "batch": "A/C/D",
+      "acceptance": "管理动作、归档生命周期、异步undo、中文、共享pin/read与分页"
+    },
+    {
+      "id": "LG07",
+      "feature": "会话动作菜单重命名可用性",
+      "disposition": "完善/修复",
+      "batch": "A/C/D",
+      "acceptance": "管理动作、归档生命周期、异步undo、中文、共享pin/read与分页"
+    },
+    {
+      "id": "LG08",
+      "feature": "归档接入全局撤销",
+      "disposition": "完善/修复",
+      "batch": "A/C/D",
+      "acceptance": "管理动作、归档生命周期、异步undo、中文、共享pin/read与分页"
+    },
+    {
+      "id": "LG09",
+      "feature": "全局撤销事务与覆盖范围",
+      "disposition": "完善/修复",
+      "batch": "A/C/D",
+      "acceptance": "管理动作、归档生命周期、异步undo、中文、共享pin/read与分页"
+    },
+    {
+      "id": "LG10",
+      "feature": "归档成功即时反馈",
+      "disposition": "完善/修复",
+      "batch": "A/C/D",
+      "acceptance": "管理动作、归档生命周期、异步undo、中文、共享pin/read与分页"
+    },
+    {
+      "id": "LG11",
+      "feature": "运行中归档语义与确认",
+      "disposition": "完善/修复",
+      "batch": "A/C/D",
+      "acceptance": "管理动作、归档生命周期、异步undo、中文、共享pin/read与分页"
+    },
+    {
+      "id": "LG12",
+      "feature": "已计划任务/运行组合归档确认",
+      "disposition": "完善/修复",
+      "batch": "A/C/D",
+      "acceptance": "管理动作、归档生命周期、异步undo、中文、共享pin/read与分页"
+    },
+    {
+      "id": "LG13",
+      "feature": "归档撤销恢复原置顶",
+      "disposition": "完善/修复",
+      "batch": "A/C/D",
+      "acceptance": "管理动作、归档生命周期、异步undo、中文、共享pin/read与分页"
+    },
+    {
+      "id": "LG14",
+      "feature": "归档列表长历史分页",
+      "disposition": "完善/修复",
+      "batch": "A/C/D",
+      "acceptance": "管理动作、归档生命周期、异步undo、中文、共享pin/read与分页"
+    },
+    {
+      "id": "LG15",
+      "feature": "归档设置页中文与错误文案",
+      "disposition": "完善/修复",
+      "batch": "A/C/D",
+      "acceptance": "管理动作、归档生命周期、异步undo、中文、共享pin/read与分页"
+    },
+    {
+      "id": "LG16",
+      "feature": "列表操作中文标签",
+      "disposition": "完善/修复",
+      "batch": "A/C/D",
+      "acceptance": "管理动作、归档生命周期、异步undo、中文、共享pin/read与分页"
+    },
+    {
+      "id": "LG17",
+      "feature": "置顶的数据域与撤销",
+      "disposition": "完善/修复",
+      "batch": "A/C/D",
+      "acceptance": "管理动作、归档生命周期、异步undo、中文、共享pin/read与分页"
+    },
+    {
+      "id": "LG18",
+      "feature": "标记未读写入域",
+      "disposition": "完善/修复",
+      "batch": "A/C/D",
+      "acceptance": "管理动作、归档生命周期、异步undo、中文、共享pin/read与分页"
+    },
+    {
+      "id": "LG19",
+      "feature": "复制为 Markdown",
+      "disposition": "保留并验收",
+      "batch": "D/E",
+      "acceptance": "复制/网页深链精确目标，排除必须IDE才可用的跳转"
+    },
+    {
+      "id": "LG20",
+      "feature": "复制深度链接",
+      "disposition": "保留并验收",
+      "batch": "D/E",
+      "acceptance": "复制/网页深链精确目标，排除必须IDE才可用的跳转"
+    },
+    {
+      "id": "LG21",
+      "feature": "在新窗口打开聊天",
+      "disposition": "保留并验收",
+      "batch": "B/C/E/G",
+      "acceptance": "管理外壳与自有文件/手机/窗口能力；其他模式不扩展"
+    },
+    {
+      "id": "LG22",
+      "feature": "文件浏览器移动端与未保存保护",
+      "disposition": "保留并验收",
+      "batch": "B/C/E/G",
+      "acceptance": "管理外壳与自有文件/手机/窗口能力；其他模式不扩展"
+    },
+    {
+      "id": "LG23",
+      "feature": "VS Code 面板保持挂载",
+      "disposition": "保留现状/不扩展",
+      "batch": "G",
+      "acceptance": "现有可选VSCode iframe保持挂载；不开发IDE宿主能力"
+    },
+    {
+      "id": "LG24",
+      "feature": "设置页手机布局",
+      "disposition": "保留并验收",
+      "batch": "B/C/E/G",
+      "acceptance": "管理外壳与自有文件/手机/窗口能力；其他模式不扩展"
+    },
+    {
+      "id": "LG25",
+      "feature": "自定义快捷键保存与重置",
+      "disposition": "新增/完善",
+      "batch": "D",
+      "acceptance": "网页快捷键真实保存/重置/导航偏好，非VSCode配置桥"
+    },
+    {
+      "id": "LG26",
+      "feature": "数字键聊天/标签目标偏好",
+      "disposition": "新增/完善",
+      "batch": "D",
+      "acceptance": "网页快捷键真实保存/重置/导航偏好，非VSCode配置桥"
+    },
+    {
+      "id": "LG27",
+      "feature": "插件安装与认证后续",
+      "disposition": "完善与组合验收",
+      "batch": "A/F/G",
+      "acceptance": "现有真实插件/MCP/auth/usage/feedback路径，补scope和失败组合"
+    },
+    {
+      "id": "LG28",
+      "feature": "插件卸载与状态刷新",
+      "disposition": "完善与组合验收",
+      "batch": "A/F/G",
+      "acceptance": "现有真实插件/MCP/auth/usage/feedback路径，补scope和失败组合"
+    },
+    {
+      "id": "LG29",
+      "feature": "插件/技能/连接器导航",
+      "disposition": "完善与组合验收",
+      "batch": "A/F/G",
+      "acceptance": "现有真实插件/MCP/auth/usage/feedback路径，补scope和失败组合"
+    },
+    {
+      "id": "LG30",
+      "feature": "MCP 重新认证状态机",
+      "disposition": "完善与组合验收",
+      "batch": "A/F/G",
+      "acceptance": "现有真实插件/MCP/auth/usage/feedback路径，补scope和失败组合"
+    },
+    {
+      "id": "LG31",
+      "feature": "MCP 认证账号/实例切换失效",
+      "disposition": "完善与组合验收",
+      "batch": "A/F/G",
+      "acceptance": "现有真实插件/MCP/auth/usage/feedback路径，补scope和失败组合"
+    },
+    {
+      "id": "LG32",
+      "feature": "MCP 管理页与配置",
+      "disposition": "完善与组合验收",
+      "batch": "A/F/G",
+      "acceptance": "现有真实插件/MCP/auth/usage/feedback路径，补scope和失败组合"
+    },
+    {
+      "id": "LG33",
+      "feature": "ChatGPT/API key/device code 登录",
+      "disposition": "完善与组合验收",
+      "batch": "A/F/G",
+      "acceptance": "现有真实插件/MCP/auth/usage/feedback路径，补scope和失败组合"
+    },
+    {
+      "id": "LG34",
+      "feature": "登录取消与未知回执",
+      "disposition": "完善与组合验收",
+      "batch": "A/F/G",
+      "acceptance": "现有真实插件/MCP/auth/usage/feedback路径，补scope和失败组合"
+    },
+    {
+      "id": "LG35",
+      "feature": "原生账户用量与复原",
+      "disposition": "完善与组合验收",
+      "batch": "A/F/G",
+      "acceptance": "现有真实插件/MCP/auth/usage/feedback路径，补scope和失败组合"
+    },
+    {
+      "id": "LG36",
+      "feature": "反馈入口与权限预检",
+      "disposition": "完善与组合验收",
+      "batch": "A/F/G",
+      "acceptance": "现有真实插件/MCP/auth/usage/feedback路径，补scope和失败组合"
+    },
+    {
+      "id": "LG37",
+      "feature": "反馈上传六态及关窗后继续",
+      "disposition": "完善与组合验收",
+      "batch": "A/F/G",
+      "acceptance": "现有真实插件/MCP/auth/usage/feedback路径，补scope和失败组合"
+    },
+    {
+      "id": "LG38",
+      "feature": "听写启动/转录/失败重试",
+      "disposition": "完善与组合验收",
+      "batch": "F/G",
+      "acceptance": "听写状态/重试与owner安全"
+    },
+    {
+      "id": "LG39",
+      "feature": "听写与会话草稿归属",
+      "disposition": "完善与组合验收",
+      "batch": "F/G",
+      "acceptance": "听写状态/重试与owner安全"
+    },
+    {
+      "id": "LG40",
+      "feature": "Ultra+Full Access 二次确认",
+      "disposition": "完善",
+      "batch": "A/D",
+      "acceptance": "权限profile和每scope原生fallback，已有Ultra确认保留"
+    },
+    {
+      "id": "LG41",
+      "feature": "共享大应用设置的适用性",
+      "disposition": "排除非本地分支",
+      "batch": "范围边界",
+      "acceptance": "ChatGPT/家庭/账单/云端共享设置不当成本地会话缺口"
+    },
+    {
+      "id": "LG42",
+      "feature": "云端任务/服务器内部逻辑",
+      "disposition": "排除",
+      "batch": "范围边界",
+      "acceptance": "云端任务与服务内部实现"
+    },
+    {
+      "id": "H01",
+      "feature": "扩展注册与入口",
+      "disposition": "排除IDE宿主实现",
+      "batch": "范围边界",
+      "acceptance": "独立插件/companion/profile/code-server/部署机制不纳入；风险和审计证据保留"
+    },
+    {
+      "id": "H02",
+      "feature": "命令/快捷键/设置",
+      "disposition": "网页语义适配",
+      "batch": "D",
+      "acceptance": "保留网页可用快捷键/字体/locale/偏好，不实现VSCode设置接口"
+    },
+    {
+      "id": "H03",
+      "feature": "provider/Webview 初始化",
+      "disposition": "排除IDE宿主实现",
+      "batch": "范围边界",
+      "acceptance": "独立插件/companion/profile/code-server/部署机制不纳入；风险和审计证据保留"
+    },
+    {
+      "id": "H04",
+      "feature": "ready 与待发送消息",
+      "disposition": "排除IDE宿主实现",
+      "batch": "范围边界",
+      "acceptance": "独立插件/companion/profile/code-server/部署机制不纳入；风险和审计证据保留"
+    },
+    {
+      "id": "H05",
+      "feature": "隐藏上下文保持",
+      "disposition": "Session等价责任",
+      "batch": "B/C/G",
+      "acceptance": "沿现有Session层实现生命周期/调度/身份/同步；不新增原插件宿主桥"
+    },
+    {
+      "id": "H06",
+      "feature": "多 editor/文档",
+      "disposition": "排除IDE宿主实现",
+      "batch": "范围边界",
+      "acceptance": "独立插件/companion/profile/code-server/部署机制不纳入；风险和审计证据保留"
+    },
+    {
+      "id": "H07",
+      "feature": "本地 app-server 生命周期",
+      "disposition": "Session等价责任",
+      "batch": "B/C/G",
+      "acceptance": "沿现有Session层实现生命周期/调度/身份/同步；不新增原插件宿主桥"
+    },
+    {
+      "id": "H08",
+      "feature": "RPC/通知/请求回到原 Webview",
+      "disposition": "Session等价责任",
+      "batch": "B/C/G",
+      "acceptance": "沿现有Session层实现生命周期/调度/身份/同步；不新增原插件宿主桥"
+    },
+    {
+      "id": "H09",
+      "feature": "请求预热/放弃",
+      "disposition": "Session等价责任",
+      "batch": "B/C/G",
+      "acceptance": "沿现有Session层实现生命周期/调度/身份/同步；不新增原插件宿主桥"
+    },
+    {
+      "id": "H10",
+      "feature": "共享对象订阅/写入",
+      "disposition": "Session等价责任",
+      "batch": "B/C/G",
+      "acceptance": "沿现有Session层实现生命周期/调度/身份/同步；不新增原插件宿主桥"
+    },
+    {
+      "id": "H11",
+      "feature": "持久 atom 同步/更新/重置",
+      "disposition": "Session等价责任",
+      "batch": "B/C/G",
+      "acceptance": "沿现有Session层实现生命周期/调度/身份/同步；不新增原插件宿主桥"
+    },
+    {
+      "id": "H12",
+      "feature": "客户端协调/已读状态",
+      "disposition": "Session等价责任",
+      "batch": "B/C/G",
+      "acceptance": "沿现有Session层实现生命周期/调度/身份/同步；不新增原插件宿主桥"
+    },
+    {
+      "id": "H13",
+      "feature": "可能写出后的失败投递",
+      "disposition": "排除IDE宿主实现",
+      "batch": "范围边界",
+      "acceptance": "独立插件/companion/profile/code-server/部署机制不纳入；风险和审计证据保留"
+    },
+    {
+      "id": "H14",
+      "feature": "桥接发送准入",
+      "disposition": "排除IDE宿主实现",
+      "batch": "范围边界",
+      "acceptance": "独立插件/companion/profile/code-server/部署机制不纳入；风险和审计证据保留"
+    },
+    {
+      "id": "H15",
+      "feature": "刷新目标/实例隔离",
+      "disposition": "排除IDE宿主实现",
+      "batch": "范围边界",
+      "acceptance": "独立插件/companion/profile/code-server/部署机制不纳入；风险和审计证据保留"
+    },
+    {
+      "id": "H16",
+      "feature": "私有刷新原型/租约/保温",
+      "disposition": "排除IDE宿主实现",
+      "batch": "范围边界",
+      "acceptance": "独立插件/companion/profile/code-server/部署机制不纳入；风险和审计证据保留"
+    },
+    {
+      "id": "H17",
+      "feature": "历史只读与工具正文投影",
+      "disposition": "Session等价责任",
+      "batch": "B/C/G",
+      "acceptance": "沿现有Session层实现生命周期/调度/身份/同步；不新增原插件宿主桥"
+    },
+    {
+      "id": "H18",
+      "feature": "字体/语言/宿主设置",
+      "disposition": "网页语义适配",
+      "batch": "D",
+      "acceptance": "保留网页可用快捷键/字体/locale/偏好，不实现VSCode设置接口"
+    },
+    {
+      "id": "H19",
+      "feature": "diff/plan/open 文件容器",
+      "disposition": "自有能力保留",
+      "batch": "D/E",
+      "acceptance": "文件/diff/plan/手动上下文走自有面板，IDE自动上下文排除"
+    },
+    {
+      "id": "H20",
+      "feature": "IDE上下文与文件加入",
+      "disposition": "自有能力保留",
+      "batch": "D/E",
+      "acceptance": "文件/diff/plan/手动上下文走自有面板，IDE自动上下文排除"
+    },
+    {
+      "id": "H21",
+      "feature": "worker/fetch 取消",
+      "disposition": "Session等价责任",
+      "batch": "B/C/G",
+      "acceptance": "沿现有Session层实现生命周期/调度/身份/同步；不新增原插件宿主桥"
+    },
+    {
+      "id": "H22",
+      "feature": "fatal与显式重启",
+      "disposition": "Session等价责任",
+      "batch": "B/C/G",
+      "acceptance": "沿现有Session层实现生命周期/调度/身份/同步；不新增原插件宿主桥"
+    },
+    {
+      "id": "H23",
+      "feature": "本机环境/WSL/CLI设置",
+      "disposition": "排除IDE宿主实现",
+      "batch": "范围边界",
+      "acceptance": "独立插件/companion/profile/code-server/部署机制不纳入；风险和审计证据保留"
+    },
+    {
+      "id": "H24",
+      "feature": "实际部署与包身份",
+      "disposition": "排除IDE宿主实现",
+      "batch": "范围边界",
+      "acceptance": "独立插件/companion/profile/code-server/部署机制不纳入；风险和审计证据保留"
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "M01",
+      "scenario": "空白工作台：无关注会话、导航可操作、无隐式新建/发送",
+      "disposition": "本期必测",
+      "batch": "B/G/H",
+      "acceptance": "按当前预热/回收/性能合同复验，保留传输/堆/RSS/正确正文证据"
+    },
+    {
+      "id": "M02",
+      "scenario": "官方空白新线程：未发送 UUID、独立草稿、刷新仍相同目标",
+      "disposition": "Session场景必测；原IDE夹具不纳入",
+      "batch": "A/B/C/D/G/H",
+      "acceptance": "改用Session真实UI+隔离native协议，覆盖同一生命周期；不要求启动code-server或三个官方宿主"
+    },
+    {
+      "id": "M03",
+      "scenario": "新线程首发：仅一次接受；新资源路由与 editor URI/thread 正确",
+      "disposition": "Session场景必测；原IDE夹具不纳入",
+      "batch": "A/B/C/D/G/H",
+      "acceptance": "改用Session真实UI+隔离native协议，覆盖同一生命周期；不要求启动code-server或三个官方宿主"
+    },
+    {
+      "id": "M04",
+      "scenario": "idle 已完成历史：最新回答动作始终可见、旧 turn 按原分组隐藏",
+      "disposition": "本期必测",
+      "batch": "D/F/G/H",
+      "acceptance": "固定原组件对照与真实项目交互；动态/静态/native证据分别记录"
+    },
+    {
+      "id": "M05",
+      "scenario": "running+空草稿：显示 Stop；无“已中断”假终态；不显示错误引导",
+      "disposition": "本期必测",
+      "batch": "D/F/G/H",
+      "acceptance": "固定原组件对照与真实项目交互；动态/静态/native证据分别记录"
+    },
+    {
+      "id": "M06",
+      "scenario": "running+草稿：主动作为 Queue/Steer，草稿不被旧完成覆盖",
+      "disposition": "本期必测",
+      "batch": "D/F/G/H",
+      "acceptance": "固定原组件对照与真实项目交互；动态/静态/native证据分别记录"
+    },
+    {
+      "id": "M07",
+      "scenario": "流式 assistant：增量与最终正文合并为一行，无闪失/重复",
+      "disposition": "本期必测",
+      "batch": "D/F/G/H",
+      "acceptance": "固定原组件对照与真实项目交互；动态/静态/native证据分别记录"
+    },
+    {
+      "id": "M08",
+      "scenario": "1万交错事件：有界行/字符串，最新答复可见，序号不丢",
+      "disposition": "本期必测",
+      "batch": "D/F/G/H",
+      "acceptance": "固定原组件对照与真实项目交互；动态/静态/native证据分别记录"
+    },
+    {
+      "id": "M09",
+      "scenario": "tool 执行：command输出有界、显式展开详情、完成/失败状态",
+      "disposition": "本期必测",
+      "batch": "D/F/G/H",
+      "acceptance": "固定原组件对照与真实项目交互；动态/静态/native证据分别记录"
+    },
+    {
+      "id": "M10",
+      "scenario": "running diff + queue rail：边框/计数/滚动/多行队列共存",
+      "disposition": "本期必测",
+      "batch": "D/F/G/H",
+      "acceptance": "固定原组件对照与真实项目交互；动态/静态/native证据分别记录"
+    },
+    {
+      "id": "M11",
+      "scenario": "Markdown/代码/表格/图片：字体、wrap、高亮、copy/download",
+      "disposition": "本期必测",
+      "batch": "D/F/G/H",
+      "acceptance": "固定原组件对照与真实项目交互；动态/静态/native证据分别记录"
+    },
+    {
+      "id": "M12",
+      "scenario": "expanded composer：插入代码、选择区、关闭/刷新/返回主输入",
+      "disposition": "本期必测",
+      "batch": "D/F/G/H",
+      "acceptance": "固定原组件对照与真实项目交互；动态/静态/native证据分别记录"
+    },
+    {
+      "id": "M13",
+      "scenario": "完成通知/未读/提示音：后台收尾后状态独立于正文挂载",
+      "disposition": "本期必测",
+      "batch": "D/F/G/H",
+      "acceptance": "固定原组件对照与真实项目交互；动态/静态/native证据分别记录"
+    },
+    {
+      "id": "M14",
+      "scenario": "pending审批：精确thread/turn/item/request/token、所有按钮可达",
+      "disposition": "本期必测",
+      "batch": "D/F/G/H",
+      "acceptance": "固定原组件对照与真实项目交互；动态/静态/native证据分别记录"
+    },
+    {
+      "id": "M15",
+      "scenario": "两客户端竞争同一审批：只有一次native accept，旧请求409",
+      "disposition": "本期必测",
+      "batch": "D/F/G/H",
+      "acceptance": "固定原组件对照与真实项目交互；动态/静态/native证据分别记录"
+    },
+    {
+      "id": "M16",
+      "scenario": "审批期间B断线再接：since游标补回新请求、旧token不得批准",
+      "disposition": "本期必测",
+      "batch": "D/F/G/H",
+      "acceptance": "固定原组件对照与真实项目交互；动态/静态/native证据分别记录"
+    },
+    {
+      "id": "M17",
+      "scenario": "审批失败：卡片保留可重试；已resolve/过期/账号变化不可迟到提交",
+      "disposition": "本期必测",
+      "batch": "D/F/G/H",
+      "acceptance": "固定原组件对照与真实项目交互；动态/静态/native证据分别记录"
+    },
+    {
+      "id": "M18",
+      "scenario": "requestUserInput：选项/文字/schema验证；仅本轮自动展开一次",
+      "disposition": "本期必测",
+      "batch": "D/F/G/H",
+      "acceptance": "固定原组件对照与真实项目交互；动态/静态/native证据分别记录"
+    },
+    {
+      "id": "M19",
+      "scenario": "问题回复拒绝/未知ACK/远程已答：保留草稿、显式继续、不自动重发",
+      "disposition": "本期必测",
+      "batch": "D/F/G/H",
+      "acceptance": "固定原组件对照与真实项目交互；动态/静态/native证据分别记录"
+    },
+    {
+      "id": "M20",
+      "scenario": "turn failed：错误source卡、Markdown链接、安全可点击、可重试",
+      "disposition": "本期必测",
+      "batch": "D/F/G/H",
+      "acceptance": "固定原组件对照与真实项目交互；动态/静态/native证据分别记录"
+    },
+    {
+      "id": "M21",
+      "scenario": "显式用户中断：停止精确turn一次，队列暂停；终态不能反复追加",
+      "disposition": "Session场景必测；原IDE夹具不纳入",
+      "batch": "A/B/C/D/G/H",
+      "acceptance": "改用Session真实UI+隔离native协议，覆盖同一生命周期；不要求启动code-server或三个官方宿主"
+    },
+    {
+      "id": "M22",
+      "scenario": "刷新时旧 interrupted + 迟到 completed：真终态收敛，不凭连接失败捏造中断",
+      "disposition": "本期必测",
+      "batch": "D/F/G/H",
+      "acceptance": "固定原组件对照与真实项目交互；动态/静态/native证据分别记录"
+    },
+    {
+      "id": "M23",
+      "scenario": "older-runtime 已暂停原因：中性文案，不误称“你中断了”，不自动resume",
+      "disposition": "本期必测",
+      "batch": "D/F/G/H",
+      "acceptance": "固定原组件对照与真实项目交互；动态/静态/native证据分别记录"
+    },
+    {
+      "id": "M24",
+      "scenario": "无法加载历史：真实503仍提示错误，局部SSE不能伪装同步完成",
+      "disposition": "本期必测",
+      "batch": "B/G/H",
+      "acceptance": "按当前预热/回收/性能合同复验，保留传输/堆/RSS/正确正文证据"
+    },
+    {
+      "id": "M25",
+      "scenario": "重试history warning：双主题616/390尺寸、点击只读重试一次",
+      "disposition": "本期必测",
+      "batch": "B/G/H",
+      "acceptance": "按当前预热/回收/性能合同复验，保留传输/堆/RSS/正确正文证据"
+    },
+    {
+      "id": "M26",
+      "scenario": "SSE断开→重连：清连接/同步提示、草稿不丢、无隐式写请求",
+      "disposition": "本期必测",
+      "batch": "B/G/H",
+      "acceptance": "按当前预热/回收/性能合同复验，保留传输/堆/RSS/正确正文证据"
+    },
+    {
+      "id": "M27",
+      "scenario": "SSE序号gap/malformed/无完成：仅只读history修复、保留reader",
+      "disposition": "本期必测",
+      "batch": "B/G/H",
+      "acceptance": "按当前预热/回收/性能合同复验，保留传输/堆/RSS/正确正文证据"
+    },
+    {
+      "id": "M28",
+      "scenario": "运行实例重启或较小快照：reset旧cursor，挡住旧实例ACK",
+      "disposition": "本期必测",
+      "batch": "B/G/H",
+      "acceptance": "按当前预热/回收/性能合同复验，保留传输/堆/RSS/正确正文证据"
+    },
+    {
+      "id": "M29",
+      "scenario": "普通刷新：tabs/status/draft恢复，失败可重试，阅读位置不动",
+      "disposition": "本期必测",
+      "batch": "B/G/H",
+      "acceptance": "按当前预热/回收/性能合同复验，保留传输/堆/RSS/正确正文证据"
+    },
+    {
+      "id": "M30",
+      "scenario": "手机切后台/pagehide/refresh：运行不中断，排队保持，0新写",
+      "disposition": "本期必测",
+      "batch": "B/G/H",
+      "acceptance": "按当前预热/回收/性能合同复验，保留传输/堆/RSS/正确正文证据"
+    },
+    {
+      "id": "M31",
+      "scenario": "官方running刷新/关闭一端：精确turn持续active，完成一次，UI收尾",
+      "disposition": "Session场景必测；原IDE夹具不纳入",
+      "batch": "A/B/C/D/G/H",
+      "acceptance": "改用Session真实UI+隔离native协议，覆盖同一生命周期；不要求启动code-server或三个官方宿主"
+    },
+    {
+      "id": "M32",
+      "scenario": "官方pending approval刷新：无composer不显示误导onboarding",
+      "disposition": "Session场景必测；原IDE夹具不纳入",
+      "batch": "A/B/C/D/G/H",
+      "acceptance": "改用Session真实UI+隔离native协议，覆盖同一生命周期；不要求启动code-server或三个官方宿主"
+    },
+    {
+      "id": "M33",
+      "scenario": "原生completed后composer settle：正确唯一thread、清稿、无busy/Stop/Queue、有Send",
+      "disposition": "Session场景必测；原IDE夹具不纳入",
+      "batch": "A/B/C/D/G/H",
+      "acceptance": "改用Session真实UI+隔离native协议，覆盖同一生命周期；不要求启动code-server或三个官方宿主"
+    },
+    {
+      "id": "M34",
+      "scenario": "翻页：保留native cursor、view=chat裁正文、滚动锚不跳，不acquire/resume",
+      "disposition": "本期必测",
+      "batch": "B/G/H",
+      "acceptance": "按当前预热/回收/性能合同复验，保留传输/堆/RSS/正确正文证据"
+    },
+    {
+      "id": "M35",
+      "scenario": "1200项长历史+两页：独立位置/草稿/未读、后台不轮询大history",
+      "disposition": "本期必测",
+      "batch": "B/G/H",
+      "acceptance": "按当前预热/回收/性能合同复验，保留传输/堆/RSS/正确正文证据"
+    },
+    {
+      "id": "M36",
+      "scenario": "首次cold history超显示预算：首次发布前有界，5MiB prompt头尾保留",
+      "disposition": "本期必测",
+      "batch": "B/G/H",
+      "acceptance": "按当前预热/回收/性能合同复验，保留传输/堆/RSS/正确正文证据"
+    },
+    {
+      "id": "M37",
+      "scenario": "高堆压不重复发布相同受保护附件：防渲染反馈循环",
+      "disposition": "本期必测",
+      "batch": "B/G/H",
+      "acceptance": "按当前预热/回收/性能合同复验，保留传输/堆/RSS/正确正文证据"
+    },
+    {
+      "id": "M38",
+      "scenario": "不可见正文按预算保温/压力回收→只读重显（适配原60秒用例）",
+      "disposition": "本期必测",
+      "batch": "B/G/H",
+      "acceptance": "资源充足超过60秒仍warm并接收完成更新；压力回收后晚读/delta不回填，重显只读恢复且状态/草稿不丢；原策略开关仍验60秒，预算/长测不放宽",
+      "originalScenario": "不可见正文60s回收→只读重显：终态/审批/未读独立保留"
+    },
+    {
+      "id": "M39",
+      "scenario": "自然长测：30min、真实HTTP/EventSource、RSS/堆/传输/回显都闭合",
+      "disposition": "本期必测",
+      "batch": "B/G/H",
+      "acceptance": "按当前预热/回收/性能合同复验，保留传输/堆/RSS/正确正文证据"
+    },
+    {
+      "id": "M40",
+      "scenario": "composer模块加载失败：显式reload入口恢复草稿，无隐式task操作",
+      "disposition": "本期必测",
+      "batch": "B/G/H",
+      "acceptance": "按当前预热/回收/性能合同复验，保留传输/堆/RSS/正确正文证据"
+    },
+    {
+      "id": "M41",
+      "scenario": "split多可见窗：每窗reading/更新/目标独立、拖拽不串输入",
+      "disposition": "本期必测",
+      "batch": "C/D/E/G/H",
+      "acceptance": "共享状态与本地输入现场隔离；精确意图、回执、scope/revision"
+    },
+    {
+      "id": "M42",
+      "scenario": "跨设备tabs：共享关注/顺序/关闭，输入目标与布局/阅读本地",
+      "disposition": "本期必测",
+      "batch": "C/D/E/G/H",
+      "acceptance": "共享状态与本地输入现场隔离；精确意图、回执、scope/revision"
+    },
+    {
+      "id": "M43",
+      "scenario": "20/50后台tabs：状态推进，slow history不阻塞其它窗，0大轮询",
+      "disposition": "本期必测",
+      "batch": "B/G/H",
+      "acceptance": "按当前预热/回收/性能合同复验，保留传输/堆/RSS/正确正文证据"
+    },
+    {
+      "id": "M44",
+      "scenario": "owner外部占用：禁止retry/continue/重复投递，保留草稿/附件，可移除失败项",
+      "disposition": "本期必测",
+      "batch": "C/D/E/G/H",
+      "acceptance": "共享状态与本地输入现场隔离；精确意图、回执、scope/revision"
+    },
+    {
+      "id": "M45",
+      "scenario": "uncertain ACK：显式确认前不重发；reload后重试沿原意图ID",
+      "disposition": "本期必测",
+      "batch": "C/D/E/G/H",
+      "acceptance": "共享状态与本地输入现场隔离；精确意图、回执、scope/revision"
+    },
+    {
+      "id": "M46",
+      "scenario": "迟到send ACK：另一页新草稿/相同文字独立edit不能被清空",
+      "disposition": "本期必测",
+      "batch": "C/D/E/G/H",
+      "acceptance": "共享状态与本地输入现场隔离；精确意图、回执、scope/revision"
+    },
+    {
+      "id": "M47",
+      "scenario": "附件异步upload/delete/restore：旧upload不能复活已删图，不误删其它页bytes",
+      "disposition": "本期必测",
+      "batch": "C/D/E/G/H",
+      "acceptance": "共享状态与本地输入现场隔离；精确意图、回执、scope/revision"
+    },
+    {
+      "id": "M48",
+      "scenario": "大粘贴/context/file引用/expanded draft：刷新保留、发送捕获冻结、undo不串设置",
+      "disposition": "本期必测",
+      "batch": "C/D/E/G/H",
+      "acceptance": "共享状态与本地输入现场隔离；精确意图、回执、scope/revision"
+    },
+    {
+      "id": "M49",
+      "scenario": "模型/权限设置双页事务、晚read/ACK、A→B→A：不覆盖新意图",
+      "disposition": "本期必测",
+      "batch": "C/D/E/G/H",
+      "acceptance": "共享状态与本地输入现场隔离；精确意图、回执、scope/revision"
+    },
+    {
+      "id": "M50",
+      "scenario": "Goal完成清理晚ACK：新goal不被旧清除、只读完成不接管",
+      "disposition": "本期必测",
+      "batch": "C/D/E/G/H",
+      "acceptance": "共享状态与本地输入现场隔离；精确意图、回执、scope/revision"
+    },
+    {
+      "id": "M51",
+      "scenario": "子Agent readonly观察：不改变主输入/project、不resume；审批精确身份",
+      "disposition": "本期必测",
+      "batch": "C/D/E/G/H",
+      "acceptance": "共享状态与本地输入现场隔离；精确意图、回执、scope/revision"
+    },
+    {
+      "id": "M52",
+      "scenario": "Enter/IME/touch：手机Return不误发；external keyboard明确组合发送",
+      "disposition": "本期必测",
+      "batch": "D/F/G/H",
+      "acceptance": "固定原组件对照与真实项目交互；动态/静态/native证据分别记录"
+    },
+    {
+      "id": "M53",
+      "scenario": "主工作台布局：控件不被裁、landscape/short viewport可达、hidden mode不监听键",
+      "disposition": "本期必测",
+      "batch": "D/F/G/H",
+      "acceptance": "固定原组件对照与真实项目交互；动态/静态/native证据分别记录"
+    },
+    {
+      "id": "M54",
+      "scenario": "单窗/三窗≤2s：导航/composer实际可输入，typing顺畅、样本分位数",
+      "disposition": "本期必测",
+      "batch": "B/G/H",
+      "acceptance": "按当前预热/回收/性能合同复验，保留传输/堆/RSS/正确正文证据"
+    },
+    {
+      "id": "M55",
+      "scenario": "三独立官方宿主刷新并发send：thread唯一、各输入仅一次、UI收尾、2s",
+      "disposition": "Session场景必测；原IDE夹具不纳入",
+      "batch": "A/B/C/D/G/H",
+      "acceptance": "改用Session真实UI+隔离native协议，覆盖同一生命周期；不要求启动code-server或三个官方宿主"
+    }
+  ],
+  "disposition_counts": {
+    "完善": 18,
+    "适配": 1,
+    "保留并验收": 64,
+    "保留适配": 2,
+    "新增/完善": 10,
+    "修复": 3,
+    "按子能力适配": 2,
+    "技术确认后完善": 1,
+    "排除IDE实现/清理入口": 1,
+    "技术确认后实现": 1,
+    "定位并修复": 1,
+    "完善与组合验收": 30,
+    "完善/修复": 13,
+    "保留现状/不扩展": 1,
+    "排除非本地分支": 1,
+    "排除": 1,
+    "排除IDE宿主实现": 10,
+    "网页语义适配": 2,
+    "Session等价责任": 10,
+    "自有能力保留": 2
+  }
+}

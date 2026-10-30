@@ -1,3 +1,5 @@
+import { beginExecution, executionIntentId, executionScope, executionSelection, updateExecution, readExecutionContext, verifyExecutionContext } from "@session/features/workspace-execution/state";
+import { runLocalEnvironment } from "@session/features/workspace-execution/api";
 import { createSideChat } from "@session/services/conversationActions";
 import initPrompt from "@session/prompts/init.md?raw";
 import { codexService } from "@session/services/codexService";
@@ -6,7 +8,7 @@ import {
   changeThreadModel,
   getThreadModelSettings,
 } from "@session/stores/useThreadModelStore";
-import { archiveThread, renameThread } from "@session/services/apiAdapt";
+import { archiveThread, renameThread } from "@session/services/apiAdapt/codex";
 import { listMcpServerStatus } from "@session/services/apiAdapt/mcp";
 import { gitCreateWorktree } from "@session/services/apiAdapt/git";
 import { useAgentCenterStore } from "@session/stores/useAgentCenterStore";
@@ -18,6 +20,11 @@ import { goalDrafts } from "./goalDrafts";
 import { sessionDraftKey } from "@session/stores/useSessionDraftStore";
 import { postJson } from "@session/services/apiAdapt/shared";
 import type { FeedbackUploadParams } from "@session/bindings/v2/FeedbackUploadParams";
+import { captureCodexOperationScope, isCodexOperationScopeCurrent } from "@session/services/codexOperationScope";
+import { listProjectReferences } from "@session/features/files/projectReferences";
+import { readWithDeadline } from "@session/services/sessionReadQueue";
+import { lightweightThreadForStore } from "@session/services/codexTranscriptVisibility";
+import { useSessionNameStore } from "@session/stores/useSessionNameStore";
 
 /** What a slash command can do once the composer text has been cleared. */
 export interface SlashCommandContext {
@@ -40,7 +47,6 @@ export type SlashDialog =
   | "rename"
   | "fork"
   | "mcp"
-  | "ide"
   | "personality"
   | "feedback"
   | "auto-review-denials";
@@ -64,7 +70,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   {
     id: "model",
     title: "模型",
-    description: "选择模型，保留已排队消息的原配置",
+    description: "选择下次发送的模型；原生队列使用线程当前设置",
     run: ({ openDialog }) => openDialog("model"),
   },
   {
@@ -133,8 +139,19 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     description: "创建包含 Codex 指令的 AGENTS.md 文件",
     confirmation:
       "将启动新任务生成 AGENTS.md，可能修改项目文件。当前草稿保持不变。",
-    run: async ({ ensureThread }) => {
-      await codexService.turnStart(await ensureThread(), initPrompt);
+    run: async ({ ensureThread, currentThreadId }) => {
+      const scope = captureCodexOperationScope();
+      const original = useCodexStore.getState().currentThreadId;
+      const workspace = useWorkspaceStore.getState().cwd;
+      const cwd = currentThreadId ? useCodexStore.getState().threads.find((thread) => thread.id === currentThreadId)?.cwd : workspace;
+      if (!cwd) throw new Error("无法确认项目目录，尚未运行初始化。");
+      const listing = await readWithDeadline((signal) => listProjectReferences(cwd, cwd, signal), 10_000);
+      if (listing.entries.some((entry) => entry.name === "AGENTS.md")) throw new Error("AGENTS.md 已存在，无需重新初始化。");
+      if (listing.truncated) throw new Error("项目目录过大，无法确认 AGENTS.md 是否存在，尚未发送任务。");
+      if (!isCodexOperationScopeCurrent(scope) || (!currentThreadId && (useCodexStore.getState().currentThreadId !== original || useWorkspaceStore.getState().cwd !== workspace))) throw new Error("项目或运行服务已变化，尚未运行初始化。");
+      const threadId = await ensureThread();
+      if (!isCodexOperationScopeCurrent(scope)) throw new Error("运行服务已变化，尚未运行初始化。");
+      await codexService.turnStart(threadId, initPrompt);
     },
   },
   {
@@ -242,12 +259,6 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     },
   },
   {
-    id: "ide",
-    title: "IDE 上下文",
-    description: "包含当前选择、打开的文件以及其他来自你的 IDE 的上下文",
-    run: ({ openDialog }) => openDialog("ide"),
-  },
-  {
     id: "personality",
     title: "个性",
     description: "切换亲和友善或务实",
@@ -261,39 +272,92 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   },
 ];
 
-export async function forkSlashLocal(threadId: string) {
-  const forked = await codexService.threadFork(threadId);
+export async function forkSlashLocal(threadId: string, label?: string) {
+  const scope = captureCodexOperationScope();
+  const selected = useCodexStore.getState().currentThreadId;
+  const workspace = useWorkspaceStore.getState().cwd;
+  const cwd = useCodexStore.getState().threads.find(thread => thread.id === threadId)?.cwd ?? workspace;
+  if (!cwd) throw new Error("无法确认原会话目录，尚未创建分支。");
+  const transaction = executionIntentId();
+  const executionContext=await readExecutionContext();
+  if(!isCodexOperationScopeCurrent(scope))throw new Error("连接或账号已变化，尚未创建分支。");
+  beginExecution({ id: transaction, scope: executionContext.domain, root: cwd, kind: "fork", sourceThreadId: threadId });
+  let forked: Awaited<ReturnType<typeof codexService.threadFork>>;
+  try {
+    updateExecution(transaction, { phase: "native", cwd });
+    forked = await codexService.threadFork(threadId, { activate: false,expectedScope:executionContext.scopeToken });
+    if (!isCodexOperationScopeCurrent(scope)) throw new Error("连接或账号已变化，请核对原连接中的分支，勿重复创建。");
+    updateExecution(transaction, { phase: "completed", cwd: forked.cwd, threadId: forked.id });
+  } catch (error) {
+    updateExecution(transaction, { phase: "unknown", error: error instanceof Error ? error.message : String(error) });
+    throw error;
+  }
+  const activate = selected === threadId && useCodexStore.getState().currentThreadId === selected && useWorkspaceStore.getState().cwd === workspace;
+  const projected = lightweightThreadForStore({ ...forked, turns: forked.turns ?? [], ...(label ? { name: label, preview: label } : {}) });
+  if (label) useSessionNameStore.getState().setName("codex", forked.id, label);
+  useCodexStore.setState(state => ({ threads: [projected, ...state.threads.filter(thread => thread.id !== forked.id)] }));
   useAgentCenterStore.getState().addAgentCard(
     {
       kind: "codex",
       id: forked.id,
       cwd: forked.cwd,
-      preview: forked.name || "会话分支",
+      preview: label || forked.name || "会话分支",
     },
-    { activate: true },
+    { activate },
   );
-  useCodexStore.getState().setCurrentThreadId(forked.id);
+  if (activate) useCodexStore.getState().setCurrentThreadId(forked.id);
   return forked.id;
 }
 
 export async function forkSlashWorktree(threadId: string) {
-  const cwd = useWorkspaceStore.getState().cwd;
+  const state = useCodexStore.getState();
+  const cwd = state.threads.find((thread) => thread.id === threadId)?.cwd ??
+    (state.currentThreadId === threadId ? useWorkspaceStore.getState().cwd : null);
   if (!cwd) throw new Error("先选择项目，再创建工作树分支。");
-  const key = `slash-${threadId.slice(0, 8)}-${Date.now().toString(36)}`;
-  const worktree = await gitCreateWorktree(cwd, key);
-  const forked = await codexService.threadFork(threadId);
-  useWorkspaceStore.getState().setCwd(worktree.worktree_path);
+  const scope = captureCodexOperationScope();
+  const selectedBefore = state.currentThreadId;
+  const workspaceBefore = useWorkspaceStore.getState().cwd;
+  const key = executionIntentId(), selection = executionSelection(cwd);
+  const executionContext=await readExecutionContext();
+  if(!isCodexOperationScopeCurrent(scope))throw new Error("连接或账号已变化，尚未创建工作树。");
+  beginExecution({id:key,scope:executionContext.domain,root:cwd,kind:"fork",sourceThreadId:threadId,preparation:{mode:"worktree",environmentId:selection.environmentId,environmentVersion:selection.environmentVersion}});
+  let worktree: Awaited<ReturnType<typeof gitCreateWorktree>>;
+  let forked: Awaited<ReturnType<typeof codexService.threadFork>>;
+  try {
+    updateExecution(key,{phase:"worktree"});
+    worktree = selection.baseBranch ? await gitCreateWorktree(cwd,key,{baseBranch:selection.baseBranch}) : await gitCreateWorktree(cwd,key);
+    updateExecution(key,{cwd:worktree.worktree_path});
+    if (!isCodexOperationScopeCurrent(scope)) throw new Error("连接或账号已变化，已创建的工作树保留，请核对原连接后再创建会话。");
+    if (selection.environmentId) {
+      if (!selection.runSetup) throw new Error("请先在工作环境中确认设置命令。");
+      updateExecution(key,{phase:"setup"});
+      const setup = await runLocalEnvironment(cwd,{cwd:worktree.worktree_path,id:selection.environmentId,version:selection.environmentVersion,intentId:key,confirmed:true});
+      if(setup.status!=="completed") throw new Error("设置命令未成功完成，请核对工作树；不会自动重复执行。");
+    }
+    if (!isCodexOperationScopeCurrent(scope)) throw new Error("连接或账号已变化，已创建的工作树保留，请先核对原连接。");
+    await verifyExecutionContext(executionContext);
+    updateExecution(key,{phase:"native"});
+    forked = await codexService.threadFork(threadId, { cwd: worktree.worktree_path, activate: false,expectedScope:executionContext.scopeToken });
+    updateExecution(key,{phase:"completed",cwd:forked.cwd,threadId:forked.id});
+  } catch(error) {
+    updateExecution(key,{phase:"unknown",error:error instanceof Error?error.message:String(error)});
+    throw error;
+  }
+  const activate = selectedBefore === threadId &&
+    useCodexStore.getState().currentThreadId === selectedBefore &&
+    useWorkspaceStore.getState().cwd === workspaceBefore;
+  if (activate) useWorkspaceStore.getState().setCwd(forked.cwd);
   useAgentCenterStore.getState().addAgentCard(
     {
       kind: "codex",
       id: forked.id,
-      cwd: worktree.worktree_path,
+      cwd: forked.cwd,
       worktreePath: worktree.worktree_path,
       preview: forked.name || "工作树分支",
     },
-    { activate: true },
+    { activate },
   );
-  useCodexStore.getState().setCurrentThreadId(forked.id);
+  if (activate) useCodexStore.getState().setCurrentThreadId(forked.id);
   return forked.id;
 }
 

@@ -1,4 +1,4 @@
-import { getJson, postNoContent } from './shared';
+import { getJsonWithOptions, postNoContent } from "./shared";
 
 export interface SettingsFile {
   version?: number;
@@ -10,10 +10,17 @@ export interface SettingsFile {
   [key: string]: unknown;
 }
 
-export async function fetchRemoteSettings(): Promise<SettingsFile> {
-  return getJson<SettingsFile>('/api/settings');
+export async function fetchRemoteSettings(options?: {
+  signal?: AbortSignal;
+}): Promise<SettingsFile> {
+  return getJsonWithOptions<SettingsFile>("/api/settings", {
+    ...options,
+    suppressToast: true,
+  });
 }
 
-export async function saveRemoteSettings(settings: SettingsFile): Promise<void> {
-  return postNoContent('/api/settings', settings);
+export async function saveRemoteSettings(
+  settings: SettingsFile,
+): Promise<void> {
+  return postNoContent("/api/settings", settings);
 }

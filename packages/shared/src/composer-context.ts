@@ -5,6 +5,9 @@ export interface ComposerContext {
   name: string;
   text: string;
   path?: string;
+  sourceKind?: "file" | "directory";
+  workspaceRoot?: string;
+  version?: string;
   range?: { start: number; end: number };
   sourceThreadId?: string;
   sourceItemId?: string;
@@ -12,7 +15,7 @@ export interface ComposerContext {
 
 export function composeContextText(text: string, contexts: ComposerContext[] = []): string {
   return [text, ...contexts.map((item) => {
-    const label = item.kind === "paste" ? "粘贴的文本" : item.kind === "quote" ? "引用的回答" : "文件快照";
+    const label = item.kind === "paste" ? "粘贴的文本" : item.kind === "quote" ? "引用的回答" : item.sourceKind === "directory" ? "目录引用（当前层级快照）" : "文件快照";
     const source = item.path ?? item.sourceThreadId;
     const fence = "`".repeat(Math.max(3, ...(item.text.match(/`+/g) ?? []).map(s => s.length + 1)));
     return `[${label}：${item.name}${source ? ` · ${source}` : ""}${item.range ? `:${item.range.start}-${item.range.end}` : ""}]\n${fence}\n${item.text}\n${fence}`;

@@ -1,105 +1,31 @@
 import { expect, test } from "@playwright/test";
 import { installSessionUxFixture, seedSessionUx } from "./session-ux-fixture";
+import { setupAcpNewConnectionFailure } from "./session-acp-running-fixture";
 
-test("running ACP tasks require explicit interruption and cancel remains usable on mobile", async ({
-  page,
-}) => {
-  const errors: string[] = [];
-  page.on("pageerror", (error) => errors.push(error.message));
-  await installSessionUxFixture(page, 1);
-  const operations: Array<{ path: string; body: unknown }> = [];
-  await page.route("**/api/**/acp/**", async (route) => {
-    const request = route.request();
-    const path = new URL(request.url()).pathname;
-    if (request.method() === "POST")
-      operations.push({ path, body: request.postDataJSON() });
-    const json = path.endsWith("/agents")
-      ? [
-          {
-            id: "fixture-agent",
-            name: "测试 Agent",
-            command: "fixture",
-            args: [],
-            env: {},
-            available: false,
-          },
-        ]
-      : path.endsWith("/sessions")
-        ? []
-        : path.endsWith("/new-session")
-          ? { sessionId: "new-confirmed-session" }
-          : {};
-    await route.fulfill({ json });
-  });
-  await page.goto("/?mode=session");
-  await page.locator(".session-mode [contenteditable=true]").first().waitFor();
-  await seedSessionUx(page, 1);
-  await page.evaluate(async () => {
-    const { useAcpStore } = await import(
-      performance
-        .getEntriesByType("resource")
-        .findLast(
-          (e) =>
-            new URL(e.name).pathname ===
-            "/src/session-mode/stores/useAcpStore.ts",
-        )?.name ?? "/src/session-mode/stores/useAcpStore.ts"
-    );
-    useAcpStore.setState({
-      active: true,
-      agentId: "fixture-agent",
-      agentTitle: "测试 Agent",
-      connectionId: "owned-connection",
-      sessionId: "running-session",
-      running: true,
-      connecting: false,
-    });
-  });
+test("new chat leaves a running ACP task untouched on desktop and mobile", async ({ page }, testInfo) => {
+  const { calls, errors } = await setupAcpNewConnectionFailure(page);
+  const editor = page.getByRole("textbox", { name: "ACP 消息输入" });
+  await editor.fill("两种尺寸都保留的草稿");
+  let attempts = 0;
   for (const width of [1440, 320]) {
     await page.setViewportSize({ width, height: 1000 });
     if (width < 768) {
       await page.getByRole("button", { name: "更多功能", exact: true }).click();
       await page.getByRole("menuitem", { name: "新聊天", exact: true }).click();
-    } else {
-      await page.keyboard.press("Control+n");
-    }
-    const dialog = page.getByRole("dialog", {
-      name: "中断当前任务并新建会话？",
-    });
-    await expect(dialog).toBeVisible();
-    await expect(
-      dialog.getByRole("button", { name: "取消", exact: true }),
-    ).toBeInViewport();
-    await expect(
-      dialog.getByRole("button", { name: "中断并新建", exact: true }),
-    ).toBeInViewport();
-    expect(
-      operations.filter((op) => /\/(cancel|new-session|stop)$/.test(op.path)),
-    ).toEqual([]);
-    await page.screenshot({
-      animations: "disabled",
-      path: `.dev-runtime/ui-ux-audit-20261007/verified-confirmation-${width}.png`,
-    });
-    await dialog.getByRole("button", { name: "取消", exact: true }).click();
-    await expect(dialog).toHaveCount(0);
+    } else await page.keyboard.press("Control+n");
+    await expect.poll(() => calls.filter((call) => call.path.endsWith("/start")).length).toBe(++attempts);
+    await expect.poll(() => page.evaluate(() => (window as any).acpFixtureStore.getState().sessionTransition)).toBeNull();
+    await expect(page.getByRole("dialog", { name: "中断当前任务并新建会话？" })).toHaveCount(0);
+    await expect(editor).toHaveValue("两种尺寸都保留的草稿");
+    await expect(page.getByRole("button", { name: "停止生成", exact: true })).toBeInViewport();
+    expect(calls.filter((call) => /\/(cancel|new-session|stop)$/.test(call.path))).toEqual([]);
+    expect(await page.evaluate(() => {
+      const s = (window as any).acpFixtureStore.getState();
+      return { connectionId: s.connectionId, sessionId: s.sessionId, historySessionId: s.historySessionId, running: s.running };
+    })).toEqual({ connectionId: "fixture-connection", sessionId: "fixture-running", historySessionId: "acph_fixture_owner_a", running: true });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ animations: "disabled", path: testInfo.outputPath(`acp-new-connection-failure-${width}.png`) });
   }
-  await page.getByRole("button", { name: "更多功能", exact: true }).click();
-      await page.getByRole("menuitem", { name: "新聊天", exact: true }).click();
-  await page.getByRole("button", { name: "中断并新建", exact: true }).click();
-  await expect
-    .poll(
-      () => operations.filter((op) => op.path.endsWith("/new-session")).length,
-    )
-    .toBe(1);
-  expect(operations.filter((op) => op.path.endsWith("/cancel"))).toEqual([
-    {
-      path: "/api/session/api/acp/cancel",
-      body: {
-        connection_id: "owned-connection",
-        session_id: "running-session",
-      },
-    },
-  ]);
-  expect(operations.some((op) => op.path.endsWith("/stop"))).toBe(false);
   expect(errors).toEqual([]);
 });
 

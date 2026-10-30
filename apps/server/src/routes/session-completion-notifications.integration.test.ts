@@ -50,6 +50,13 @@ test("session Codex completion sends from the backend without a browser and resu
     const url = new URL(request.url!, "http://localhost");
     if (url.pathname === "/health")
       return void response.end(JSON.stringify({ instance: "native-instance" }));
+    if (url.pathname === "/api/internal/codex/operation-context")
+      return void response.end(
+        JSON.stringify({
+          scope: "completion-scope",
+          namespace: "completion-namespace",
+        }),
+      );
     if (url.pathname === "/api/events") {
       const since = url.searchParams.get("since");
       cursors.push(since);
@@ -75,6 +82,7 @@ test("session Codex completion sends from the backend without a browser and resu
             cwd: root,
             source: "appServer",
             parentThreadId: null,
+            status: { type: "idle" },
             turns,
           },
         }),
@@ -82,8 +90,19 @@ test("session Codex completion sends from the backend without a browser and resu
     } else if (url.pathname === "/api/codex/thread/turns/list") {
       reads.push(body);
       response.end(
-        JSON.stringify({ data: [...turns].reverse(), nextCursor: null }),
+        JSON.stringify({
+          data: [...turns].reverse().slice(0, body.limit ?? 50),
+          nextCursor: null,
+        }),
       );
+    } else if (url.pathname === "/api/codex/thread/loaded/list") {
+      response.end(
+        JSON.stringify({ data: ["native-thread"], nextCursor: null }),
+      );
+    } else if (url.pathname === "/api/codex/thread/queue/list") {
+      response.end(JSON.stringify({ data: [], nextCursor: null }));
+    } else if (url.pathname === "/api/codex/thread/goal/get") {
+      response.end(JSON.stringify({ goal: null }));
     } else if (url.pathname === "/api/codex/thread/list") {
       response.end(JSON.stringify({ data: [], nextCursor: null }));
     } else if (url.pathname === "/api/internal/codex/queue-holds")
@@ -165,14 +184,21 @@ test("a trusted native completion card reply starts the original session once an
   const root = await mkdtemp(join(tmpdir(), "kanban-native-reply-"));
   const streams = new Set<ServerResponse>();
   const starts: any[] = [];
+  const queued: any[] = [],
+    adds: any[] = [],
+    unexpectedWrites: string[] = [];
   const notices: any[] = [];
   const turns: any[] = [];
   let status = "idle";
+  let scope = "reply-scope",
+    namespace = "reply-namespace";
   let sequence = 0;
   const runtime = createServer(async (request, response) => {
     const url = new URL(request.url!, "http://localhost");
     if (url.pathname === "/health")
       return void response.end(JSON.stringify({ instance: "reply-runtime" }));
+    if (url.pathname === "/api/internal/codex/operation-context")
+      return void response.end(JSON.stringify({ scope, namespace }));
     if (url.pathname === "/api/events") {
       response.writeHead(200, { "content-type": "text/event-stream" });
       response.write(": ready\n\n");
@@ -198,18 +224,44 @@ test("a trusted native completion card reply starts the original session once an
       response.end(JSON.stringify({ thread }));
     else if (url.pathname === "/api/codex/thread/turns/list")
       response.end(
-        JSON.stringify({ data: [...turns].reverse(), nextCursor: null }),
+        JSON.stringify({
+          data: [...turns].reverse().slice(0, body.limit ?? 50),
+          nextCursor: null,
+        }),
       );
+    else if (url.pathname === "/api/codex/thread/loaded/list")
+      response.end(
+        JSON.stringify({ data: ["native-thread"], nextCursor: null }),
+      );
+    else if (url.pathname === "/api/codex/thread/queue/list")
+      response.end(JSON.stringify({ data: queued, nextCursor: null }));
+    else if (url.pathname === "/api/codex/thread/goal/get")
+      response.end(JSON.stringify({ goal: null }));
     else if (url.pathname === "/api/codex/thread/list")
       response.end(JSON.stringify({ data: [thread], nextCursor: null }));
     else if (url.pathname === "/api/internal/codex/queue-holds")
       response.end("{}");
-    else if (url.pathname === "/api/codex/turn/start") {
-      starts.push(body);
-      status = "active";
-      response.end(
-        JSON.stringify({ turn: { id: `reply-turn-${starts.length}` } }),
-      );
+    else if (url.pathname === "/api/internal/codex/guarded-queue") {
+      assert.equal(body.expectedScope, scope);
+      if (body.method === "thread/settings/update")
+        return void response.end("{}");
+      if (body.method !== "thread/queue/add") {
+        unexpectedWrites.push(body.method);
+        return void response.writeHead(400).end();
+      }
+      const row = {
+        id: `official-${adds.length + 1}`,
+        clientUserMessageId: body.params.clientUserMessageId,
+        input: body.params.input,
+      };
+      adds.push(body.params);
+      queued.push(row);
+      if (status === "idle") {
+        queued.shift();
+        starts.push(body.params);
+        status = "active";
+      }
+      response.end(JSON.stringify({ queuedSubmission: row }));
     } else response.writeHead(404).end();
   });
   await new Promise<void>((r) => runtime.listen(0, "127.0.0.1", r));
@@ -334,7 +386,9 @@ test("a trusted native completion card reply starts the original session once an
       })
     ).json();
     assert.equal(
-      queued.items.find((item: any) => item.id === "feishu:om_reply2").status,
+      queued.items.find(
+        (item: any) => item.nativeClientUserMessageId === "feishu:om_reply2",
+      ).status,
       "queued",
     );
     await fixture.app.close();
@@ -346,6 +400,52 @@ test("a trusted native completion card reply starts the original session once an
       "native-thread",
     );
     assert.equal(starts.length, 1);
+    assert.equal(
+      adds.length,
+      2,
+      "trusted reply replay must never re-add an accepted native message",
+    );
+    assert.deepEqual(unexpectedWrites, []);
+    assert.equal(
+      fixture.bindings.resolve("om_reply2")?.sessionModeScope,
+      "reply-scope",
+    );
+    assert.equal(
+      fixture.bindings.resolve("om_reply2")?.sessionModeNamespace,
+      "reply-namespace",
+    );
+    // A new account may expose the same UUID. Neither a fresh current context
+    // nor same-valued account metadata may re-authorize the older card.
+    for (const next of [
+      { scope: "changed-account-scope", namespace: "another-account" },
+      { scope: "same-account-new-revision", namespace: "reply-namespace" },
+      { scope: "new-runtime-scope", namespace: "reply-namespace" },
+    ]) {
+      scope = next.scope;
+      namespace = next.namespace;
+      await assert.rejects(
+        fixture.service.handle({ ...event, message_id: "om_refused_" + scope }),
+        /目标会话不可用/,
+      );
+      assert.equal(adds.length, 2);
+      assert.equal(starts.length, 1);
+    }
+    fixture.bindings.record({
+      sessionId: "session-codex:native-thread",
+      sessionModeThreadId: "native-thread",
+      completionId: "legacy",
+      messages: [{ messageId: "om_legacy", chatId: "oc_private" }],
+    });
+    assert.equal(
+      await fixture.service.handle({
+        ...event,
+        message_id: "om_legacy_reply",
+        reply_to: "om_legacy",
+        root_id: "om_legacy",
+      }),
+      "ignored_unavailable",
+    );
+    assert.equal(adds.length, 2);
   } finally {
     await fixture.app.close();
     for (const stream of streams) stream.end();

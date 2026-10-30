@@ -121,3 +121,39 @@ it("runtime boundary immediately clears the previous quota and discards reads al
   await act(async () => current({ ...response, rateLimitsByLimitId: {} }));
   expect(screen.queryByText("gpt-special")).toBeNull();
 });
+
+it("clears former-device quota immediately and rejects old reads when only pairing credentials change", async () => {
+  const { usePairingStore } = await import("@session/stores/usePairingStore");
+  usePairingStore.setState({
+    selectedHost: "same-host",
+    desktops: [
+      { host: "same-host", port: 3000, token: "old-device", name: "fixture" },
+    ],
+  });
+  let finish!: (value: GetAccountRateLimitsResponse) => void;
+  const api = {
+    readAccount: vi.fn().mockResolvedValue(account),
+    readRateLimits: vi
+      .fn()
+      .mockResolvedValueOnce(response)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      ),
+  };
+  render(<NativeCodexUsage api={api} />);
+  await screen.findByText('accountUsage.remaining{"percent":77}');
+  act(() =>
+    usePairingStore.setState({
+      desktops: [
+        { host: "same-host", port: 3000, token: "new-device", name: "fixture" },
+      ],
+    }),
+  );
+  expect(screen.queryByText('accountUsage.remaining{"percent":77}')).toBeNull();
+  await waitFor(() => expect(api.readRateLimits).toHaveBeenCalledTimes(2));
+  await act(async () => finish({ ...response, rateLimitsByLimitId: {} }));
+  expect(screen.queryByText('accountUsage.remaining{"percent":77}')).toBeNull();
+});

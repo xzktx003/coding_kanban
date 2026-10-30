@@ -1,7 +1,7 @@
 import {
   classifySubagentThread,
   type SubagentThread,
-} from "@agent-orchestrator/shared";
+} from "@agent-orchestrator/shared/session-subagents";
 import { useCodexStore } from "@session/components/codex/stores";
 import { MutationNotStartedError } from "@session/services/MutationNotStartedError";
 import { useSubagentStore } from "./store";

@@ -19,8 +19,8 @@ vi.mock("./apiAdapt/shared", async (original) => ({
   ...(await original<object>()),
   postJsonWithOptions: api.postJsonWithOptions,
 }));
-vi.mock("./apiAdapt", () => api);
 vi.mock("./apiAdapt/codex", () => ({
+  ...api,
   threadAccess: vi.fn(async () => ({ state: "owned", generation: 1 })),
 }));
 
@@ -108,3 +108,4 @@ it("rechecks the captured settings after asynchronous authority checks before pu
   expect(api.postJsonWithOptions).not.toHaveBeenCalled();
   expect(useCodexDeliveryStore.getState().entries).toEqual({});
 });
+vi.mock("./nativeOperationContext", () => ({ readNativeOperationContext: vi.fn(async () => ({ scopeToken: "fixture-runtime-scope", namespace: "fixture-history" })) }));

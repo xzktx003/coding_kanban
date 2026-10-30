@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 import type { ServerNotification } from "@session/bindings";
+import { projectCodexChatValue } from "@agent-orchestrator/shared";
 import {
   completedTurnChanges,
   aggregateFileChanges,
@@ -105,4 +106,47 @@ it("retains unloaded file metadata through completion and aggregation without tr
   expect(aggregateFileChanges([projected, change])[0]).not.toHaveProperty(
     "transcriptMetadataOnly",
   );
+});
+
+it("keeps the gateway-projected large file diff unloaded through completed-turn aggregation", () => {
+  const rawChange = {
+    path: "/project/large.py",
+    kind: { type: "update" as const, move_path: null },
+    diff: `--- a/large.py\n+++ b/large.py\n${"+large-body-line\n".repeat(1800)}`,
+  };
+  const sourceItem = {
+    id: "large-patch",
+    type: "fileChange",
+    status: "completed",
+    changes: [rawChange],
+  };
+  const itemEvent = projectCodexChatValue({
+    method: "item/completed",
+    params: { threadId: "own", turnId: "turn", item: sourceItem },
+  }) as ServerNotification;
+  const completion = projectCodexChatValue({
+    method: "turn/completed",
+    params: {
+      threadId: "own",
+      turn: { id: "turn", status: "completed", items: [sourceItem] },
+    },
+  }) as ServerNotification;
+  const turn = (completion.params as any).turn;
+  const result = completedTurnChanges("own", "turn", turn.items, {
+    events: [itemEvent, completion],
+    eventIndex: 1,
+  });
+  expect(result.changes).toMatchObject([
+    {
+      path: "/project/large.py",
+      diff: "",
+      transcriptMetadataOnly: true,
+      addedCount: 0,
+      removedCount: 0,
+    },
+  ]);
+  expect(result.batches[0].changes[0]).toMatchObject({
+    diff: "",
+    transcriptMetadataOnly: true,
+  });
 });

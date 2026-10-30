@@ -48,7 +48,10 @@ async function setup(
     poisonedRoot?: boolean;
   } = {},
 ) {
-  const fixture = await installSessionUxFixture(page, 2),
+  const children: any[] = [];
+  const fixture = await installSessionUxFixture(page, 2, {
+      nativeThreads: () => children,
+    }),
     calls: any[] = [];
   const errorEvents: Array<{ text: string; at: number; kind: string }> = [],
     navigationAborts: number[] = [];
@@ -150,7 +153,7 @@ async function setup(
       );
     });
   }
-  const children: any[] = [
+  children.push(
     {
       id: "child-atlas",
       parentThreadId: "ux-0",
@@ -205,7 +208,7 @@ async function setup(
       cwd: fixture.threads[0].cwd,
       turns: [{ id: "echo-turn", status: "completed", items: [] }],
     },
-  ];
+  );
   for (const child of children)
     child.source = {
       subAgent: { thread_spawn: { parent_thread_id: child.parentThreadId } },

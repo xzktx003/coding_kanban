@@ -80,6 +80,21 @@ test("status and literal staging preserve spaces, newlines, wildcards and index 
   await assert.rejects(lstat(join(cwd, special)));
 });
 
+test("unknown preparation can inspect a fixed worktree intent without creating or deleting directories", async t => {
+  const {cwd,service,git}=await fixture(t);
+  const absent=await service.inspectWorktree(cwd,"fixed-intent");
+  assert.equal(absent.state,"missing");
+  await assert.rejects(lstat(absent.worktree_path));
+  const created=await service.createWorktree(cwd,"fixed-intent");
+  const result=await service.inspectWorktree(cwd,"fixed-intent");
+  assert.equal(result.state,"registered");
+  assert.equal(result.worktree_path,created.worktree_path);
+  assert.equal(result.head,git("rev-parse","HEAD").trim());
+  await writeFile(join(created.worktree_path,"preserve.txt"),"preserved");
+  assert.equal((await service.inspectWorktree(cwd,"fixed-intent")).dirty,true);
+  assert.equal(await readFile(join(created.worktree_path,"preserve.txt"),"utf8"),"preserved");
+});
+
 test("unborn branch, binary/meta, symlink and input safety", async (t) => {
   const { cwd, service, dir } = await fixture(t, false);
   await writeFile(join(cwd, "b"), Buffer.from([0, 255, 1]));
@@ -359,4 +374,15 @@ test("shared clone preserves existing destinations and rejects unsafe transport 
     /url|transport/i,
   );
   assert.equal(await readFile(join(unknown, "keep"), "utf8"), "safe");
+});
+
+test("new independent worktree can pin a verified base branch without checking out the source",async(t)=>{
+ const {service,cwd,git}=await fixture(t);
+ git("branch","base-for-task");
+ await writeFile(join(cwd,"new.txt"),"second commit");git("add","new.txt");git("commit","-m","next");
+ const created=await service.createWorktree(cwd,"base-task",{baseBranch:"base-for-task"});
+ assert.equal(git("rev-parse","--abbrev-ref","HEAD").trim(),"main");
+ const actual=execFileSync("git",["rev-parse","HEAD"],{cwd:created.worktree_path,encoding:"utf8"});
+ assert.equal(actual,git("rev-parse","base-for-task"));
+ await assert.rejects(service.createWorktree(cwd,"bad-base",{baseBranch:"--upload-pack=bad"}));
 });

@@ -97,9 +97,6 @@ it("does not ask while the permission mode is still unconfirmed", () => {
   ).toBe(false);
 });
 
-it("steps down to the permission mode our own menu offers as its default row", () => {
-  // Official reads a stored preferred-non-full-access mode; we have no such
-  // preference, so the fallback must be a mode the permission menu can itself
-  // produce, or a refresh would show a combination no menu row can create.
-  expect(ULTRA_FALLBACK_SANDBOX).toBe("workspace-write");
+it("does not invent a host restricted-mode preference", () => {
+  expect(ULTRA_FALLBACK_SANDBOX).toBeNull();
 });

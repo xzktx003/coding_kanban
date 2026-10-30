@@ -14,6 +14,8 @@ import { ResultCard } from './ResultCard';
 import { SystemInitCard } from './SystemInitCard';
 import { UserMessage } from './UserMessage';
 import { safeStringify } from './utils';
+import { ProviderHistoryDetail } from '@session/components/history/ProviderHistoryDetail';
+import { isHistorySourceScopeCurrent } from '@session/components/history/historySourceScope';
 
 interface CCMessageProps {
   message: CCMessageType;
@@ -21,26 +23,43 @@ interface CCMessageProps {
   inlineErrors?: Record<string, ToolResultBlock>;
   /** Every tool result for this message, keyed by tool_use_id. */
   toolResults?: Record<string, ToolResultBlock>;
+  detailVisible?: boolean;
 }
 
 const isToolBlock = (b: { type: string }) => b.type === 'tool_use' || b.type === 'tool_result';
 
-export function CCMessage({
+export function CCMessage(props: CCMessageProps) {
+  const msg = props.message;
+  const history = msg.type === 'user' || msg.type === 'assistant' ? msg : null;
+  return <>
+    <CCMessageBody {...props} />
+    {history?.truncated && (history.historyDetail && history.session_id
+      ? <ProviderHistoryDetail provider="cc" sessionId={history.session_id} itemId={history.historyDetail.itemId} images={history.historyImages} active={props.detailVisible} sourceRow={history} sourceOwner={`cc:${history.session_id}`} onConfirmSource={async (scope, signal, cursor) => {
+          const { refreshClaudeHistory } = await import('@session/services/followedSessionAuxSync');
+          if (signal.aborted || !isHistorySourceScopeCurrent(scope)) throw new Error('连接已变化，请重新核对消息来源。');
+          await refreshClaudeHistory(history.session_id!, signal, 'interactive', cursor);
+        }} />
+      : <p className="py-1 text-xs text-muted-foreground">此消息仅显示预览，完整内容暂不可读取。</p>)}
+  </>;
+}
+
+function CCMessageBody({
   message: msg,
   index: idx,
   inlineErrors,
   toolResults,
+  detailVisible,
 }: CCMessageProps) {
   const { showPermissionCards } = useCCSettingsStore();
   const { updateMessage } = useCCStore();
 
   const handleResolvePermission = async (requestId: string, decision: PermissionDecision) => {
-    const { ccResolvePermission } = await import('@session/services');
+    const { resolveClaudePermission } = await import('@session/services/resolveClaudePermission');
     try {
-      await ccResolvePermission(requestId, decision);
-      updateMessage(idx, { resolved: decision } as any);
+      await resolveClaudePermission(requestId, decision);
     } catch (err) {
       console.error('Failed to resolve permission:', err);
+      throw err;
     }
   };
 
@@ -86,8 +105,20 @@ export function CCMessage({
     }
 
     case 'user': {
-      if (msg.text) {
-        return <UserMessage text={msg.text} />;
+      const text = msg.text ?? msg.content?.filter((block): block is { type: 'text'; text: string } => block.type === 'text').map(block => block.text).join('\n') ?? '';
+      const images = msg.content?.flatMap(block => {
+        if (block.type !== 'image') return [];
+        const source = block.source;
+        if (!source || typeof source !== 'object') return [];
+        if (source.type === 'base64') return typeof source.data === 'string' && ['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(source.media_type) ? [`data:${source.media_type};base64,${source.data}`] : [];
+        if (source.type !== 'url' || typeof source.url !== 'string') return [];
+        try {
+          const url = new URL(source.url, window.location.origin);
+          return ['http:', 'https:'].includes(url.protocol) ? [url.href] : [];
+        } catch { return []; }
+      }) ?? [];
+      if (text || images.length) {
+        return <UserMessage text={text} images={images} />;
       }
       const errors = msg.content?.filter((b) => isToolResultBlock(b) && b.is_error) ?? [];
       if (errors.length === 0) return null;
@@ -97,7 +128,7 @@ export function CCMessage({
 
     case 'permission_request':
       if (!showPermissionCards) return null;
-      return <PermissionRequestCard msg={msg} onResolve={handleResolvePermission} />;
+      return <PermissionRequestCard msg={msg} onResolve={handleResolvePermission} active={detailVisible} />;
 
     case 'system':
       return msg.subtype === 'init' ? <SystemInitCard msg={msg} /> : null;

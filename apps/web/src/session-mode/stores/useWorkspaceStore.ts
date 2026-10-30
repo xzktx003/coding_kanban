@@ -1,3 +1,4 @@
+import { sessionWindowStorageName } from "@session/services/sessionWindowContext";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { createDeduplicatedJSONStorage } from "../lib/deduplicatedStorage";
@@ -6,7 +7,7 @@ import {
   applyProjectAction,
   type ProjectAction,
   type SharedProjects,
-} from "@agent-orchestrator/shared";
+} from "@agent-orchestrator/shared/session-projects";
 import { useEditorStore } from "./useEditorStore";
 import {
   acknowledgeProjectOperations,
@@ -287,7 +288,7 @@ export const useWorkspaceStore = create<WorkspaceStore>()(
       },
     }),
     {
-      name: "kanban.session.workspace",
+      name: sessionWindowStorageName("kanban.session.workspace"),
       storage: createDeduplicatedJSONStorage(),
       version: 1,
       partialize: (state) => ({

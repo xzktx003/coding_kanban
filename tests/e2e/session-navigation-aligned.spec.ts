@@ -20,7 +20,10 @@ test("approved navigation A aligns project and session surfaces and preserves in
   const editor = page.locator('.session-agent-view [contenteditable=true]').first();
   await editor.fill("A 版布局验收草稿");
   const align = async () => {
-    await expect.poll(async () => Math.abs((await sidebar.boundingBox())!.y - (await header.boundingBox())!.y)).toBeLessThanOrEqual(1);
+    await expect.poll(async () => {
+      const sidebarBox = await sidebar.boundingBox(), headerBox = await header.boundingBox();
+      return sidebarBox && headerBox ? Math.abs(sidebarBox.y - headerBox.y) : Infinity;
+    }).toBeLessThanOrEqual(1);
     expect((await header.boundingBox())!.height).toBe(48);
   };
   await align();
@@ -96,7 +99,7 @@ test('compact navigation exposes full titles, quiet actions, themed portals and 
   const key = await selected.getAttribute('data-tab-key');
   await rows.nth(1).hover();
   await rows.nth(1).getByRole('button', { name: '会话操作', exact: true }).click();
-  await expect(page.getByRole('menuitem', { name: 'Rename', exact: true })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: '重命名', exact: true })).toBeVisible();
   expect(await selected.getAttribute('data-tab-key')).toBe(key);
   await page.keyboard.press('Escape');
   await rows.first().locator('.session-row-title').focus();

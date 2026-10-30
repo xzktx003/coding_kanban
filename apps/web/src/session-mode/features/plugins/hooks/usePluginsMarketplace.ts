@@ -6,27 +6,24 @@ import type {
   PluginSummary,
 } from "@session/bindings/v2";
 import { pluginNotice as toast } from "../pluginNotices";
-import { pluginInstall, pluginList, pluginRead } from "@session/services";
+import { pluginList, pluginRead } from "@session/services";
 import { usePluginsViewContext } from "../hooks";
 import {
   dedupePluginEntries,
   type PluginEntry,
   pluginRequestTarget,
   preferredLocalSources,
+  pluginEntryKey,
+  assertPluginDetailTarget,
 } from "./pluginTargets";
-import { useExternalUrl } from "./useExternalUrl";
-import { invalidatePluginCapabilities } from "../pluginInputs";
+import {
+  capturePluginScope,
+  isPluginScopeCurrent,
+  readPluginCatalogCache,
+  savePluginCatalogCache,
+  usePluginCatalogRevision,
+} from "../pluginScope";
 import { tryPluginInComposer } from "../pluginNavigation";
-
-/**
- * Process-wide cache of the last plugin/list result, so re-entering the view
- * (or coming back from a detail page) renders instantly instead of refetching
- * the remote catalog.
- */
-let listCache: {
-  marketplaces: PluginMarketplaceEntry[];
-  errors: MarketplaceLoadErrorInfo[];
-} | null = null;
 
 /** Build a placeholder detail from a list summary so the detail page can render immediately. */
 function summaryToDetail(
@@ -54,18 +51,25 @@ function summaryToDetail(
  * The component passes an optional `refreshTrigger` prop; changing it forces a reload.
  */
 export function usePluginsMarketplace(refreshTrigger = 0) {
+  const revision = usePluginCatalogRevision(),
+    cached = readPluginCatalogCache();
   const [marketplaces, setMarketplaces] = useState<PluginMarketplaceEntry[]>(
-    listCache?.marketplaces ?? [],
+    cached?.marketplaces ?? [],
   );
   const [errors, setErrors] = useState<MarketplaceLoadErrorInfo[]>(
-    listCache?.errors ?? [],
+    cached?.errors ?? [],
   );
-  const [isLoading, setIsLoading] = useState(!listCache);
+  const [isLoading, setIsLoading] = useState(!cached);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const requestVersion = useRef(0);
+  const requestVersion = useRef(0),
+    detailVersion = useRef(0),
+    detailRead = useRef<AbortController | null>(null);
+  const domain = useRef(capturePluginScope());
   useEffect(
     () => () => {
       requestVersion.current++;
+      detailVersion.current++;
+      detailRead.current?.abort();
     },
     [],
   );
@@ -74,49 +78,51 @@ export function usePluginsMarketplace(refreshTrigger = 0) {
   );
   const [query, setQuery] = useState("");
 
-  const { handlePluginDetail } = usePluginsViewContext();
-  const { openExternalUrl } = useExternalUrl();
+  const { handlePluginDetail, handlePluginDetailError, handlePluginInstall } =
+    usePluginsViewContext();
 
   const loadPlugins = useCallback(async (forceRefetch = false) => {
-    const request = ++requestVersion.current;
+    const request = ++requestVersion.current,
+      scope = capturePluginScope();
     setIsLoading(true);
     setLoadError(null);
     try {
       // forceRefetch also makes the app-server re-sync the curated marketplace
       // checkout under ~/.codex/.tmp instead of serving its in-memory catalog.
       const response = await pluginList({ forceRefetch });
-      if (request !== requestVersion.current) return;
-      if (!Array.isArray(response?.marketplaces))
+      if (request !== requestVersion.current || !isPluginScopeCurrent(scope))
+        return;
+      if (
+        new TextEncoder().encode(JSON.stringify(response)).byteLength >
+        2 * 1024 * 1024
+      )
+        throw new Error("插件目录超过 2 MiB 读取预算，请缩小市场范围后重试");
+      if (
+        !Array.isArray(response?.marketplaces) ||
+        response.marketplaces.some(
+          (market) =>
+            !market ||
+            typeof market.name !== "string" ||
+            !Array.isArray(market.plugins),
+        )
+      )
         throw new Error("服务返回的插件列表无效");
       const marketplaceErrors = Array.isArray(response.marketplaceLoadErrors)
         ? response.marketplaceLoadErrors
         : [];
-      listCache = {
+      savePluginCatalogCache({
         marketplaces: response.marketplaces,
         errors: marketplaceErrors,
-      };
+      });
       setMarketplaces(response.marketplaces);
       setErrors(marketplaceErrors);
     } catch (error) {
-      if (request === requestVersion.current)
+      if (request === requestVersion.current && isPluginScopeCurrent(scope))
         setLoadError(error instanceof Error ? error.message : String(error));
     } finally {
-      if (request === requestVersion.current) setIsLoading(false);
+      if (request === requestVersion.current && isPluginScopeCurrent(scope))
+        setIsLoading(false);
     }
-  }, []);
-
-  /** Flip the installed flag locally so the list stays in sync without a full reload. */
-  const markInstalled = useCallback((pluginId: string, installed: boolean) => {
-    setMarketplaces((prev) => {
-      const next = prev.map((m) => ({
-        ...m,
-        plugins: m.plugins.map((p) =>
-          p.id === pluginId ? { ...p, installed } : p,
-        ),
-      }));
-      if (listCache) listCache = { ...listCache, marketplaces: next };
-      return next;
-    });
   }, []);
 
   const preferred = useMemo(
@@ -137,54 +143,28 @@ export function usePluginsMarketplace(refreshTrigger = 0) {
 
   const handleInstall = useCallback(
     async (marketplace: PluginMarketplaceEntry, plugin: PluginSummary) => {
-      const target = pluginRequestTarget(marketplace, plugin, preferred);
+      const target = pluginRequestTarget(marketplace, plugin, preferred),
+        scope = capturePluginScope(),
+        identity = pluginEntryKey(marketplace, plugin);
       if (!target) {
         toast({
-          title: "Install unavailable",
-          description:
-            "This plugin cannot be addressed by the current marketplace.",
+          title: "无法安装插件",
+          description: "无法确认原生市场来源",
           variant: "destructive",
         });
         return;
       }
-
-      setInstallingPluginId(plugin.id);
+      setInstallingPluginId(identity);
       try {
-        const response = await pluginInstall(target);
-        invalidatePluginCapabilities();
-
-        const authTargets = response.appsNeedingAuth.filter(
-          (app) => app.installUrl,
-        );
-        if (authTargets.length > 0) {
-          await openExternalUrl(authTargets[0].installUrl!);
-        }
-
-        markInstalled(plugin.id, true);
-        toast({
-          title:
-            authTargets.length > 0
-              ? "Plugin installed, auth required"
-              : "Plugin installed",
-          description:
-            authTargets.length > 0
-              ? `${plugin.interface?.displayName ?? plugin.name} needs ${authTargets
-                  .map((app) => app.name)
-                  .join(", ")} authentication.`
-              : `${plugin.interface?.displayName ?? plugin.name} is ready in the composer.`,
-        });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        toast({
-          title: "Install failed",
-          description: message,
-          variant: "destructive",
-        });
+        await handlePluginInstall(summaryToDetail(marketplace, plugin), target);
       } finally {
-        setInstallingPluginId(null);
+        if (isPluginScopeCurrent(scope))
+          setInstallingPluginId((current) =>
+            current === identity ? null : current,
+          );
       }
     },
-    [markInstalled, openExternalUrl, preferred],
+    [preferred, handlePluginInstall],
   );
 
   const handleUsePlugin = useCallback((plugin: PluginSummary) => {
@@ -194,19 +174,40 @@ export function usePluginsMarketplace(refreshTrigger = 0) {
   const handleShowDetail = useCallback(
     async (marketplace: PluginMarketplaceEntry, plugin: PluginSummary) => {
       // Open immediately with what the list already knows, then fill in the rest.
-      handlePluginDetail(summaryToDetail(marketplace, plugin));
+      const request = ++detailVersion.current,
+        scope = capturePluginScope();
+      detailRead.current?.abort();
+      const controller = new AbortController();
+      detailRead.current = controller;
+      const selection = handlePluginDetail(
+        summaryToDetail(marketplace, plugin),
+      );
       const target = pluginRequestTarget(marketplace, plugin, preferred);
       if (!target) return;
       try {
-        const response = await pluginRead(target);
-        handlePluginDetail(response.plugin);
+        const response = await pluginRead(target, {
+          signal: controller.signal,
+        });
+        if (
+          request === detailVersion.current &&
+          !controller.signal.aborted &&
+          isPluginScopeCurrent(scope)
+        ) {
+          assertPluginDetailTarget(response.plugin, target);
+          handlePluginDetail(response.plugin, selection);
+        }
       } catch (error) {
         // The detail page already shows what the list knows; a failed enrich
         // (e.g. the remote catalog 404s on this plugin) is not worth a toast.
-        console.warn("Failed to load plugin details:", error);
+        if (
+          request === detailVersion.current &&
+          !controller.signal.aborted &&
+          isPluginScopeCurrent(scope)
+        )
+          handlePluginDetailError?.(error, selection);
       }
     },
-    [handlePluginDetail, preferred],
+    [handlePluginDetail, handlePluginDetailError, preferred],
   );
 
   const lastTrigger = useRef(refreshTrigger);
@@ -215,9 +216,25 @@ export function usePluginsMarketplace(refreshTrigger = 0) {
     // nothing cached or the user explicitly asked for a refresh.
     const refreshRequested = refreshTrigger !== lastTrigger.current;
     lastTrigger.current = refreshTrigger;
-    if (listCache && !refreshRequested) return;
+    if (readPluginCatalogCache() && !refreshRequested) return;
     void loadPlugins(refreshRequested);
   }, [loadPlugins, refreshTrigger]);
+
+  const lastRevision = useRef(revision);
+  useEffect(() => {
+    if (lastRevision.current === revision) return;
+    lastRevision.current = revision;
+    if (!isPluginScopeCurrent(domain.current)) {
+      domain.current = capturePluginScope();
+      requestVersion.current++;
+      detailVersion.current++;
+      detailRead.current?.abort();
+      setMarketplaces([]);
+      setErrors([]);
+      setInstallingPluginId(null);
+    }
+    void loadPlugins(false);
+  }, [revision, loadPlugins]);
 
   const browseGroups = useMemo(() => {
     const needle = query.trim().toLowerCase();

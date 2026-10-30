@@ -9,6 +9,12 @@ vi.mock("@session/hooks/runtime", () => ({
 import { openEventStream } from "@session/lib/eventStream";
 import { useAcpStore } from "@session/stores/useAcpStore";
 import { useAcpEvents } from "./useAcpEvents";
+import {
+  providerTranscriptKey,
+  trackProviderTranscript,
+  updateProviderTranscript,
+  useProviderTranscriptStore,
+} from "@session/services/sessionProviderTranscriptState";
 
 class FakeSource {
   onmessage: ((event: { data: string }) => void) | null = null;
@@ -33,8 +39,10 @@ const emit = (
 
 beforeEach(() => {
   instances.length = 0;
+  useProviderTranscriptStore.setState({ entries: {} });
   vi.stubGlobal("EventSource", FakeSource);
   useAcpStore.setState({
+    agentId: "agent",
     connectionId: "conn",
     sessionId: "session",
     entries: [],
@@ -44,6 +52,64 @@ beforeEach(() => {
     authNotice: null,
     running: true,
   });
+});
+
+it("binds persisted prompt acknowledgements and live source IDs to the exact current agent/connection/session", () => {
+  useAcpStore
+    .getState()
+    .addEntry({
+      id: "optimistic",
+      role: "user",
+      text: "same text",
+      clientMessageId: "client-one",
+    });
+  const { unmount } = renderHook(() => useAcpEvents("conn"));
+  try {
+    emit(1, {
+      connectionId: "conn",
+      agentId: "wrong-agent",
+      sessionId: "session",
+      kind: "prompt-persisted",
+      clientMessageId: "client-one",
+      sourceRows: [{ historySourceId: 1, partIndex: 0 }],
+    });
+    expect(useAcpStore.getState().entries[0].id).toBe("optimistic");
+    emit(2, {
+      connectionId: "conn",
+      agentId: "agent",
+      sessionId: "session",
+      kind: "prompt-persisted",
+      clientMessageId: "client-one",
+      historySourceId: 1,
+      sourceRows: [{ historySourceId: 1, partIndex: 0 }],
+    });
+    expect(useAcpStore.getState().entries[0]).toMatchObject({
+      id: "acp-1-0",
+      historySourceId: 1,
+      clientMessageId: "client-one",
+    });
+    const source = {
+      connectionId: "conn",
+      agentId: "agent",
+      sessionId: "session",
+      kind: "update",
+      historySourceId: 2,
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "once" },
+      },
+    };
+    emit(3, source);
+    emit(4, source);
+    expect(useAcpStore.getState().entries[1]).toMatchObject({
+      id: "acp-2-0",
+      text: "once",
+      historySourceId: 2,
+    });
+    expect(useAcpStore.getState().entries).toHaveLength(2);
+  } finally {
+    unmount();
+  }
 });
 
 afterEach(() => vi.unstubAllGlobals());
@@ -136,4 +202,38 @@ it("queues permissions by ACP session without opening another SSE connection", (
     closeCodex();
   }
   expect(instances[0].close).toHaveBeenCalledOnce();
+});
+
+// The persistent App bridge stays mounted when its provider pane is hidden.
+it("keeps background approvals and mode state without resurrecting a reclaimed legacy body", () => {
+  const owner = providerTranscriptKey("acp", "session", "agent", "conn");
+  trackProviderTranscript(owner, "acp", "session");
+  updateProviderTranscript(owner, { dormant: true });
+  useAcpStore.setState({ active: false });
+  const { unmount } = renderHook(() => useAcpEvents("conn"));
+  try {
+    emit(1, {
+      connectionId: "conn",
+      agentId: "agent",
+      sessionId: "session",
+      kind: "update",
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "late untagged body" },
+      },
+    });
+    emit(2, {
+      connectionId: "conn",
+      agentId: "agent",
+      sessionId: "session",
+      kind: "permission",
+      requestId: "background",
+      toolCall: { title: "Background request" },
+      options: [{ optionId: "allow", name: "Allow" }],
+    });
+    expect(useAcpStore.getState().entries).toHaveLength(0);
+    expect(useAcpStore.getState().permission?.requestId).toBe("background");
+  } finally {
+    unmount();
+  }
 });

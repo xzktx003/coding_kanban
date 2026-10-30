@@ -1,17 +1,22 @@
 import type { AgentCenterCard } from "./useAgentCenterStore";
 
 /** Registered by the session tab actions. Menu reopen uses the same select path. */
-let select: ((card: AgentCenterCard) => void | Promise<void>) | null = null;
+const selectors: Array<{
+  select: (card: AgentCenterCard) => void | Promise<void>;
+}> = [];
 
 export function registerSessionTabSelect(
   next: (card: AgentCenterCard) => void | Promise<void>,
 ) {
-  select = next;
+  const registration = { select: next };
+  selectors.push(registration);
   return () => {
-    if (select === next) select = null;
+    const index = selectors.indexOf(registration);
+    if (index >= 0) selectors.splice(index, 1);
   };
 }
 
 export function sessionTabSelect(card: AgentCenterCard) {
-  return select?.(card);
+  return selectors.at(-1)?.select(card);
 }
+export const canSelectSessionTab = () => selectors.length > 0;

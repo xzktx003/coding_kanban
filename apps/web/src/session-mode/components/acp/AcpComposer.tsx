@@ -4,6 +4,8 @@ import { useStopAction } from "../common/useStopAction";
 import { useSessionAttentionStore } from "@session/stores/useSessionAttentionStore";
 import {
   moveImageDraft,
+  ensureAttachmentDraft,
+  useAttachmentDraftStore,
   useImageAttachments,
 } from "../common/useImageAttachments";
 import {
@@ -13,7 +15,7 @@ import {
   useSessionTextDraft,
 } from "@session/stores/useSessionDraftStore";
 import { ImageAttachmentStrip } from "../common/ImageAttachmentStrip";
-import { ArrowUp, Download, Square } from "lucide-react";
+import { ArrowUp, Download, Square,ArchiveRestore } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@session/components/ui/button";
 import { toast } from "@session/components/ui/use-toast";
@@ -25,10 +27,13 @@ import {
 } from "@session/services/apiAdapt/acp";
 import { useWorkspaceStore } from "@session/stores";
 import { useAcpStore } from "@session/stores/useAcpStore";
+import { buildUrl } from "@session/hooks/runtime";
+import { requestAcpConnectionRecovery } from "@session/services/acpConnectionRecoveryPointer";
 import { AgentModelPanel } from "@session/components/agent/AgentModelPanel";
 import { AgentModelTrigger } from "@session/components/agent/AgentModelTrigger";
 import { captureBotOptions } from "@session/stores/useBotOptionsStore";
 import { ComposerSheet } from "../codex/composer/v2/ComposerSheet";
+import {acpDraftSessionId} from "@session/services/acpSessionIdentity";
 import { AcpSessionControls } from "./AcpSessionControls";
 import { useAcpAgents } from "./useAcpAgents";
 import { runAcpSessionOperation } from "./sessionOperations";
@@ -44,10 +49,12 @@ export function AcpComposer({
     agentId,
     connectionId,
     sessionId,
+    historySessionId,
     sessionCwd,
     connecting,
     sessionTransition,
     sessionTransitionError,
+    connectionRecovery,
     running,
     setConnecting,
     setConnection,
@@ -59,12 +66,31 @@ export function AcpComposer({
   const interactionVisible = useAgentInteractionVisible();
   const cwd = useWorkspaceStore((s) => s.cwd);
   const agents = useAcpAgents() ?? [];
-  const owner = sessionDraftKey("acp", sessionId, cwd, agentId);
+  const owner = sessionDraftKey("acp", acpDraftSessionId(sessionId,historySessionId,connectionId), cwd, agentId);
   const { inputValue: text, setInputValue: setText } =
     useSessionTextDraft(owner);
   const attachments = useImageAttachments(owner);
+  const legacyOwner=sessionDraftKey("acp",sessionId,cwd,agentId);
+  const legacyText=useSessionDraftStore(state=>state.drafts[legacyOwner]?.text??"");
+  const [legacyOpen,setLegacyOpen]=useState<string|null>(null);
+  const [importingLegacy,setImportingLegacy]=useState(false);
+  const importLegacy=async()=>{
+    const captured={owner,legacyOwner,agentId,connectionId,sessionId,historySessionId,cwd,revision:readDraft(owner).revision};
+    setImportingLegacy(true);
+    try{
+      await ensureAttachmentDraft(captured.legacyOwner);
+      const current=useAcpStore.getState();
+      if(!current.active||current.agentId!==captured.agentId||current.connectionId!==captured.connectionId||current.sessionId!==captured.sessionId||current.historySessionId!==captured.historySessionId||useWorkspaceStore.getState().cwd!==captured.cwd||readDraft(captured.owner).revision!==captured.revision)throw new Error("当前会话或草稿已变化，请重新核对后导入。");
+      if(!readDraft(captured.legacyOwner).text&&!(useAttachmentDraftStore.getState().drafts[captured.legacyOwner]?.length)){toast({title:"未发现旧版草稿"});setLegacyOpen(null);return;}
+      await moveImageDraft(captured.legacyOwner,captured.owner);
+      useSessionDraftStore.getState().move(captured.legacyOwner,captured.owner);
+      setLegacyOpen(null);
+    }catch(error){toast({title:"旧草稿仍保留",description:String(error),variant:"destructive"});}
+    finally{setImportingLegacy(false);}
+  };
   const canInputImages = useAcpStore((s) => s.canInputImages);
   const settingsPending = useAcpStore(hasPendingAcpSettings);
+  const readonlyWithoutConnection=useAcpStore(s=>!!s.inheritedHistory?.viewOnly&&!s.connectionId);
   const directoryMatches = (native: string | null, browsed: string | null) =>
     !!native &&
     !!browsed &&
@@ -100,6 +126,7 @@ export function AcpComposer({
     }
     attempted.current = agentId;
     const original = useAcpStore.getState();
+    const connectionEndpoint=buildUrl("/api/acp/connection-snapshot");
     setConnecting(true);
     return (
       (await runAcpSessionOperation("正在启动 Agent…", async (isLatest) => {
@@ -109,6 +136,7 @@ export function AcpComposer({
           useAcpStore.getState().agentId === agentId &&
           useAcpStore.getState().restartNonce === original.restartNonce &&
           useAcpStore.getState().connectionId === original.connectionId &&
+          connectionEndpoint===buildUrl("/api/acp/connection-snapshot") &&
           useWorkspaceStore.getState().cwd === cwd;
         try {
           if (!ownsSource()) return null;
@@ -116,14 +144,14 @@ export function AcpComposer({
           if (!ownsSource()) {
             // This start created an undelivered resource. Never stop an adopted
             // connection or any process discovered outside this request.
-            if (useAcpStore.getState().connectionId !== res.connectionId)
+            if (connectionEndpoint===buildUrl("/api/acp/connection-snapshot")&&useAcpStore.getState().connectionId !== res.connectionId)
               await acpStop(res.connectionId).catch(() => {});
             return null;
           }
           if (res.sessionId) {
             const connectedOwner = sessionDraftKey(
               "acp",
-              res.sessionId,
+              acpDraftSessionId(res.sessionId,res.historySessionId??res.session?.historySessionId,res.connectionId),
               cwd,
               agentId,
             );
@@ -131,8 +159,11 @@ export function AcpComposer({
           }
           setConnection({
             connectionId: res.connectionId,
+            runtimeInstance: res.runtimeInstance,
+            connectionEndpoint,
             cwd,
             sessionId: res.sessionId,
+            historySessionId:res.historySessionId??res.session?.historySessionId,
             agentTitle:
               res.initialize.agentInfo?.title ??
               res.initialize.agentInfo?.name ??
@@ -151,7 +182,7 @@ export function AcpComposer({
           if (res.sessionId)
             await moveImageDraft(
               owner,
-              sessionDraftKey("acp", res.sessionId, cwd, agentId),
+              sessionDraftKey("acp", acpDraftSessionId(res.sessionId,res.historySessionId??res.session?.historySessionId,res.connectionId), cwd, agentId),
             );
           // keke's own catalogue also configures bots, which are keke processes —
           // so a bot can be set up from this session without opening its chat.
@@ -166,7 +197,7 @@ export function AcpComposer({
             return null;
           }
           return res.sessionId
-            ? { connectionId: res.connectionId, sessionId: res.sessionId }
+            ? { connectionId: res.connectionId, sessionId: res.sessionId, historySessionId:res.historySessionId??res.session?.historySessionId }
             : null;
         } catch (e) {
           if (!ownsSource()) return null;
@@ -200,6 +231,7 @@ export function AcpComposer({
     }
     if (
       !interactionVisible ||
+      readonlyWithoutConnection ||
       connectionId ||
       connecting ||
       sessionTransition ||
@@ -221,6 +253,7 @@ export function AcpComposer({
     restartNonce,
     connect,
     interactionVisible,
+    readonlyWithoutConnection,
   ]);
 
   const send = async () => {
@@ -228,6 +261,7 @@ export function AcpComposer({
     if (
       (!trimmed && !attachments.paths.length) ||
       running ||
+      readonlyWithoutConnection ||
       connecting ||
       sessionTransition ||
       sessionTransitionError ||
@@ -246,7 +280,7 @@ export function AcpComposer({
     if (preparingSends.current.has(owner)) return;
     preparingSends.current.add(owner);
     const original = useAcpStore.getState();
-    let live = connectionId && sessionId ? { connectionId, sessionId } : null;
+    let live: {connectionId:string;sessionId:string;historySessionId?:string|null}|null = connectionId && sessionId ? { connectionId, sessionId,historySessionId } : null;
     const ownsTarget = () => {
       const current = useAcpStore.getState();
       return (
@@ -283,7 +317,7 @@ export function AcpComposer({
         live = await connect();
         if (!live || !canSubmit()) return;
       }
-      submittedOwner = sessionDraftKey("acp", live.sessionId, cwd, agentId);
+      submittedOwner = sessionDraftKey("acp", acpDraftSessionId(live.sessionId,live.historySessionId,live.connectionId), cwd, agentId);
       if (submittedOwner !== owner) {
         useSessionDraftStore.getState().move(owner, submittedOwner);
         await moveImageDraft(owner, submittedOwner);
@@ -291,8 +325,10 @@ export function AcpComposer({
       // Preparation may await a connection or attachment storage. Never insert
       // a message or dispatch a prompt after the user has selected another target.
       if (!canSubmit()) return;
+      const clientMessageId = randomUUID();
       addEntry({
-        id: `u-${Date.now()}`,
+        id: `u-${clientMessageId}`,
+        clientMessageId,
         role: "user",
         text: trimmed,
         images: attachments.paths,
@@ -305,13 +341,14 @@ export function AcpComposer({
         live.sessionId,
         trimmed,
         attachments.paths,
+        clientMessageId,
       );
       useSessionDraftStore.getState().clearSubmitted(submittedOwner, snapshot);
       attachments.clear(submittedIds);
       if (result.stopReason === "end_turn")
         useSessionAttentionStore
           .getState()
-          .complete("acp", `${agentId}:${live.sessionId}`, randomUUID());
+          .complete("acp", `${agentId}:${acpDraftSessionId(live.sessionId,live.historySessionId,live.connectionId)}`, randomUUID());
     } catch (e) {
       if (ownsTarget()) {
         addEntry({ id: `e-${Date.now()}`, role: "error", text: String(e) });
@@ -368,7 +405,7 @@ export function AcpComposer({
                 send();
               }
             }}
-            placeholder="描述你想完成的任务…"
+            placeholder={readonlyWithoutConnection?"当前仅查看原记录；点击上方继续按钮后再发送。":"描述你想完成的任务…"}
             rows={2}
             className="w-full min-h-[44px] resize-none bg-transparent text-base md:text-sm outline-none placeholder:text-muted-foreground"
           />
@@ -378,6 +415,7 @@ export function AcpComposer({
         <div className="session-composer-toolbar">
           <div className="session-composer-policy">
             <AcpSessionControls />
+            {sessionId&&legacyOwner!==owner&&<Button type="button" variant="ghost" className="min-h-11 min-w-11" title="找回旧版草稿" aria-label="找回旧版草稿" onClick={()=>setLegacyOpen(owner)}><ArchiveRestore size={16}/></Button>}
             {agent && !agent.available && !connectionId && (
               <Button
                 type="button"
@@ -392,6 +430,7 @@ export function AcpComposer({
 
           <div className="session-compact-meta">
             {targetLabel}
+            {(connectionRecovery==="failed"||(sessionTransitionError&&connectionId))&&<Button type="button" size="sm" variant="ghost" className="min-h-11 text-xs" onClick={requestAcpConnectionRecovery}>重新核对连接</Button>}
             <span
               className="session-compact-status"
               id="acp-session-transition"
@@ -448,6 +487,7 @@ export function AcpComposer({
                 size="icon"
                 className="session-composer-send"
                 disabled={
+                  readonlyWithoutConnection ||
                   connecting ||
                   Boolean(sessionTransition) ||
                   Boolean(sessionTransitionError) ||
@@ -465,6 +505,9 @@ export function AcpComposer({
           </div>
         </div>
       </div>
+      {legacyOpen===owner&&<ComposerSheet title="找回旧版草稿" onClose={()=>setLegacyOpen(null)} description="旧版草稿未区分独立连接。请确认它属于当前会话后导入；现有草稿会保留。">
+        <div className="space-y-3 p-3 text-sm"><p className="text-muted-foreground">当前会话：{agentId} · {sessionId}</p>{legacyText&&<pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-md border p-2">{legacyText}</pre>}<Button disabled={importingLegacy} onClick={()=>void importLegacy()}>确认导入当前会话</Button></div>
+      </ComposerSheet>}
       {installInfoOpen && (
         <ComposerSheet
           title="Agent 安装说明"

@@ -1,21 +1,19 @@
-import {
-  act,
-  renderHook,
-  render,
-  fireEvent,
-  screen,
-} from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
 import { useAcpStore } from "@session/stores/useAcpStore";
+import {
+  useAcpRuntimeOwnersStore,
+  rememberCurrentAcpOwner,
+} from "@session/services/acpRuntimeOwners";
+import { buildUrl } from "@session/hooks/runtime";
 import type { AcpSessionRecord } from "@session/services/apiAdapt/acp";
 import { useAcpSessions } from "./useAcpSessions";
-
 const api = vi.hoisted(() => ({
   load: vi.fn(),
   start: vi.fn(),
-  list: vi.fn().mockResolvedValue([]),
-  cancel: vi.fn().mockResolvedValue(undefined),
+  list: vi.fn(),
+  cancel: vi.fn(),
   remove: vi.fn(),
   fresh: vi.fn(),
 }));
@@ -27,194 +25,179 @@ vi.mock("@session/services/apiAdapt/acp", () => ({
   acpGetSession: vi.fn(),
   acpDeleteSession: api.remove,
   acpCancel: api.cancel,
-  acpStop: vi.fn().mockResolvedValue(undefined),
+  acpStop: vi.fn(),
 }));
 vi.mock("./newSession", () => ({ acpFreshSession: api.fresh }));
-vi.mock("./applyUpdate", () => ({ applyAcpUpdate: vi.fn() }));
+vi.mock("@session/lib/eventStream", () => ({
+  openEventStream: () => () => {},
+}));
 vi.mock("@session/components/ui/use-toast", () => ({ toast: vi.fn() }));
-
-const record = (sessionId: string, cwd: string): AcpSessionRecord => ({
+const record = (
+  sessionId: string,
+  cwd = "/fixture/project",
+): AcpSessionRecord => ({
   sessionId,
   cwd,
   agentId: "fixture-agent",
-  agentTitle: "Fixture Agent",
+  agentTitle: "Fixture",
   title: sessionId,
   createdAt: "2026-01-01T00:00:00Z",
   updatedAt: "2026-01-01T00:00:00Z",
 });
 beforeEach(() => {
-  api.load.mockReset();
-  api.remove.mockReset().mockResolvedValue(undefined);
-  api.fresh.mockReset();
-  api.start.mockReset();
-  api.cancel.mockReset().mockResolvedValue(undefined);
+  vi.clearAllMocks();
+  api.list.mockResolvedValue([]);
+  api.remove.mockResolvedValue(undefined);
+  api.fresh.mockResolvedValue(false);
+  useAcpRuntimeOwnersStore.setState({ owners: {} });
   useAcpStore.getState().reset();
   useAcpStore.setState({
     active: true,
     agentId: "fixture-agent",
     connectionId: "fixture-connection",
+    runtimeInstance: "runtime",
+    connectionEndpoint: buildUrl("/api/acp/connection-snapshot"),
     sessionId: "initial",
+    historySessionId: "source-initial",
+    sessionCwd: "/current",
     canLoadSession: true,
-    running: false,
   });
+  useWorkspaceStore.setState({ cwd: "/current" });
 });
-
-// Late replies must retain the current project and session selection.
-// Two project hook instances share the real ACP store; all RPCs are mocked.
-test("a late history response cannot replace the newer selection from another project", async () => {
-  let resolveOld!: (value: { sessionId: string }) => void;
-  let resolveNew!: (value: { sessionId: string }) => void;
-  const oldReply = new Promise((resolve) => (resolveOld = resolve));
-  const newReply = new Promise((resolve) => (resolveNew = resolve));
-  api.load.mockReturnValueOnce(oldReply).mockReturnValueOnce(newReply);
-  useAcpStore.setState({
-    active: true,
-    agentId: "fixture-agent",
-    connectionId: "fixture-connection",
+test("opening a stored ACP record only reads its source and preserves the current task target", async () => {
+  const entries = [
+    { id: "current", role: "agent" as const, text: "keep current body" },
+  ];
+  useAcpStore.setState({ entries, running: true });
+  const hook = renderHook(() => useAcpSessions("/fixture/project"));
+  await act(() => hook.result.current.open(record("history")));
+  expect(api.load).not.toHaveBeenCalled();
+  expect(api.start).not.toHaveBeenCalled();
+  expect(api.cancel).not.toHaveBeenCalled();
+  expect(useAcpStore.getState()).toMatchObject({
     sessionId: "initial",
-    canLoadSession: true,
-    entries: [],
+    historySessionId: "source-initial",
+    running: true,
+    entries,
+    sessionCwd: "/current",
+    inheritedHistory: { sessionId: "history", viewOnly: true },
   });
-  const oldProject = renderHook(() => useAcpSessions("/fixture/old-project"));
-  const newProject = renderHook(() => useAcpSessions("/fixture/new-project"));
-  let oldOpen!: Promise<void>;
-  let newOpen!: Promise<void>;
-  act(() => {
-    oldOpen = oldProject.result.current.open(
-      record("old-history", "/fixture/old-project"),
-    );
-  });
-  await act(async () => {});
-  expect(api.load).toHaveBeenCalledTimes(1);
-  act(() => {
-    newOpen = newProject.result.current.open(
-      record("new-history", "/fixture/new-project"),
-    );
-  });
-  // Native loads mutate the connection context: filtering only the final UI
-  // response is insufficient. The second load must wait for the first.
-  expect(api.load).toHaveBeenCalledTimes(1);
-  await act(async () => {
-    resolveOld({ sessionId: "old-history" });
-    await oldOpen;
-  });
-  expect(api.load).toHaveBeenCalledTimes(2);
-  await act(async () => {
-    resolveNew({ sessionId: "new-history" });
-    await Promise.all([oldOpen, newOpen]);
-  });
-  expect(useAcpStore.getState().sessionId).toBe("new-history");
+  expect(useWorkspaceStore.getState().cwd).toBe("/current");
+  expect(hook.result.current.confirmation).toBeNull();
+});
+test("two project selections do not issue mutating RPCs or change the current context", async () => {
+  const old = renderHook(() => useAcpSessions("/old")),
+    next = renderHook(() => useAcpSessions("/new"));
+  await act(() => old.result.current.open(record("source-old", "/old")));
+  await act(() => next.result.current.open(record("source-new", "/new")));
+  expect(useAcpStore.getState().inheritedHistory?.sessionId).toBe("source-new");
+  expect(useAcpStore.getState().sessionId).toBe("initial");
+  expect(api.load).not.toHaveBeenCalled();
   expect(api.start).not.toHaveBeenCalled();
 });
-
-function RunningHistory() {
-  const { open, confirmation } = useAcpSessions("/fixture/project");
-  return (
-    <>
-      <button onClick={() => void open(record("history", "/fixture/project"))}>
-        恢复历史
-      </button>
-      {confirmation}
-    </>
+test("same native ID in two live connections cannot choose the latest wrong history source", async () => {
+  useAcpStore.setState({
+    sessionId: "same",
+    historySessionId: "source-A",
+    sessionCwd: "/A",
+  });
+  rememberCurrentAcpOwner();
+  useAcpStore.setState({
+    connectionId: "connection-B",
+    sessionId: "same",
+    historySessionId: "source-B",
+    sessionCwd: "/B",
+  });
+  const b = rememberCurrentAcpOwner()!;
+  useAcpRuntimeOwnersStore.setState((s) => ({
+    owners: { ...s.owners, [b.key]: { ...b, lastUsed: Date.now() + 1000 } },
+  }));
+  const hook = renderHook(() => useAcpSessions("/A"));
+  await act(() =>
+    hook.result.current.open({
+      ...record("source-A", "/A"),
+      nativeSessionId: "same",
+    }),
   );
-}
-
-test("opening history cannot abandon a running task without explicit interruption", async () => {
-  useAcpStore.setState({ running: true });
-  render(<RunningHistory />);
-  fireEvent.click(screen.getByRole("button", { name: "恢复历史" }));
-  await act(async () => {});
-  expect(api.cancel).not.toHaveBeenCalled();
+  expect(useAcpStore.getState().historySessionId).toBe("source-A");
+  expect(useWorkspaceStore.getState().cwd).toBe("/A");
   expect(api.load).not.toHaveBeenCalled();
-  expect(useAcpStore.getState().sessionId).toBe("initial");
-  fireEvent.click(screen.getByRole("button", { name: "取消" }));
-  await act(async () => {});
-  expect(useAcpStore.getState().running).toBe(true);
 });
-
-test("failed interruption during history selection preserves the task and never loads", async () => {
-  useAcpStore.setState({ running: true });
-  api.cancel.mockRejectedValueOnce(new Error("cancel failed"));
-  render(<RunningHistory />);
-  fireEvent.click(screen.getByRole("button", { name: "恢复历史" }));
-  await act(async () =>
-    fireEvent.click(screen.getByRole("button", { name: "中断并打开" })),
-  );
-  expect(api.cancel).toHaveBeenCalledExactlyOnceWith(
-    "fixture-connection",
-    "initial",
-  );
-  expect(api.load).not.toHaveBeenCalled();
-  expect(useAcpStore.getState().sessionId).toBe("initial");
-  expect(useAcpStore.getState().running).toBe(true);
-});
-
-test("failed native restoration keeps sending blocked until an explicit retry succeeds", async () => {
-  api.load
-    .mockRejectedValueOnce(new Error("load failed"))
-    .mockResolvedValueOnce({ sessionId: "history" });
+test("opening the exact current source restores its project without native load", async () => {
+  useAcpStore.setState({ running: true, sessionCwd: null });
+  useWorkspaceStore.setState({ cwd: "/browsed" });
   const hook = renderHook(() => useAcpSessions("/fixture/project"));
-  await act(() =>
-    hook.result.current.open(record("history", "/fixture/project")),
-  );
-  expect(useAcpStore.getState().sessionTransitionError).toContain(
-    "load failed",
-  );
-  await act(() =>
-    hook.result.current.open(record("history", "/fixture/project")),
-  );
-  expect(useAcpStore.getState().sessionTransitionError).toBeNull();
-  expect(useAcpStore.getState().sessionId).toBe("history");
+  await act(() => hook.result.current.open(record("source-initial")));
+  expect(useAcpStore.getState()).toMatchObject({
+    sessionId: "initial",
+    running: true,
+    sessionCwd: "/fixture/project",
+    inheritedHistory: null,
+  });
+  expect(api.load).not.toHaveBeenCalled();
 });
-
-test("deleting a running current session preserves its record and never interrupts implicitly", async () => {
+test("revoked list scope cannot open an old record", async () => {
+  const hook = renderHook(() => useAcpSessions("/fixture/project"));
+  await waitFor(() => expect(hook.result.current.loading).toBe(false));
+  const { invalidateCodexOperationScope } =
+    await import("@session/services/codexOperationScope");
+  invalidateCodexOperationScope();
+  await act(() => hook.result.current.open(record("history")));
+  expect(useAcpStore.getState().inheritedHistory).toBeNull();
+  expect(hook.result.current.error).toContain("变化");
+});
+test("deleting a running current source preserves its history and never interrupts", async () => {
   useAcpStore.setState({ running: true });
   const hook = renderHook(() => useAcpSessions("/fixture/project"));
   await expect(
-    hook.result.current.remove(record("initial", "/fixture/project")),
+    hook.result.current.remove(record("source-initial")),
   ).rejects.toThrow("任务");
   expect(api.remove).not.toHaveBeenCalled();
   expect(api.fresh).not.toHaveBeenCalled();
   expect(api.cancel).not.toHaveBeenCalled();
 });
-test("failed replacement cannot destroy the current history record", async () => {
-  api.fresh.mockResolvedValue(false);
+test("deleting a background source with pending approval is blocked", async () => {
+  useAcpStore.setState({ permission: { requestId: "approval" } as any });
+  rememberCurrentAcpOwner();
+  useAcpStore.setState({
+    connectionId: "B",
+    sessionId: "other",
+    historySessionId: "source-B",
+    permission: null,
+  });
   const hook = renderHook(() => useAcpSessions("/fixture/project"));
   await expect(
-    hook.result.current.remove(record("initial", "/fixture/project")),
+    hook.result.current.remove(record("source-initial")),
+  ).rejects.toThrow(/任务|审批/);
+  expect(api.remove).not.toHaveBeenCalled();
+});
+test("failed idle replacement cannot destroy the current history record", async () => {
+  const hook = renderHook(() => useAcpSessions("/fixture/project"));
+  await expect(
+    hook.result.current.remove(record("source-initial")),
   ).rejects.toThrow("新会话");
   expect(api.remove).not.toHaveBeenCalled();
   expect(useAcpStore.getState().sessionId).toBe("initial");
 });
 
-test("opening the already running session restores its recorded project without interruption or reload", async () => {
-  useAcpStore.setState({ running: true, sessionCwd: null });
-  useWorkspaceStore.setState({ cwd: "/browsed-other" });
+test("scope revocation while replacing idle context cannot delete the old source through new credentials", async () => {
+  let finish!: (v: boolean) => void;
+  api.fresh.mockReturnValueOnce(new Promise((r) => (finish = r)));
   const hook = renderHook(() => useAcpSessions("/fixture/project"));
-  await act(() =>
-    hook.result.current.open(record("initial", "/fixture/project")),
-  );
-  expect(useWorkspaceStore.getState().cwd).toBe("/fixture/project");
-  expect(useAcpStore.getState().sessionCwd).toBe("/fixture/project");
-  expect(api.cancel).not.toHaveBeenCalled();
-  expect(api.load).not.toHaveBeenCalled();
-  expect(useAcpStore.getState().running).toBe(true);
-});
-
-test("failed native history load restores the original identity and visible context for explicit retry", async () => {
-  const entries = [
-    { id: "original-message", role: "agent" as const, text: "原任务正文" },
-  ];
-  useAcpStore.setState({ entries, sessionCwd: "/fixture/original" });
-  api.load.mockRejectedValueOnce(new Error("native load rejected"));
-  const hook = renderHook(() => useAcpSessions("/fixture/project"));
-  await act(() =>
-    hook.result.current.open(record("history", "/fixture/project")),
-  );
-  expect(useAcpStore.getState().sessionId).toBe("initial");
-  expect(useAcpStore.getState().sessionCwd).toBe("/fixture/original");
-  expect(useAcpStore.getState().entries).toEqual(entries);
-  expect(useAcpStore.getState().sessionTransitionError).toContain(
-    "native load rejected",
-  );
+  await waitFor(() => expect(hook.result.current.loading).toBe(false));
+  const pending = hook.result.current.remove(record("source-initial"));
+  let failure: unknown;
+  const settled = pending.catch((e) => {
+    failure = e;
+  });
+  await waitFor(() => expect(api.fresh).toHaveBeenCalledOnce());
+  const { invalidateCodexOperationScope } =
+    await import("@session/services/codexOperationScope");
+  invalidateCodexOperationScope();
+  await act(async () => {
+    finish(true);
+    await settled;
+  });
+  expect(failure).toBeInstanceOf(Error);
+  expect(api.remove).not.toHaveBeenCalled();
 });

@@ -18,8 +18,8 @@ const api = vi.hoisted(() => ({
 
 // Actual hook/cache/stores, nested Trigger and Radix. Only four IO reads are
 // fixtures; neither readiness nor the component/identity helpers are mocked.
-vi.mock("@session/services/apiAdapt", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@session/services/apiAdapt")>()), ...api,
+vi.mock("@session/services/apiAdapt/codex", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@session/services/apiAdapt/codex")>()), ...api,
 }));
 
 const A = "r25-identity-owner-a";

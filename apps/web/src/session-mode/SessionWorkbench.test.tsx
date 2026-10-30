@@ -158,7 +158,7 @@ it("keeps draft mounted while sync notices collapse, retry, and recover", async 
     vi.fn(async () => ({ ok: true, json: async () => ({ status: "ok" }) })),
   );
   const retried = vi.fn();
-  window.addEventListener("session-connection-retry", retried);
+  window.addEventListener("session-sync-retry", retried);
   const { unmount, container } = render(<SessionWorkbench />);
   try {
     await act(async () => {
@@ -171,17 +171,21 @@ it("keeps draft mounted while sync notices collapse, retry, and recover", async 
       useWorkspaceStore.setState({ projectSyncError: "HTTP 503" });
     });
     expect(screen.getAllByText("同步待重试")).toHaveLength(1);
-    const notice = screen.getByText("同步待重试").closest(".session-outage");
-    expect(notice?.getAttribute("role")).toBe("status");
-    expect(notice?.closest(".session-notices")).not.toBeNull();
+    const trigger = screen.getByRole("button", { name: /同步待重试/ });
+    expect(trigger.closest(".session-top-nav")).not.toBeNull();
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
     expect(
       container.querySelector(".session-notices-anchor")?.nextElementSibling,
     ).toBe(container.querySelector(".session-content"));
-    fireEvent.click(screen.getByRole("button", { name: "收起同步待重试" }));
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("button", { name: "收起同步详情" }));
     expect(screen.queryByRole("button", { name: "立即同步" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "展开同步待重试" }));
+    fireEvent.click(trigger);
     fireEvent.click(screen.getByRole("button", { name: "立即同步" }));
-    expect(retried).toHaveBeenCalledOnce();
+    expect(retried.mock.calls.map(([event]) => event.detail.channel)).toEqual([
+      "tabs",
+      "projects",
+    ]);
     expect(screen.getByLabelText("会话草稿")).toBe(draft);
     expect((draft as HTMLTextAreaElement).value).toBe("unsent draft");
     act(() => {
@@ -192,8 +196,36 @@ it("keeps draft mounted while sync notices collapse, retry, and recover", async 
     expect(screen.getByLabelText("会话草稿")).toBe(draft);
   } finally {
     unmount();
-    window.removeEventListener("session-connection-retry", retried);
+    window.removeEventListener("session-sync-retry", retried);
     useAgentCenterStore.setState({ tabSyncError: null });
     useWorkspaceStore.setState({ projectSyncError: null });
   }
+});
+it("a read-only sync failure stays compact and never claims there are saved local edits", async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => ({ ok: true, json: async () => ({ status: "ok" }) })),
+  );
+  const { unmount } = render(<SessionWorkbench />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(10);
+  });
+  act(() => {
+    useAgentCenterStore.setState({
+      tabSyncError: "HTTP 503",
+      pendingTabOperations: [],
+    });
+    useWorkspaceStore.setState({
+      projectSyncError: null,
+      pendingProjectOperations: [],
+    });
+  });
+  expect(
+    screen.queryByText("修改已保存在本机，连接恢复后自动同步。"),
+  ).toBeNull();
+  const trigger = screen.getByRole("button", { name: /同步待重试/ });
+  expect(trigger.getAttribute("aria-expanded")).toBe("false");
+  unmount();
+  useAgentCenterStore.setState({ tabSyncError: null });
 });

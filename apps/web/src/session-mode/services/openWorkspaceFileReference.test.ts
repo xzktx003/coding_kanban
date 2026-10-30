@@ -95,3 +95,4 @@ it("rejects malformed resolve responses and unknown owners before opening", asyn
   expect(useEditorStore.getState().openFiles).toEqual([]);
   expect(resolveWorkspaceFileReference).toHaveBeenCalledTimes(1);
 });
+it("does not reveal a late old-runtime file or toast after account authority changes",async()=>{let done!:(target:{root:string;path:string})=>void;vi.mocked(resolveWorkspaceFileReference).mockReturnValueOnce(new Promise(resolve=>done=resolve));const onOpened=vi.fn(),pending=openWorkspaceFileReference({path:"/repo/file"},"/repo",onOpened);const {invalidateCodexOperationScope}=await import("./codexOperationScope");invalidateCodexOperationScope();done({root:"/repo",path:"/repo/file"});expect(await pending).toBe(false);expect(onOpened).not.toHaveBeenCalled();expect(useEditorStore.getState().activeFile).toBeNull();});

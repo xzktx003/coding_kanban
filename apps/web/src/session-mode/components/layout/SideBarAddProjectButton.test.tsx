@@ -7,7 +7,7 @@ const isDesktopTauri = vi.fn();
 vi.mock('@session/services/codexService', () => ({ codexService: { setCurrentThread: vi.fn(async () => {}) } }));
 vi.mock('@session/browser-dialog', () => ({ open: (...args: unknown[]) => openDialog(...args) }));
 vi.mock('@session/hooks/runtime', () => ({ isDesktopTauri: () => isDesktopTauri() }));
-vi.mock('@session/features/ProjectSelector', () => ({
+vi.mock('@session/features/ProjectSelector/BrowserProjects', () => ({
   BrowserProjects: ({ onAddProject }: { onAddProject: (path: string) => void }) => (
     <button type="button" onClick={() => onAddProject('/projects/browser-picked')}>
       Choose browser project

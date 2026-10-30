@@ -1,6 +1,6 @@
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
 const api = vi.hoisted(() => ({ threadRead: vi.fn(), threadGoalGet: vi.fn() }));
-vi.mock("./apiAdapt", () => api);
+vi.mock("./apiAdapt/codex", () => api);
 import { codexService, resetCodexRuntimeState } from "./codexService";
 import { HistoryReadScopeChangedError } from "./HistoryReadScopeChangedError";
 import { useCodexStore } from "../components/codex/stores";

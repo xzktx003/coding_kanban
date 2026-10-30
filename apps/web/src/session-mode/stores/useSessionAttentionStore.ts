@@ -5,6 +5,7 @@ export type SessionKind = "codex" | "cc" | "acp";
 export interface ReplyReceipt {
   completed: Array<{ id: string; at: number }>;
   read: string[];
+  manualUnreadRevision?: number;
 }
 export const sessionKey = (kind: SessionKind, id: string) => `${kind}:${id}`;
 export function latestUnread(receipt?: ReplyReceipt): string | null {
@@ -34,9 +35,15 @@ function mergeReceipts(
     ]
       .sort((a, b) => a.at - b.at)
       .slice(-32);
+    const localRevision = existing?.manualUnreadRevision ?? 0;
+    const incomingRevision = receipt.manualUnreadRevision ?? 0;
+    const read = localRevision > incomingRevision ? existing!.read
+      : incomingRevision > localRevision ? receipt.read
+      : [...new Set([...(existing?.read ?? []), ...receipt.read])];
     merged[key] = {
       completed,
-      read: [...new Set([...(existing?.read ?? []), ...receipt.read])].filter(
+      manualUnreadRevision: Math.max(localRevision, incomingRevision),
+      read: read.filter(
         (id) => completed.some((r) => r.id === id),
       ),
     };
@@ -53,7 +60,7 @@ function mergeReceipts(
 interface AttentionState {
   receipts: Record<string, ReplyReceipt>;
   complete: (kind: SessionKind, id: string, replyId: string) => void;
-  read: (kind: SessionKind, id: string, replyId: string) => void;
+  read: (kind: SessionKind, id: string, replyId: string, expectedManualUnreadRevision?: number) => void;
   markUnread: (kind: SessionKind, id: string) => boolean;
   markFollowedRead: (ids: string[]) => number;
 }
@@ -79,7 +86,7 @@ export const useSessionAttentionStore = create<AttentionState>()(
           const key = sessionKey(kind, id);
           const receipt = state.receipts[key];
           const latest = receipt?.completed.at(-1);
-          if (!receipt || !latest || !receipt.read.includes(latest.id))
+          if (!receipt || !latest)
             return state;
           marked = true;
           return {
@@ -87,6 +94,7 @@ export const useSessionAttentionStore = create<AttentionState>()(
               ...state.receipts,
               [key]: {
                 ...receipt,
+                manualUnreadRevision: (receipt.manualUnreadRevision ?? 0) + 1,
                 read: receipt.read.filter((replyId) => replyId !== latest.id),
               },
             },
@@ -115,13 +123,14 @@ export const useSessionAttentionStore = create<AttentionState>()(
         });
         return cleared;
       },
-      read: (kind, id, replyId) =>
+      read: (kind, id, replyId, expectedManualUnreadRevision) =>
         set((state) => {
           const key = sessionKey(kind, id);
           const receipt = state.receipts[key];
           const index =
             receipt?.completed.findIndex((r) => r.id === replyId) ?? -1;
-          if (!receipt || index < 0 || receipt.read.includes(replyId))
+          if (!receipt || index < 0 || receipt.read.includes(replyId) ||
+            (expectedManualUnreadRevision !== undefined && expectedManualUnreadRevision !== (receipt.manualUnreadRevision ?? 0)))
             return state;
           return {
             receipts: {

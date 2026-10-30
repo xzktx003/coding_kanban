@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { randomUUID } from "node:crypto";
 import { installSessionUxFixture, seedSessionUx } from "./session-ux-fixture";
 
 async function cwd(page: Page, path: string) {
@@ -49,7 +50,7 @@ for (const width of [375, 1440])
       (route) =>
         route.fulfill({
           contentType: "text/html",
-          body: `<!doctype html><html><head><title>Editor fixture</title><style>body{margin:0;background:#181f26;color:#ddd;font:14px system-ui}header{padding:16px;border-bottom:1px solid #40464c}textarea{box-sizing:border-box;background:#181f26;color:#ddd;border:0;resize:none;width:100%;height:75vh;padding:24px;font:14px monospace}textarea:focus{outline:none}</style></head><body><main class="monaco-workbench"><header>EXPLORER　　App.tsx　　README.md</header><textarea aria-label="编辑内容">export function App() {\n  return &lt;Workbench /&gt;;\n}</textarea></main><script>window.frameIdentity=crypto.randomUUID()</script></body></html>`,
+          body: `<!doctype html><html><head><title>Editor fixture</title><style>body{margin:0;background:#181f26;color:#ddd;font:14px system-ui}header{padding:16px;border-bottom:1px solid #40464c}textarea{box-sizing:border-box;background:#181f26;color:#ddd;border:0;resize:none;width:100%;height:75vh;padding:24px;font:14px monospace}textarea:focus{outline:none}</style></head><body><main class="monaco-workbench"><header>EXPLORER　　App.tsx　　README.md</header><textarea aria-label="编辑内容">export function App() {\n  return &lt;Workbench /&gt;;\n}</textarea></main><script>window.frameIdentity=${JSON.stringify(randomUUID())}</script></body></html>`,
         }),
     );
     await page.route("**/api/workbench/vscode-web", (route) => {

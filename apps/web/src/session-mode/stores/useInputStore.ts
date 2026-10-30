@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { useCodexStore } from "../components/codex/stores/useCodexStore";
 import { useCCStore } from "./cc/ccStore";
 import { useAcpStore } from "./useAcpStore";
+import { acpDraftSessionId } from "../services/acpSessionIdentity";
 import { useAgentSettingsStore } from "./useAgentSettingsStore";
 import { useWorkspaceStore } from "./useWorkspaceStore";
 import {
@@ -17,7 +18,12 @@ export function activeDraftOwner() {
   const acp = useAcpStore.getState();
   const cwd = useWorkspaceStore.getState().cwd;
   if (acp.active)
-    return sessionDraftKey("acp", acp.sessionId, cwd, acp.agentId);
+    return sessionDraftKey(
+      "acp",
+      acpDraftSessionId(acp.sessionId, acp.historySessionId, acp.connectionId),
+      cwd,
+      acp.agentId,
+    );
   const kind = useAgentSettingsStore.getState().selectedAgent;
   return sessionDraftKey(
     kind,

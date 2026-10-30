@@ -1,3 +1,6 @@
+import { isUnsupportedTranscriptEvent } from "./transcriptDiagnostics";
+import { isCachedTurnExecutionUnverified } from "@session/services/cachedTurnExecutionView";
+import { isTranscriptControlNotification } from "../presentation/transcriptControl";
 import type { ServerNotification } from "@session/bindings";
 import {
   normalizeQuestionEvents,
@@ -36,6 +39,7 @@ const hiddenMethods = new Set([
   "hook/completed",
 ]);
 function turnIdOf(event: ServerNotification): string | undefined {
+  if (!event.params || typeof event.params !== "object") return undefined;
   if (event.method === "turn/completed") return event.params.turn.id;
   if ("turnId" in event.params) return event.params.turnId ?? undefined;
 }
@@ -70,12 +74,12 @@ export function buildThreadRows(events: ServerNotification[]): ThreadRow[] {
     string,
     { startedAt: number | null; completedAt: number | null }
   >();
-  for (const event of events) {
+  const lastCompletion = new Map<string, number>();
+  for (const [index, event] of events.entries()) {
     if (event.method === "turn/started" || event.method === "turn/completed") {
-      turnTimes.set(
-        JSON.stringify([event.params.threadId, event.params.turn.id]),
-        event.params.turn,
-      );
+      const key = JSON.stringify([event.params.threadId, event.params.turn.id]);
+      turnTimes.set(key, event.params.turn);
+      if (event.method === "turn/completed") lastCompletion.set(key, index);
     }
   }
   const turns = new Map<string, ServerNotification[]>();
@@ -123,7 +127,12 @@ export function buildThreadRows(events: ServerNotification[]): ThreadRow[] {
     const { index } = item;
     if (projection.hidden.has(index)) continue;
     const event = projection.replacements.get(index) ?? item.event;
-    if (hiddenMethods.has(event.method)) continue;
+    if (
+      hiddenMethods.has(event.method) ||
+      isTranscriptControlNotification(event.method) ||
+      isUnsupportedTranscriptEvent(event)
+    )
+      continue;
     // VSIX app-initial-e98b9eaef8e3: wait never becomes a
     // multi-agent-action. Retain its native lifecycle for observation only.
     if (
@@ -211,6 +220,13 @@ export function buildThreadRows(events: ServerNotification[]): ThreadRow[] {
     }
     if (event.method === "turn/completed") {
       const turn = event.params.turn;
+      // Read-only recovery may reconcile an earlier provisional termination.
+      // Keep the raw log intact, but render one current ending per exact turn.
+      if (
+        lastCompletion.get(JSON.stringify([event.params.threadId, turn.id])) !==
+        index
+      )
+        continue;
       if (
         turn.status !== "interrupted" &&
         turn.status !== "failed" &&
@@ -223,6 +239,9 @@ export function buildThreadRows(events: ServerNotification[]): ThreadRow[] {
       context = {
         events: turns.get(turn.id),
         eventIndex: localIndices.get(index),
+        ...(isCachedTurnExecutionUnverified(event)
+          ? { executionUnverified: true }
+          : {}),
       };
     }
     if (

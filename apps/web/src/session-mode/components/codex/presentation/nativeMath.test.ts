@@ -1,4 +1,4 @@
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { nativeMathMarkdown } from "./nativeMath";
 it("uses the original plugin delimiters while keeping currency and dollar notation literal", () => {
   expect(nativeMathMarkdown("Cost $5, $x$ and $$y$$; \\(x^2\\).")).toBe(
@@ -18,3 +18,24 @@ it("keeps unfinished native delimiters literal until their closure arrives", () 
 it("treats the native one-line bracket delimiter as inline math", () => {
   expect(nativeMathMarkdown("Before \\[y\\] after")).toBe("Before $y$ after");
 });
+
+it.each([
+  "# Reply\n\n" + "ordinary reply without formulas ".repeat(8192),
+  "# 常规回复🙂\n`C:\\project\\file.ts`\n\n" +
+    "保留 **Markdown** 与 Unicode。".repeat(4096),
+])(
+  "passes math-free Markdown through without rebuilding its lines",
+  (source) => {
+    const slice = vi.spyOn(String.prototype, "slice");
+    let value: string;
+    let slices: number;
+    try {
+      value = nativeMathMarkdown(source);
+      slices = slice.mock.calls.length;
+    } finally {
+      slice.mockRestore();
+    }
+    expect(value).toBe(source);
+    expect(slices).toBe(0);
+  },
+);

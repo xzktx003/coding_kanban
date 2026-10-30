@@ -11,8 +11,7 @@ import type { SandboxMode } from "@session/bindings/v2";
  * current permission mode is full access and no non-default permission profile
  * is pinned. Only the remaining case awaits the `Pti` dialog.
  *
- * Our side has no permission-profile concept, so `b` reduces to the sandbox
- * mode. `permissionsKnown` is required because an unconfirmed permission state
+ * `permissionsKnown` is required because an unconfirmed permission state
  * must not be read as full access, and must not be read as safe either: the
  * gate only fires on an affirmatively known full-access mode, matching how the
  * rest of the composer refuses to render an unknown mode as a definite one.
@@ -22,16 +21,21 @@ export function needsUltraFullAccessConfirmation({
   currentEffort,
   sandbox,
   permissionsKnown,
+  permissionProfile,
 }: {
   nextEffort: ReasoningEffort;
   currentEffort: ReasoningEffort | null | undefined;
   sandbox: SandboxMode | null | undefined;
   permissionsKnown: boolean;
+  permissionProfile?: string | null;
 }): boolean {
   if (nextEffort !== "ultra") return false;
   // Already on ultra: raising nothing, so there is no new combination to warn
   // about. This is the official `s.reasoningEffort === "ultra"` arm.
   if (currentEffort === "ultra") return false;
+  // Official Lti's condition applies only to the ordinary built-in permission
+  // modes. A custom named profile must not inherit a stale sandbox label.
+  if (permissionProfile && !permissionProfile.startsWith(":")) return false;
   return permissionsKnown && sandbox === "danger-full-access";
 }
 
@@ -40,9 +44,8 @@ export function needsUltraFullAccessConfirmation({
  * `preferred-non-full-access-agent-mode-by-host-id` preference and returns null
  * when none applies, which is what disables `Continue`.
  *
- * We do not persist that preference, so the fallback is the one restricted mode
- * our own permission menu offers as its default row ("请求批准"). Returning it
- * unconditionally would be wrong if the current mode already were that mode,
- * but this helper is only consulted while the mode is full access.
+ * The web client now records an explicit restricted-mode choice per server
+ * origin through nonFullAccessPreference; an absent preference stays null.
  */
-export const ULTRA_FALLBACK_SANDBOX: SandboxMode = "workspace-write";
+/** @deprecated Use the host's actual saved restricted-mode preference. */
+export const ULTRA_FALLBACK_SANDBOX: SandboxMode | null = null;

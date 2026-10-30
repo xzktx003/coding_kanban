@@ -5,6 +5,7 @@ const mock = vi.hoisted(() => ({
   event: undefined as ((event: any) => void) | undefined,
   open: undefined as (() => void) | undefined,
   resync: undefined as (() => void) | undefined,
+  prepared: vi.fn(() => true),
 }));
 vi.mock("./codexService", () => ({
   codexService: { loadThreadHistory: mock.resume },
@@ -21,15 +22,24 @@ vi.mock("../lib/eventStream", () => ({
     return () => {};
   },
 }));
+vi.mock("./codexTranscriptActivity", async (original) => ({
+  ...(await original<object>()),
+  isCodexTranscriptPrepared: mock.prepared,
+}));
 import { useAgentCenterStore } from "../stores/useAgentCenterStore";
 import { useCodexStore } from "../components/codex/stores";
 import { startFollowedSessionHistorySync } from "./followedSessionHistorySync";
 import { useSessionSyncStore } from "../stores/useSessionSyncStore";
+import { useSessionPreloadStore } from "./sessionPreloadState";
+import { retainCodexTranscript } from "./codexTranscriptActivity";
+import { useSessionSplitStore } from "../stores/useSessionSplitStore";
 let stop: (() => void) | undefined;
 beforeEach(() => {
   vi.useFakeTimers();
   mock.resume.mockReset();
   mock.resume.mockResolvedValue(undefined);
+  mock.prepared.mockReturnValue(true);
+  useSessionSplitStore.getState().reset();
   useCodexStore.setState({
     historyLoadedMap: {},
     threadStatusMap: {},
@@ -49,17 +59,59 @@ beforeEach(() => {
     currentAgentCardKind: "codex",
   });
 });
+it("keeps background warm publication behind the committed foreground renderer", async () => {
+  mock.prepared.mockReturnValue(false);
+  stop = startFollowedSessionHistorySync();
+  await vi.advanceTimersByTimeAsync(1);
+  expect(mock.resume.mock.calls.map((call) => call[0])).toEqual(["a"]);
+  mock.prepared.mockReturnValue(true);
+  retainCodexTranscript("a")();
+  await vi.advanceTimersByTimeAsync(1);
+  expect(mock.resume.mock.calls.map((call) => call[0])).toEqual(["a", "b"]);
+  expect(mock.resume.mock.calls[1][2].priority).toBe("background");
+});
 it("clears an initial history failure after automatic read-only retry", async () => {
   useAgentCenterStore.setState({ cards: [{ kind: "codex", id: "a" }] });
   mock.resume.mockRejectedValueOnce(new Error("offline"));
   stop = startFollowedSessionHistorySync();
   await vi.advanceTimersByTimeAsync(1);
   expect(useSessionSyncStore.getState().recovering.a).toBe("retrying");
+  expect(useSessionPreloadStore.getState().entries["codex:a"]?.phase).toBe(
+    "failed",
+  );
   await vi.advanceTimersByTimeAsync(5000);
   expect(mock.resume).toHaveBeenCalledTimes(2);
   expect(useSessionSyncStore.getState().recovering.a).toBeUndefined();
+  expect(useSessionPreloadStore.getState().entries["codex:a"]?.phase).toBe(
+    "ready",
+  );
   await vi.advanceTimersByTimeAsync(60000);
   expect(mock.resume).toHaveBeenCalledTimes(2);
+});
+it("covers all fifty followed recent pages and cleans the coverage registry on teardown", async () => {
+  const cards = Array.from({ length: 50 }, (_, i) => ({
+    kind: "codex" as const,
+    id: `all-${i}`,
+  }));
+  useAgentCenterStore.setState({
+    cards,
+    currentAgentCardId: "all-49",
+    currentAgentCardKind: "codex",
+  });
+  stop = startFollowedSessionHistorySync();
+  await vi.advanceTimersByTimeAsync(1);
+  expect(mock.resume).toHaveBeenCalledTimes(50);
+  expect(mock.resume.mock.calls[0][0]).toBe("all-49");
+  expect(Object.values(useSessionPreloadStore.getState().entries)).toHaveLength(
+    50,
+  );
+  expect(
+    Object.values(useSessionPreloadStore.getState().entries).every(
+      (entry) => entry.phase === "ready",
+    ),
+  ).toBe(true);
+  stop();
+  expect(useSessionPreloadStore.getState().entries).toEqual({});
 });
 it("reads the newly selected session before the background queue drains", async () => {
   // Observed in the browser: switching sessions took ~14s because four
@@ -91,6 +143,129 @@ it("reads the newly selected session before the background queue drains", async 
   pending.forEach((resolve) => resolve());
 });
 
+it("admits every visible pane ahead of queued background pages without changing the selected target", async () => {
+  const releases: Array<() => void> = [];
+  mock.resume.mockImplementation(
+    () => new Promise<void>((resolve) => releases.push(resolve)),
+  );
+  useAgentCenterStore.setState({
+    cards: ["a", "b", "c", "d", "pane-2", "pane-3", "pane-4"].map((id) => ({
+      kind: "codex",
+      id,
+    })),
+  });
+  stop = startFollowedSessionHistorySync();
+  await vi.advanceTimersByTimeAsync(1);
+  const panes = ["pane-2", "pane-3", "pane-4"].map(retainCodexTranscript);
+  try {
+    await vi.advanceTimersByTimeAsync(1);
+    for (const id of ["pane-2", "pane-3", "pane-4"])
+      expect(
+        mock.resume.mock.calls.find((call) => call[0] === id)?.[2].priority,
+      ).toBe("interactive");
+    expect(useAgentCenterStore.getState().currentAgentCardId).toBe("a");
+  } finally {
+    panes.forEach((release) => release());
+    releases.forEach((resolve) => resolve());
+  }
+});
+
+it("treats a hidden browser page's saved selection as background demand", async () => {
+  const visibility = vi
+    .spyOn(document, "visibilityState", "get")
+    .mockReturnValue("hidden");
+  try {
+    stop = startFollowedSessionHistorySync();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(
+      mock.resume.mock.calls.every((call) => call[2].priority === "background"),
+    ).toBe(true);
+  } finally {
+    visibility.mockRestore();
+  }
+});
+
+it("preloads the restored visible window targets before unrelated background tabs mount", async () => {
+  const releases: Array<() => void> = [];
+  mock.resume.mockImplementation(
+    () => new Promise<void>((resolve) => releases.push(resolve)),
+  );
+  const group = (id: string, key: string) => ({
+    type: "group" as const,
+    id,
+    keys: [key],
+    selected: key,
+  });
+  useSessionSplitStore.setState({
+    activeGroupId: "primary",
+    tree: {
+      type: "split",
+      id: "split",
+      direction: "horizontal",
+      ratio: 50,
+      first: group("primary", "codex:a"),
+      second: group("other", "codex:visible-target"),
+    },
+  });
+  useAgentCenterStore.setState({
+    cards: ["a", "background", "visible-target"].map((id) => ({
+      kind: "codex",
+      id,
+    })),
+  });
+  stop = startFollowedSessionHistorySync();
+  try {
+    await vi.advanceTimersByTimeAsync(1);
+    expect(mock.resume.mock.calls.map((call) => call[0])).toEqual([
+      "a",
+      "visible-target",
+      "background",
+    ]);
+    expect(mock.resume.mock.calls[1][2].priority).toBe("interactive");
+  } finally {
+    releases.forEach((resolve) => resolve());
+  }
+});
+
+it("keeps non-current restored phone window groups in the background lane", async () => {
+  const previousWidth = Object.getOwnPropertyDescriptor(window, "innerWidth");
+  Object.defineProperty(window, "innerWidth", {
+    configurable: true,
+    value: 393,
+  });
+  useSessionSplitStore.setState({
+    activeGroupId: "phone-current",
+    tree: {
+      type: "split",
+      id: "phone-split",
+      direction: "horizontal",
+      ratio: 50,
+      first: {
+        type: "group",
+        id: "phone-current",
+        keys: ["codex:a"],
+        selected: "codex:a",
+      },
+      second: {
+        type: "group",
+        id: "phone-other",
+        keys: ["codex:b"],
+        selected: "codex:b",
+      },
+    },
+  });
+  stop = startFollowedSessionHistorySync();
+  try {
+    await vi.advanceTimersByTimeAsync(1);
+    expect(
+      mock.resume.mock.calls.find((call) => call[0] === "b")?.[2].priority,
+    ).toBe("background");
+  } finally {
+    if (previousWidth)
+      Object.defineProperty(window, "innerWidth", previousWidth);
+  }
+});
+
 it("clears failed initial recovery on teardown without leaving a stale notice", async () => {
   mock.resume.mockRejectedValue(new Error("offline"));
   stop = startFollowedSessionHistorySync();
@@ -115,6 +290,7 @@ it("loads all followed histories even with partial events, without selecting the
       {
         background: true,
         recent: true,
+        priority: "interactive",
         signal: expect.any(AbortSignal),
         reportScopeChanges: true,
       },
@@ -125,6 +301,7 @@ it("loads all followed histories even with partial events, without selecting the
       {
         background: true,
         recent: true,
+        priority: "background",
         signal: expect.any(AbortSignal),
         reportScopeChanges: true,
       },

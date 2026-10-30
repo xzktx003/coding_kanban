@@ -1302,6 +1302,48 @@ it("observes an official writer lock that appears after the composer and clears 
   tracker.dispose();
 });
 
+it("recognizes the official zh-CN writer lock and keeps watching while it stays up", async () => {
+  vi.useFakeTimers();
+  const { frame, app } = nativeContentFixture();
+  const root = app.getElementById("root")!;
+  root.innerHTML =
+    '<button>Chat</button><div data-above-composer-portal="true" data-above-composer-conversation-id="019aabcd-1234-7890-abcd-0123456789ab"></div><div contenteditable="true"></div>';
+  const tracker = observeNativeContent(frame, () => {});
+  dispose = () => tracker.dispose();
+  tracker.start();
+  await vi.advanceTimersByTimeAsync(30_001);
+  const notice = document.createElement("div");
+  notice.setAttribute("role", "alert");
+  notice.innerHTML =
+    "<strong>已在另一个应用中打开</strong><span>请先在那边关闭会话，才能在这里继续。</span><button>重试</button>";
+  root.append(notice);
+  await vi.advanceTimersByTimeAsync(40);
+  expect(tracker.snapshot()).toMatchObject({
+    blockedByOtherApp: true,
+    hasComposer: false,
+  });
+  notice.remove();
+  await vi.advanceTimersByTimeAsync(40);
+  expect(tracker.snapshot()).toMatchObject({
+    blockedByOtherApp: false,
+    hasComposer: true,
+  });
+});
+
+it("does not treat an unrelated retry button as another app holding the thread", async () => {
+  const { frame, app } = nativeContentFixture();
+  const root = app.getElementById("root")!;
+  root.innerHTML =
+    '<div data-above-composer-portal="true" data-above-composer-conversation-id="019aabcd-1234-7890-abcd-0123456789ab"></div><div contenteditable="true"></div><button>重试</button>';
+  const tracker = observeNativeContent(frame, () => {});
+  dispose = () => tracker.dispose();
+  tracker.start();
+  expect(tracker.snapshot()).toMatchObject({
+    blockedByOtherApp: false,
+    hasComposer: true,
+  });
+});
+
 it("detects the writer lock without reading the entire conversation text on every check", async () => {
   const { frame, app } = nativeContentFixture();
   const root = app.getElementById("root")!;

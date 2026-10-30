@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { composeContextText } from "@agent-orchestrator/shared";
+import { composeContextText } from "@agent-orchestrator/shared/composer-context";
 import type {
   FollowupSubmit,
   FollowupThread,
@@ -56,7 +56,19 @@ export function reconcileDeliveryEchoes(
     let entries = s.entries;
     let changed = false;
     for (const message of receipt.items) {
-      const id = key(threadId, message.id);
+      const logicalId = message.nativeClientUserMessageId ?? message.id;
+      const id = key(threadId, logicalId);
+      // Official queue acceptance does not prove execution. Once a pending
+      // entry leaves that queue, native events/history own its visible message;
+      // metadata receipts must not manufacture an empty or cancelled echo.
+      if (message.receiptOnly || (message.authority === "native" && message.nativeQueuedSubmissionId)) {
+        if (entries[id]) {
+          if (!changed) entries = { ...entries };
+          delete entries[id];
+          changed = true;
+        }
+        continue;
+      }
       // Accepted delivery wins over a delayed negative queue snapshot. Model
       // failure belongs to the real turn and must never retract its user input.
       if (
@@ -84,12 +96,16 @@ export function reconcileDeliveryEchoes(
       // resurrect its sent archive as new transcript content.
       if (
         !entries[id] &&
+        message.authority === "native"
+      ) continue;
+      if (
+        !entries[id] &&
         message.status !== "queued" &&
         message.status !== "sending"
       )
         continue;
       const next = {
-        id: message.id,
+        id: logicalId,
         threadId,
         text: composeContextText(message.text, message.contexts),
         images: [...message.images],

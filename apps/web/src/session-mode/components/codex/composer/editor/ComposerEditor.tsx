@@ -28,7 +28,7 @@ import {
 } from "react";
 import { type MentionItem, useMentionItems } from "../mentions";
 import { usePluginInputDrafts } from "@session/features/plugins/pluginInputs";
-import { validNativeInputMention } from "@agent-orchestrator/shared";
+import { validNativeInputMention } from "@agent-orchestrator/shared/session-subagents";
 import { MentionChipDeletePlugin } from "./MentionChipDeletePlugin";
 import { MentionChipNode } from "./MentionChipNode";
 import { MentionTypeaheadPlugin } from "./MentionTypeaheadPlugin";

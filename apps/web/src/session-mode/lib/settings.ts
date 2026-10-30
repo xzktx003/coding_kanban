@@ -34,31 +34,44 @@ interface SettingsFile {
 
 // ── File I/O ─────────────────────────────────────────────────────────────────
 
-async function readSettingsFile(): Promise<SettingsFile | null> {
-  try {
-    return await getJsonWithOptions<SettingsFile>("/api/settings", {
-      suppressToast: true,
-    });
-  } catch {
-    return null;
-  }
+async function readSettingsFile(signal?: AbortSignal): Promise<SettingsFile> {
+  return getJsonWithOptions<SettingsFile>("/api/settings", {
+    suppressToast: true,
+    signal,
+  });
 }
 
 // ── Hydration ─────────────────────────────────────────────────────────────────
 
-function applySettings(data: SettingsFile): void {
-  useSessionNameStore.setState((s) => ({
-    names: { ...s.names, ...normalizeSessionNames(data.sessionNames) },
-  }));
+function applySettings(
+  data: SettingsFile,
+  revisions: Record<string, number>,
+): void {
+  const remote = normalizeSessionNames(data.sessionNames);
+  useSessionNameStore.setState((s) => {
+    let names = s.names;
+    for (const [key, value] of Object.entries(remote)) {
+      if (
+        (s.editRevisions[key] ?? 0) !== (revisions[key] ?? 0) ||
+        names[key] === value
+      )
+        continue;
+      if (names === s.names) names = { ...names };
+      names[key] = value;
+    }
+    return names === s.names ? s : { names };
+  });
   // Workspace membership is now managed by /api/session/projects.
   // cwd, history, selected Agent and layout belong to this browser; remote settings
   // must never hydrate them over a restored local workspace.
 }
 
-export async function loadSettings(): Promise<void> {
-  const data = await readSettingsFile();
-  if (!data) return;
-  applySettings(data);
+export async function loadSettings(signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
+  const revisions = useSessionNameStore.getState().editRevisions;
+  const data = await readSettingsFile(signal);
+  signal?.throwIfAborted();
+  applySettings(data, revisions);
 }
 
 /** Why the last remote load produced no projects, for the phone to show. */
@@ -71,16 +84,22 @@ export const remoteSettingsError = (): string | null => lastRemoteError;
  * Returns false when the desktop answered with nothing usable, so the caller
  * can fall back to reading the file over the remote filesystem API instead.
  */
-export async function loadRemoteSettings(): Promise<boolean> {
+export async function loadRemoteSettings(
+  signal?: AbortSignal,
+): Promise<boolean> {
+  signal?.throwIfAborted();
+  const revisions = useSessionNameStore.getState().editRevisions;
   try {
-    const data = (await fetchRemoteSettings()) as SettingsFile;
+    const data = (await fetchRemoteSettings({ signal })) as SettingsFile;
+    signal?.throwIfAborted();
     lastRemoteError = data.workspace
       ? null
       : "The desktop returned no workspace settings.";
     if (!data.workspace) return false;
-    applySettings(data);
+    applySettings(data, revisions);
     return true;
   } catch (err) {
+    signal?.throwIfAborted();
     lastRemoteError = String(err);
     console.error("[settings] loadRemoteSettings failed:", err);
     return false;

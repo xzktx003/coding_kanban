@@ -24,6 +24,7 @@ interface PluginDetailViewProps {
   onInstall?: () => void;
   onUninstall?: () => void;
   onUse?: () => void;
+  onAuthentication?: () => void;
   onBack?: () => void;
 }
 
@@ -45,10 +46,12 @@ function getPluginScreenshots(plugin: PluginDetail): string[] {
 export function PluginDetailView({
   plugin,
   isInstalling,
+  isUninstalling,
   canInstall,
   onInstall,
   onUninstall,
   onUse,
+  onAuthentication,
 }: PluginDetailViewProps) {
   const { openExternalUrl } = useExternalUrl();
 
@@ -114,15 +117,17 @@ export function PluginDetailView({
                 className="session-plugin-touch-target"
                 variant="destructive"
                 onClick={onUninstall}
+                disabled={isUninstalling || isInstalling}
               >
                 <Trash2 className="h-4 w-4" />
-                Uninstall
+                {isUninstalling ? "正在卸载…" : "Uninstall"}
               </Button>
               <Button
                 size="sm"
                 className="session-plugin-touch-target"
                 variant="default"
                 onClick={onUse}
+                disabled={isUninstalling || isInstalling}
               >
                 <MessageCircleCode className="h-4 w-4 mr-2" />
                 Try now
@@ -175,6 +180,11 @@ export function PluginDetailView({
         )}
 
         <AppsSection apps={apps} />
+        {apps.some((app) => app.installUrl) && (
+          <Button size="sm" variant="outline" onClick={onAuthentication}>
+            管理应用认证
+          </Button>
+        )}
 
         {mcpServers.length > 0 && (
           <div className="space-y-1">

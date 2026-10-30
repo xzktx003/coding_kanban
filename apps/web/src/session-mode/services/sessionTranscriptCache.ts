@@ -1,13 +1,19 @@
 import { withoutToolTranscriptEvents } from "./codexTranscriptVisibility";
 import type { ServerNotification } from "../bindings";
-import { isCodexTranscriptDormant } from "./codexTranscriptActivity";
+import {
+  isCodexTranscriptDormant,
+  isCodexTranscriptVisible,
+} from "./codexTranscriptActivity";
 import type { Thread } from "../bindings/v2";
 import type { CCMessage } from "../components/cc/types/messages";
 import { useCodexStore } from "../components/codex/stores";
 import { isIgnoredTranscriptEvent } from "../components/codex/stores/eventUtils";
 import { useCCStore } from "../stores/cc";
 import { useSessionSyncStore } from "../stores/useSessionSyncStore";
-import { useAgentCenterStore } from "../stores/useAgentCenterStore";
+import {
+  selectedAgentCard,
+  useAgentCenterStore,
+} from "../stores/useAgentCenterStore";
 import { openedSessions } from "./openedSessions";
 import {
   MEMORY_HISTORY_RESTART_CURSOR,
@@ -17,7 +23,20 @@ import {
 import {
   compactCodexTranscript,
   estimateTranscriptBytes,
+  CODEX_TRANSCRIPT_MAX_BYTES,
+  CODEX_TRANSCRIPT_MAX_EVENTS,
 } from "./codexTranscriptMemoryBudget";
+import { mergeThreadHistory } from "../utils/mergeThreadHistory";
+import {
+  captureNativeExecutionScope,
+  currentNativeExecutionTiming,
+  isNativeExecutionScopeCurrent,
+  reconcileNativeExecutionEvents,
+} from "./nativeTurnExecutionProof";
+import {
+  isCachedTurnExecutionUnverified,
+  markCachedTurnExecutionUnverified,
+} from "./cachedTurnExecutionView";
 import {
   cachedTranscriptBaselines,
   cachedTranscriptTimings,
@@ -50,7 +69,85 @@ const CACHE_RECORD_TOOL_TEXT_LIMIT = 16 * 1024;
 const CACHE_RECORD_ACTIVE_TOOL_GROUPS = 64;
 const CACHE_RECORD_ESTIMATE_RATIO = 0.85;
 let database: Promise<IDBDatabase | null> | undefined;
-const textEncoder = new TextEncoder();
+
+/** Internal JSON byte estimator exported for its serialization contract tests. */
+export function cacheSerializedJsonUtf8ByteLength(value: unknown): number {
+  let stringContentBytes = 0;
+  const serialized = JSON.stringify(value, (_key, current) => {
+    let normalized = current;
+    if (typeof normalized === "bigint") normalized = normalized.toString();
+    if (typeof normalized === "string") {
+      stringContentBytes +=
+        cacheEscapedJsonStringContentUtf8ByteLength(normalized);
+      return "";
+    }
+    return normalized;
+  });
+  // Preserve the existing counter's failure for JSON.stringify(undefined); the
+  // read/write callers catch this and skip cache restoration/persistence.
+  if (serialized === undefined)
+    throw new TypeError("Cannot count bytes for undefined JSON serialization");
+  return cacheSerializedUtf8ByteLength(serialized) + stringContentBytes;
+}
+
+function cacheEscapedJsonStringContentUtf8ByteLength(value: string): number {
+  let bytes = 0;
+  for (let index = 0; index < value.length; index++) {
+    const code = value.charCodeAt(index);
+    if (
+      code === 0x22 ||
+      code === 0x5c ||
+      code === 0x08 ||
+      code === 0x09 ||
+      code === 0x0a ||
+      code === 0x0c ||
+      code === 0x0d
+    ) {
+      bytes += 2;
+    } else if (code < 0x20) {
+      bytes += 6;
+    } else if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        bytes += 4;
+        index++;
+      } else {
+        bytes += 6;
+      }
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      bytes += 6;
+    } else if (code < 0x80) {
+      bytes++;
+    } else if (code < 0x800) {
+      bytes += 2;
+    } else {
+      bytes += 3;
+    }
+  }
+  return bytes;
+}
+
+/** Count UTF-8 bytes in serialized JSON without allocating an encoded copy. */
+export function cacheSerializedUtf8ByteLength(value: string): number {
+  let bytes = 0;
+  for (let index = 0; index < value.length; index++) {
+    const code = value.charCodeAt(index);
+    if (code < 0x80) bytes++;
+    else if (code < 0x800) bytes += 2;
+    else if (
+      code >= 0xd800 &&
+      code <= 0xdbff &&
+      index + 1 < value.length &&
+      value.charCodeAt(index + 1) >= 0xdc00 &&
+      value.charCodeAt(index + 1) <= 0xdfff
+    ) {
+      bytes += 4;
+      index++;
+    } else bytes += 3;
+  }
+  return bytes;
+}
+
 function open() {
   if (!database)
     database = new Promise((resolve) => {
@@ -104,10 +201,7 @@ export async function readTranscriptCache(
       const limit = cacheRecordLimit();
       const record = buildCacheRecord(cached, limit);
       if (!record) return;
-      const serialized = JSON.stringify(record, (_key, value) =>
-        typeof value === "bigint" ? value.toString() : value,
-      );
-      record.bytes = textEncoder.encode(serialized).byteLength;
+      record.bytes = cacheSerializedJsonUtf8ByteLength(record);
       if (record.bytes > limit) return;
       return record;
     }
@@ -343,10 +437,7 @@ async function writeTranscriptCacheNow(record: TranscriptCache) {
     const limit = cacheRecordLimit();
     // JSON is used only to estimate bytes. IndexedDB persists the original
     // structured-clone record, including exact native bigint hook counters.
-    const serialized = JSON.stringify(record, (_key, value) =>
-      typeof value === "bigint" ? value.toString() : value,
-    );
-    record.bytes = textEncoder.encode(serialized).byteLength;
+    record.bytes = cacheSerializedJsonUtf8ByteLength(record);
     if (record.bytes > limit) return;
     const tx = db.transaction(["transcripts", "budget"], "readwrite"),
       store = tx.objectStore("transcripts"),
@@ -410,6 +501,7 @@ export function saveReadingPosition(key: string, position: ReadingPosition) {
 export function startSessionTranscriptCache() {
   let stopped = false;
   const restoring = new Set<string>();
+  let restoreRunning = false;
   const dirty = new Set<string>();
   let timer: ReturnType<typeof setTimeout> | undefined;
   function flush() {
@@ -440,79 +532,189 @@ export function startSessionTranscriptCache() {
     if (dirty.size && !timer) timer = setTimeout(flush, 500);
   }
   async function restore() {
-    if (stopped || isTranscriptCacheDisposed()) return;
-    for (const card of openedSessions()) {
-      if (card.kind === "codex" && isCodexTranscriptDormant(card.id)) continue;
-      const key = `${card.kind}:${card.id}`;
-      if (restoring.has(key)) continue;
-      restoring.add(key);
-      const before =
-        card.kind === "codex"
-          ? useCodexStore.getState().events[card.id]
-          : useCCStore.getState().sessionMessagesMap[card.id];
-      const cached = await readTranscriptCache(key);
-      // Cache disposal can precede React's effect cleanup during hot replacement.
-      // A late IndexedDB result must not repopulate the retired module's maps.
-      if (stopped || isTranscriptCacheDisposed()) return;
-      if (
-        (card.kind === "codex" && isCodexTranscriptDormant(card.id)) ||
-        !cached ||
-        !openedSessions().some((c) => c.kind === card.kind && c.id === card.id)
-      )
-        continue;
-      if (
-        card.kind === "codex" &&
-        cached.events &&
-        useCodexStore.getState().events[card.id] === before &&
-        !useCodexStore.getState().historyLoadedMap[card.id]
-      ) {
-        cachedTranscriptBaselines.set(card.id, cached.events);
-        const boundary = [...cached.events]
-          .reverse()
-          .find(
-            (e) => e.method === "turn/completed" || e.method === "turn/started",
-          );
+    if (restoreRunning || stopped || isTranscriptCacheDisposed()) return;
+    restoreRunning = true;
+    try {
+      while (!stopped && !isTranscriptCacheDisposed()) {
+        // Re-evaluate after each bounded IDB read so a newly selected view does
+        // not wait for the whole original followed order. Only one restore runs.
+        const candidates = openedSessions().filter(
+          (card) =>
+            !restoring.has(`${card.kind}:${card.id}`) &&
+            !(card.kind === "codex" && isCodexTranscriptDormant(card.id)),
+        );
+        const selected = selectedAgentCard(useAgentCenterStore.getState());
+        const card =
+          candidates.find(
+            (card) => card.kind === selected?.kind && card.id === selected.id,
+          ) ??
+          candidates.find(
+            (card) =>
+              card.kind === "codex" && isCodexTranscriptVisible(card.id),
+          ) ??
+          candidates[0];
+        if (!card) break;
+        const key = `${card.kind}:${card.id}`;
+        restoring.add(key);
+        const before =
+          card.kind === "codex"
+            ? useCodexStore.getState().events[card.id]
+            : useCCStore.getState().sessionMessagesMap[card.id];
+        const sourceScope = captureNativeExecutionScope();
+        const cached = await readTranscriptCache(key);
+        // Cache disposal can precede React's effect cleanup during hot replacement.
+        // A late IndexedDB result must not repopulate the retired module's maps.
+        if (stopped || isTranscriptCacheDisposed()) return;
+        if (!isNativeExecutionScopeCurrent(sourceScope)) continue;
         if (
-          boundary &&
-          (boundary.method === "turn/completed" ||
-            boundary.method === "turn/started")
+          (card.kind === "codex" && isCodexTranscriptDormant(card.id)) ||
+          !cached ||
+          !openedSessions().some(
+            (c) => c.kind === card.kind && c.id === card.id,
+          )
+        )
+          continue;
+        if (
+          card.kind === "codex" &&
+          cached.events &&
+          useCodexStore.getState().events[card.id] === before &&
+          !useCodexStore.getState().historyLoadedMap[card.id]
         ) {
-          const turn = boundary.params.turn;
-          cachedTranscriptTimings.set(card.id, {
-            turnId: turn.id,
-            status: turn.status,
-            startedAtMs: (turn.startedAt ?? 0) * 1000,
-            durationMs: turn.durationMs,
+          const execution = useCodexStore.getState();
+          const verified = currentNativeExecutionTiming(
+            card.id,
+            execution.turnTimingMap[card.id],
+          );
+          const projected = reconcileNativeExecutionEvents(
+            card.id,
+            cached.events,
+            verified,
+            execution.threadStatusMap[card.id]?.type === "active",
+          );
+          // Native events that arrived before cache hydration started remain
+          // newer than this device snapshot too; never overwrite their items.
+          const merged = before?.length
+            ? mergeThreadHistory(projected, [], before as ServerNotification[])
+            : projected;
+          const bounded = compactCodexTranscript(merged, {
+            maxBytes: CODEX_TRANSCRIPT_MAX_BYTES,
+            targetBytes: CODEX_TRANSCRIPT_MAX_BYTES / 2,
+            maxEvents: CODEX_TRANSCRIPT_MAX_EVENTS,
+            targetEvents: CODEX_TRANSCRIPT_MAX_EVENTS / 2,
+            activeTurnId:
+              verified?.status === "inProgress" ? verified.turnId : undefined,
           });
+          if (bounded.estimatedBytes > CODEX_TRANSCRIPT_MAX_BYTES) continue;
+          let restoredEvents = bounded.events;
+          // Only the latest cache-only ending is provisional. Genuine older
+          // interruptions remain visible; no protocol status or busy flag is
+          // changed to express this display uncertainty.
+          let latestLifecycle: ServerNotification | undefined;
+          for (let index = restoredEvents.length - 1; index >= 0; index--) {
+            const event = restoredEvents[index];
+            if (
+              (event.method === "turn/started" ||
+                event.method === "turn/completed") &&
+              event.params.threadId === card.id
+            ) {
+              latestLifecycle = event;
+              break;
+            }
+          }
+          const latestId =
+            latestLifecycle &&
+            (latestLifecycle.method === "turn/started" ||
+              latestLifecycle.method === "turn/completed")
+              ? latestLifecycle.params.turn.id
+              : undefined;
+          if (
+            latestId &&
+            (!verified ||
+              (verified.turnId === latestId &&
+                verified.status === "inProgress" &&
+                execution.threadStatusMap[card.id]?.type !== "active"))
+          ) {
+            restoredEvents = restoredEvents.map((event) => {
+              if (
+                event.method === "turn/completed" &&
+                event.params.threadId === card.id &&
+                event.params.turn.id === latestId &&
+                event.params.turn.status === "interrupted" &&
+                !isCachedTurnExecutionUnverified(event)
+              ) {
+                const projected = { ...event, params: { ...event.params } };
+                markCachedTurnExecutionUnverified(projected);
+                return projected;
+              }
+              return event;
+            });
+          }
+          const recoveryCursor = transcriptBudgetRecoveryCursor(bounded);
+          cachedTranscriptBaselines.set(card.id, restoredEvents);
+          const boundary = [...restoredEvents]
+            .reverse()
+            .find(
+              (e) =>
+                e.method === "turn/completed" || e.method === "turn/started",
+            );
+          if (
+            boundary &&
+            (boundary.method === "turn/completed" ||
+              boundary.method === "turn/started")
+          ) {
+            const turn = boundary.params.turn;
+            cachedTranscriptTimings.set(
+              card.id,
+              verified?.turnId === turn.id
+                ? verified
+                : {
+                    turnId: turn.id,
+                    status: turn.status,
+                    startedAtMs: (turn.startedAt ?? 0) * 1000,
+                    durationMs: turn.durationMs,
+                  },
+            );
+          }
+          useCodexStore.setState((s) => ({
+            events: { ...s.events, [card.id]: restoredEvents },
+            historyLoadedMap: { ...s.historyLoadedMap, [card.id]: true },
+            activeThreadIds: s.activeThreadIds.includes(card.id)
+              ? s.activeThreadIds
+              : [...s.activeThreadIds, card.id],
+            ...(cached.thread && !s.threads.some((t) => t.id === card.id)
+              ? { threads: [...s.threads, cached.thread] }
+              : {}),
+          }));
+          useSessionSyncStore.setState((s) => ({
+            cursors: {
+              ...s.cursors,
+              [card.id]: recoveryCursor ?? cached.cursor ?? null,
+            },
+          }));
+          if (restoredEvents.some(isCachedTurnExecutionUnverified))
+            window.dispatchEvent(
+              new CustomEvent("session-cached-execution-pending", {
+                detail: card.id,
+              }),
+            );
+        } else if (
+          card.kind === "cc" &&
+          cached.messages &&
+          useCCStore.getState().sessionMessagesMap[card.id] === before
+        ) {
+          useCCStore.setState((s) => ({
+            sessionMessagesMap: {
+              ...s.sessionMessagesMap,
+              [card.id]: cached.messages!,
+            },
+            ...(s.activeSessionId === card.id
+              ? { messages: cached.messages }
+              : {}),
+          }));
         }
-        useCodexStore.setState((s) => ({
-          events: { ...s.events, [card.id]: cached.events! },
-          historyLoadedMap: { ...s.historyLoadedMap, [card.id]: true },
-          activeThreadIds: s.activeThreadIds.includes(card.id)
-            ? s.activeThreadIds
-            : [...s.activeThreadIds, card.id],
-          ...(cached.thread && !s.threads.some((t) => t.id === card.id)
-            ? { threads: [...s.threads, cached.thread] }
-            : {}),
-        }));
-        useSessionSyncStore.setState((s) => ({
-          cursors: { ...s.cursors, [card.id]: cached.cursor ?? null },
-        }));
-      } else if (
-        card.kind === "cc" &&
-        cached.messages &&
-        useCCStore.getState().sessionMessagesMap[card.id] === before
-      ) {
-        useCCStore.setState((s) => ({
-          sessionMessagesMap: {
-            ...s.sessionMessagesMap,
-            [card.id]: cached.messages!,
-          },
-          ...(s.activeSessionId === card.id
-            ? { messages: cached.messages }
-            : {}),
-        }));
       }
+    } finally {
+      restoreRunning = false;
     }
   }
   const stopCodex = useCodexStore.subscribe((next, prev) => {
@@ -523,7 +725,12 @@ export function startSessionTranscriptCache() {
       changed("cc", next.sessionMessagesMap, prev.sessionMessagesMap);
   });
   const stopMembers = useAgentCenterStore.subscribe((next, prev) => {
-    if (next.cards !== prev.cards || next.detachedCard !== prev.detachedCard)
+    if (
+      next.cards !== prev.cards ||
+      next.detachedCard !== prev.detachedCard ||
+      next.currentAgentCardId !== prev.currentAgentCardId ||
+      next.currentAgentCardKind !== prev.currentAgentCardKind
+    )
       void restore();
   });
   window.addEventListener("pagehide", flush);

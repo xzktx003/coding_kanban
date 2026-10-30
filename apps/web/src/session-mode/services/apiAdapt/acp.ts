@@ -79,18 +79,30 @@ export type AcpConfigOption = {
 
 export type AcpSessionResult = {
   sessionId: string;
+  historySessionId?: string;
   modes?: AcpModeState;
   models?: AcpModelState;
   configOptions?: AcpConfigOption[];
 };
 
 export type AcpStartResult = {
+  runtimeInstance?: string;
   connectionId: string;
   sessionId: string | null;
+  historySessionId?: string | null;
   initialize: AcpInitializeResult;
   session: AcpSessionResult | null;
   sessionError: string | null;
 };
+export interface AcpConnectionSnapshot {
+  runtimeInstance:string;connectionId:string;agentId:string;sessionId:string;historySessionId:string;cwd:string;
+  initialize:AcpInitializeResult;session:AcpSessionResult;settingsKnown:boolean;
+  running:boolean;deliveryUnknown:boolean;lifecycleUnknown:boolean;
+  permissions:Array<{requestId:string;sessionId:string;toolCall?:{title?:string;kind?:string};options:Array<{optionId:string;name:string;kind?:string}>}>;
+}
+export function acpReadConnectionSnapshot(connectionId:string,sessionId:string,expectedRuntimeInstance:string,options:{signal?:AbortSignal;suppressToast?:boolean}={}) {
+  return postJsonWithOptions<AcpConnectionSnapshot>("/api/acp/connection-snapshot",{connection_id:connectionId,session_id:sessionId,expected_runtime_instance:expectedRuntimeInstance},options);
+}
 
 export async function acpListAgents() {
   return await getJson<AcpAgentDef[]>("/api/acp/agents");
@@ -142,6 +154,7 @@ export async function acpPrompt(
   sessionId: string | null,
   text: string,
   imagePaths: string[] = [],
+  clientMessageId?: string,
 ) {
   if (imagePaths.length) {
     const response = await fetch("/api/session/health");
@@ -156,6 +169,7 @@ export async function acpPrompt(
     session_id: sessionId,
     text,
     image_paths: imagePaths,
+    ...(clientMessageId ? { client_message_id: clientMessageId } : {}),
   });
 }
 
@@ -185,6 +199,10 @@ export async function acpNewSession(connectionId: string, cwd: string) {
 
 /** A persisted session, as listed in the sidebar. */
 export type AcpSessionRecord = {
+  nativeSessionId?: string;
+  runtimeInstance?: string;
+  connectionId?: string;
+  historyScope?: "scoped"|"legacy";
   botId?: string | null;
   sessionId: string;
   agentId: string;
@@ -220,6 +238,36 @@ export async function acpGetSession(sessionId: string) {
   return await postJson<Array<Record<string, unknown>>>("/api/acp/session", {
     session_id: sessionId,
   });
+}
+
+export interface AcpTranscriptPage {
+  data: import("@session/stores/useAcpStore").AcpEntry[];
+  nextCursor: string | null;
+  revision: string;
+  truncated: boolean;
+  projection: "acp-entries";
+  metadata: { currentModeId?: string; configOptions?: AcpConfigOption[]; historySourceId?: number };
+}
+export async function acpReadSessionTranscript(
+  sessionId: string,
+  options: {
+    signal?: AbortSignal;
+    suppressToast?: boolean;
+    cursor?: string;
+    metadataOnly?: boolean;
+  } = {},
+): Promise<AcpTranscriptPage> {
+  const { cursor, metadataOnly, ...requestOptions } = options;
+  return postJsonWithOptions<AcpTranscriptPage>(
+    "/api/acp/session?view=recent",
+    {
+      session_id: sessionId,
+      limit: 128,
+      ...(cursor ? { cursor } : {}),
+      ...(metadataOnly ? { metadataOnly: true } : {}),
+    },
+    requestOptions,
+  );
 }
 
 export async function acpDeleteSession(sessionId: string) {

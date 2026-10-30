@@ -1,8 +1,7 @@
 import { captureCodexOperationScope, isCodexOperationScopeCurrent, type CodexOperationScope } from "./codexOperationScope";
 import { lightweightThreadForStore } from "./codexTranscriptVisibility";
 import { codexRuntimeState } from "@session/utils/codexRuntimeState";
-import { postJsonWithOptions } from "./apiAdapt/shared";
-import type { ReviewStartResponse } from "../bindings/v2";
+import { lifecycleMutation } from "./lifecycleMutation";
 import type { ReviewTarget } from "../bindings/v2";
 import { threadFork } from "./apiAdapt/codex";
 import { useCodexStore } from "../components/codex/stores";
@@ -82,24 +81,23 @@ export async function runConversationReview(
   delivery: "inline" | "detached",
   target: ReviewTarget,
 ): Promise<string> {
-  const s = useCodexStore.getState();
+  const scope = captureCodexOperationScope();
+  const timingBefore = useCodexStore.getState().turnTimingMap;
   const capturedTarget = structuredClone(target);
   const capturedCwd =
-    s.threads.find((t) => t.id === threadId)?.cwd ??
+    useCodexStore.getState().threads.find((t) => t.id === threadId)?.cwd ??
     useAgentCenterStore
       .getState()
       .cards.find((c) => c.id === threadId && c.kind === "codex")?.cwd;
-  if (delivery === "inline" && codexRuntimeState(s, threadId).running)
+  if (delivery === "inline" && codexRuntimeState(useCodexStore.getState(), threadId).running)
     throw new Error("当前任务运行中，请选择独立审查");
-  const result = await postJsonWithOptions<ReviewStartResponse>(
-    "/followups/review",
-    { threadId, delivery, target: capturedTarget },
-    { suppressToast: true },
-  );
+  const result = await lifecycleMutation("review", threadId, { delivery, target: capturedTarget });
+  if (!isCodexOperationScopeCurrent(scope)) throw new Error("账号或运行服务已变化，审查回执已保留，请核对原会话。");
   if (!result.reviewThreadId || !result.turn?.id)
     throw new Error("服务未返回审查会话");
   const id = result.reviewThreadId;
-  if (capturedCwd)
+  const turn = result.turn;
+  if (capturedCwd && !result.reconciled)
     useSavedTurnReviewStore.getState().captureReviewScope({
       requestThreadId: threadId,
       reviewThreadId: id,
@@ -107,12 +105,12 @@ export async function runConversationReview(
       cwd: capturedCwd,
       target: capturedTarget,
     });
-  const beforeTiming = s.turnTimingMap[id];
+  const beforeTiming = timingBefore[id];
   useCodexStore.setState((s) => {
     if (
       s.turnTimingMap[id] &&
       s.turnTimingMap[id] !== beforeTiming &&
-      (s.turnTimingMap[id].turnId !== result.turn.id ||
+      (s.turnTimingMap[id].turnId !== turn.id ||
         s.turnTimingMap[id].status !== "inProgress")
     )
       return s;
@@ -120,16 +118,16 @@ export async function runConversationReview(
       turnTimingMap: {
         ...s.turnTimingMap,
         [id]: {
-          turnId: result.turn.id,
-          status: result.turn.status,
-          startedAtMs: (result.turn.startedAt ?? Date.now() / 1000) * 1000,
-          durationMs: result.turn.durationMs ?? null,
+          turnId: turn.id,
+          status: turn.status,
+          startedAtMs: (turn.startedAt ?? Date.now() / 1000) * 1000,
+          durationMs: turn.durationMs ?? null,
         },
       },
       threadStatusMap: {
         ...s.threadStatusMap,
         [id]:
-          result.turn.status === "inProgress"
+          turn.status === "inProgress"
             ? { type: "active", activeFlags: [] }
             : { type: "idle" },
       },
@@ -143,7 +141,7 @@ export async function runConversationReview(
         { kind: "codex", id, cwd, preview: "独立代码审查" },
         { activate: false },
       );
-    useSideChatStore
+    if (useCodexStore.getState().currentThreadId === threadId) useSideChatStore
       .getState()
       .open({ id, parentId: threadId, title: "独立代码审查", images: [] });
   }

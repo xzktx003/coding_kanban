@@ -43,9 +43,11 @@ function decodeClientTextFrame(frame: Buffer): string {
 test("GET /vscode/* proxies HTTP requests to the active VS Code Web target", async () => {
   let receivedUrl = "";
   let receivedHost = "";
+  let receivedProtocol = "";
   const upstream = createServer((request, response) => {
     receivedUrl = request.url ?? "";
     receivedHost = request.headers.host ?? "";
+    receivedProtocol = String(request.headers["x-forwarded-proto"] ?? "");
     response.statusCode = 200;
     response.setHeader("content-type", "text/plain; charset=utf-8");
     response.setHeader("permissions-policy", "geolocation=()");
@@ -73,6 +75,7 @@ test("GET /vscode/* proxies HTTP requests to the active VS Code Web target", asy
     assert.equal(await response.text(), "proxied-ok");
     assert.equal(receivedUrl, "/test/path?via=proxy");
     assert.equal(receivedHost, `127.0.0.1:${address.port}`);
+    assert.equal(receivedProtocol,"http");
     assert.equal(
       response.headers.get("permissions-policy"),
       "geolocation=(), clipboard-read=(self), clipboard-write=(self)",
@@ -91,7 +94,7 @@ test("GET /vscode/* proxies HTTP requests to the active VS Code Web target", asy
   }
 });
 
-test("GET /vscode/* prefers browser origin host but forwards HTTP protocol to the upstream VS Code Web server", async () => {
+test("GET /vscode/* forwards the browser's HTTPS origin protocol through the local HTTP gateway", async () => {
   let receivedForwardedHost = "";
   let receivedForwardedProto = "";
   const upstream = createServer((request, response) => {
@@ -124,7 +127,7 @@ test("GET /vscode/* prefers browser origin host but forwards HTTP protocol to th
 
     assert.equal(response.status, 204);
     assert.equal(receivedForwardedHost, "127.0.0.1:3000");
-    assert.equal(receivedForwardedProto, "http");
+    assert.equal(receivedForwardedProto, "https");
   } finally {
     await app.close();
     await new Promise<void>((resolve, reject) => {

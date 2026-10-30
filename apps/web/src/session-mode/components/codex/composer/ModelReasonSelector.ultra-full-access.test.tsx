@@ -4,6 +4,7 @@ import type { Model } from "@session/bindings/v2";
 import { useModelCacheStore } from "../hooks/useModels";
 import { useConfigStore } from "../stores/useConfigStore";
 import { ModelReasonSelector } from "./ModelReasonSelector";
+import { rememberNonFullAccessMode } from "@session/services/nonFullAccessPreference";
 
 /**
  * The official extension refuses to silently combine `ultra` reasoning with
@@ -37,8 +38,8 @@ const api = vi.hoisted(() => ({
   listConfigProviders: vi.fn(),
   listProviderPresets: vi.fn(),
 }));
-vi.mock("@session/services/apiAdapt", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@session/services/apiAdapt")>()),
+vi.mock("@session/services/apiAdapt/codex", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@session/services/apiAdapt/codex")>()),
   ...api,
 }));
 
@@ -152,6 +153,7 @@ it("applies ultra and leaves full access on when the user keeps full access", as
 });
 
 it("applies ultra and steps down to the restricted mode when the user continues", async () => {
+  rememberNonFullAccessMode("read-only");
   await raiseEffortToUltra();
   await screen.findByRole("dialog");
   fireEvent.click(screen.getByRole("button", { name: "继续" }));
@@ -160,8 +162,15 @@ it("applies ultra and steps down to the restricted mode when the user continues"
   );
   // Official onContinueWithFallback sets the fallback mode, then applies.
   // The paired approval policy must stay consistent with the sandbox.
-  expect(useConfigStore.getState().sandbox).toBe("workspace-write");
-  expect(useConfigStore.getState().approvalPolicy).toBe("on-request");
+  expect(useConfigStore.getState().sandbox).toBe("read-only");
+  expect(useConfigStore.getState().approvalPolicy).toBe("untrusted");
+});
+
+it("has no invented restricted fallback when this host has no saved preference", async () => {
+  await raiseEffortToUltra();
+  await screen.findByRole("dialog");
+  expect((screen.getByRole("button", { name: "继续" }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByText(/当前没有权限更受限的模式可用/)).toBeTruthy();
 });
 
 it("keeps the previously saved effort when the ultra question is dismissed", async () => {

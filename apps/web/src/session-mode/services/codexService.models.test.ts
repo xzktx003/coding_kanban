@@ -5,6 +5,15 @@ const api = vi.hoisted(() => ({
   turnStart: vi.fn(),
 }));
 vi.mock("./apiAdapt", () => api);
+vi.mock("./apiAdapt/codex", () => api);
+vi.mock("./apiAdapt/git", () => api);
+vi.mock("./apiAdapt/skills", () => api);
+vi.mock("./nativeOperationContext", () => ({
+  readNativeOperationContext: vi.fn(async () => ({
+    scopeToken: "model-settings-fixture-scope",
+    namespace: "model-settings-fixture-native-domain",
+  })),
+}));
 import { codexService } from "./codexService";
 import { useCodexStore, useConfigStore } from "../components/codex/stores";
 import { followupParameters } from "./followupService";
@@ -162,6 +171,7 @@ it("a late new-thread response binds the default to its own thread without chang
       }),
   );
   const pending = codexService.threadStart({ shouldActivate: () => false });
+  await vi.waitFor(() => expect(api.threadStart).toHaveBeenCalledOnce());
   useConfigStore.getState().setModel("newer-choice");
   resolve({
     thread: { id: "model-created", cwd: "/project", preview: "", turns: [] },

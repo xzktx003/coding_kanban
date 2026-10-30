@@ -1,5 +1,7 @@
 import type { ServerNotification } from "../bindings";
 import { mergeThreadHistory } from "../utils/mergeThreadHistory";
+import { isCachedTurnExecutionUnverified } from "./cachedTurnExecutionView";
+import { sameJsonValue } from "../../lib/session-list-stability";
 
 function turnId(event: ServerNotification) {
   if (event.method === "turn/started" || event.method === "turn/completed")
@@ -70,10 +72,13 @@ export function mergeHistoryPage(
   if (merged.length !== current.length) return merged;
   for (let index = 0; index < merged.length; index++) {
     if (
-      merged[index] !== current[index] &&
-      JSON.stringify(merged[index]) !== JSON.stringify(current[index])
+      isCachedTurnExecutionUnverified(merged[index]) !==
+      isCachedTurnExecutionUnverified(current[index])
     )
       return merged;
+    // Native hook counters are bigint. Compare their exact values and the
+    // existing strings directly, without serializing two full chat bodies.
+    if (!sameJsonValue(merged[index], current[index])) return merged;
   }
   return current;
 }

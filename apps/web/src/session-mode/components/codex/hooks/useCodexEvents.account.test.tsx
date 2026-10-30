@@ -7,7 +7,7 @@ const api = vi.hoisted(() => ({
   confirmGoalScope: vi.fn(),
   sync: null as null | ((force: boolean) => Promise<void>),
 }));
-vi.mock("@session/services", () => ({ getAccountWithParams: api.read }));
+vi.mock("@session/services/apiAdapt/codex", () => ({ getAccountWithParams: api.read }));
 vi.mock("@session/services/goalCompletionAutoClear", () => ({
   confirmGoalCompletionAccountScope: api.confirmGoalScope,
 }));

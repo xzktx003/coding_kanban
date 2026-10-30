@@ -175,13 +175,16 @@ function ShellCommandContent({
       outputRef.current.scrollLeft = reading.left;
     }
   }, [expanded]);
-  const summary = t(
-    `command.${stopped ? "stoppedSummary" : running ? "running" : status === "declined" ? "declinedSummary" : expanded ? "ranGeneric" : "ran"}${elapsed ? "Elapsed" : ""}`,
-    {
-      command: expanded ? t("command.generic") : display,
-      ...(elapsed ? { elapsed } : {}),
-    },
-  );
+  const summary =
+    termination === "unverified"
+      ? `正在核对轮次状态 · ${display}`
+      : t(
+          `command.${stopped ? "stoppedSummary" : running ? "running" : status === "declined" ? "declinedSummary" : expanded ? "ranGeneric" : "ran"}${elapsed ? "Elapsed" : ""}`,
+          {
+            command: expanded ? t("command.generic") : display,
+            ...(elapsed ? { elapsed } : {}),
+          },
+        );
   const toggle = () => {
     if (expanded) detail.clear();
     else if (detailRequired) detail.load();
@@ -192,7 +195,13 @@ function ShellCommandContent({
       className="codex-command"
       ref={rootRef}
       data-command-id={commandItemId}
-      data-command-status={running ? "inProgress" : status}
+      data-command-status={
+        termination === "unverified"
+          ? "unverified"
+          : running
+            ? "inProgress"
+            : status
+      }
     >
       {explorationSummary ? (
         <div

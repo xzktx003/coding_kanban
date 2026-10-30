@@ -1,3 +1,4 @@
+import { resetAppActionHistory, canUndoAppAction, undoAppAction, redoAppAction } from "./appActionHistory";
 import {
   fireEvent,
   render,
@@ -65,6 +66,7 @@ function archiveForm(kind: "archive" | "delete" = "archive") {
 
 beforeEach(() => {
   resetConversationFormDraftsForTests();
+  resetAppActionHistory();
   vi.clearAllMocks();
   for (const fn of Object.values(api)) fn.mockResolvedValue({});
   useLayoutStore.setState({ view: "settings" });
@@ -223,13 +225,31 @@ it("ignores a second undo click so one archive cannot unarchive twice", async ()
   expect(api.unarchiveThread).toHaveBeenCalledTimes(1);
 });
 
-it("keeps a shell for the confirmation copy so the dialog itself is unchanged", async () => {
+it("separates ordinary archive from explicitly stopping and archiving", async () => {
   mountArchive();
   const heading = await screen.findByText("归档聊天");
   expect(heading).toBeTruthy();
   expect(
     within(document.body).getByText(
-      "将归档此聊天，并从关注列表移出。Agent 不会被停止。",
+      /普通归档仅适用于空闲且没有待发内容/,
     ),
   ).toBeTruthy();
+  expect(screen.getByRole("button", { name: "停止并归档" })).toBeTruthy();
+  expect(api.archiveThread).not.toHaveBeenCalled();
+});
+
+it("records archive in global history and keeps pending undo until unarchive is acknowledged", async () => {
+  await confirmArchive();
+  await waitFor(() => expect(toastCalls.message).toHaveBeenCalled());
+  expect(canUndoAppAction()).toBe(true);
+  let acknowledge!: () => void;
+  api.unarchiveThread.mockImplementationOnce(() => new Promise<void>(resolve => { acknowledge = resolve; }));
+  const pending = undoAppAction();
+  await waitFor(() => expect(api.unarchiveThread).toHaveBeenCalled());
+  expect(useCodexStore.getState().threads.some(thread => thread.id === "arch-a")).toBe(false);
+  acknowledge(); await pending;
+  expect(useCodexStore.getState().threads.some(thread => thread.id === "arch-a")).toBe(true);
+  await redoAppAction();
+  expect(api.archiveThread).toHaveBeenLastCalledWith("arch-a");
+  expect(useCodexStore.getState().threads.some(thread => thread.id === "arch-a")).toBe(false);
 });

@@ -1,7 +1,7 @@
 import { renderHook, act } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 const api=vi.hoisted(()=>({ccNewSession:vi.fn(),ccSendMessage:vi.fn(async()=>{}),ccResumeSession:vi.fn(),ccGetSessionMessages:vi.fn(),gitCreateWorktree:vi.fn()}));
-vi.mock('@session/services',()=>api);vi.mock('@session/services/apiAdapt/git',()=>api);
+vi.mock('@session/services/apiAdapt/cc',()=>api);vi.mock('@session/services/apiAdapt/git',()=>api);
 import { useCCSessionManager } from './useCCSessionManager';
 import { useCCStore } from '../stores/cc';
 import { useWorkspaceStore } from '../stores/useWorkspaceStore';

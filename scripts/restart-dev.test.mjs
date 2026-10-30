@@ -373,6 +373,27 @@ test("restart-dev guards main from sourced execution", () => {
   );
 });
 
+test("restart-runtime is explicit and keeps the default runtime reuse path", () => {
+  assert.match(script, /--restart-runtime\)/);
+  assert.match(
+    script,
+    /node "\$\{ROOT_DIR\}\/scripts\/session-runtime-replace\.mjs" "\$\{runtime_args\[@\]\}"/,
+  );
+  assert.doesNotMatch(
+    script,
+    /session-runtime-replace\.mjs" --restart-runtime/,
+  );
+});
+
+test("restart help distinguishes owned runtime maintenance from the shared official daemon", () => {
+  const result = runSourcedScript("main --help");
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /shared official daemon.*never stopped or restarted/i);
+  assert.match(result.stdout, /owned Claude\/ACP.*legacy private Codex tasks/i);
+  assert.doesNotMatch(result.stdout, /restarts.*its own Codex app-server/);
+  assert.equal(result.marker, "", "help must never prepare, launch or stop a service");
+});
+
 test("restart-dev defaults to the LAN-facing 8484 frontend port", () => {
   assert.match(script, /WEB_PORT="\$\{WEB_PORT:-8484\}"/);
 });

@@ -7,7 +7,7 @@ import {
 } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 const api = vi.hoisted(() => ({ respond: vi.fn() }));
-vi.mock("@session/services", () => ({
+vi.mock("@session/services/apiAdapt/codex", () => ({
   respondToRequestUserInput: api.respond,
 }));
 vi.mock("react-i18next", () => ({

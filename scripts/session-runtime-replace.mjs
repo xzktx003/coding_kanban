@@ -2,14 +2,14 @@ import { readFileSync, readlinkSync, readdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadStartupEnv } from "./startup-env.mjs";
-import { sessionRuntimeStatus } from "./session-runtime-status.mjs";
+import { sessionRuntimeStatus, readOwnedAgentActivity } from "./session-runtime-status.mjs";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 /**
- * Session runtimes this repository leaked in earlier runs: the exact cwd and
- * entrypoint of this package, excluding the recorded owner. A child worktree
- * nests inside the root but is an independent service, so compare exactly.
+ * Read-only candidates sharing this package's exact cwd and entrypoint. These
+ * facts do not establish ownership: another SESSION_DATA_HOME may be active.
+ * A child worktree is also an independent service, so compare cwd exactly.
  */
 export function orphanedRuntimes({
   root = repositoryRoot,
@@ -63,7 +63,7 @@ export async function activeSessionThreads({
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const body = await response.json();
-    if (!Array.isArray(body?.data)) throw new Error("thread/list 响应不完整");
+    if (!Array.isArray(body?.data) || body.nextCursor === undefined) throw new Error("thread/list 响应不完整");
     for (const thread of body.data) {
       if (thread?.status?.type === "active" && typeof thread.id === "string")
         active.push(thread.id);
@@ -74,10 +74,11 @@ export async function activeSessionThreads({
       throw new Error("thread/list 游标无效或重复");
     seen.add(cursor);
   }
+  if (cursor !== null) throw new Error("thread/list 超出页数预算，活动列表尚未读完");
   return active;
 }
 
-/** True when the pid leads its own process group, so the group holds only its tree. */
+/** Diagnostic group leadership only; it never establishes ownership of group members. */
 export function runtimeLeadsGroup(
   pid,
   readStat = (target) => readFileSync(`/proc/${target}/stat`, "utf8"),
@@ -102,6 +103,7 @@ export async function planRuntimeReplacement({
   readFile = readFileSync,
   status = sessionRuntimeStatus,
   listActive = activeSessionThreads,
+  force = false,
 } = {}) {
   const result = await status({ root, env, fetcher, readFile });
   if (result.state === "disabled") return { action: "skip", reason: "disabled" };
@@ -109,29 +111,46 @@ export async function planRuntimeReplacement({
     return { action: "skip", reason: "unavailable", detail: result.error };
   if (!result.pid)
     return { action: "skip", reason: "unverified-owner", url: result.url };
-  if (result.binaryState === "current")
+  if (result.binaryState === "current" && !force)
     return { action: "skip", reason: "already-current", pid: result.pid };
-  if (result.binaryState !== "older")
+  if (result.binaryState !== "older" && result.binaryState !== "current")
     return { action: "skip", reason: "unknown-build", pid: result.pid };
+
+  const ownedAgents = readOwnedAgentActivity(result.ownedAgents);
+  const ownedBusy = ownedAgents && Object.values(ownedAgents).some(provider => Object.values(provider).some(count => count > 0));
+  if (!force && !ownedAgents)
+    return { action: "skip", reason: "owned-activity-unknown", pid: result.pid };
+  if (!force && ownedBusy)
+    return { action: "skip", reason: "owned-agents-connected", pid: result.pid, ownedAgents };
 
   const origin = new URL(result.url).origin;
   let active;
+  let activityUnknown = !ownedAgents;
   try {
     active = await listActive({ origin, fetcher });
   } catch (error) {
-    // An unreadable thread list is not evidence that nothing is running.
-    return {
-      action: "skip",
-      reason: "active-unknown",
-      pid: result.pid,
-      detail: error.message,
-    };
+    // Automatic updates preserve unknown activity. An explicit verified
+    // maintenance request may stop the owned runtime, but never calls it idle.
+    if (!force) return { action: "skip", reason: "active-unknown", pid: result.pid, detail: error.message };
+    activityUnknown = true;
+    active = [];
   }
+  if (!force && active.length && result.codexBackend !== "shared-daemon")
+    return { action: "skip", reason: "active-turns", pid: result.pid, active };
   return {
     action: "replace",
-    reason: active.length ? "active-turns-stopped" : "idle",
+    reason: ownedBusy ? "owned-agents-stopped" : active.length
+      ? result.codexBackend === "shared-daemon"
+        ? "shared-tasks-preserved"
+        : "active-turns-stopped"
+      : force
+        ? "forced"
+        : "idle",
     pid: result.pid,
     active,
+    ...(ownedBusy ? { ownedAgents } : {}),
+    ...(activityUnknown ? { activityUnknown: true } : {}),
+    ...(result.codexBackend === "shared-daemon" ? { codexBackend: "shared-daemon" } : {}),
   };
 }
 
@@ -149,42 +168,39 @@ export async function replaceSessionRuntime({
   },
   wait = (ms) => new Promise((done) => setTimeout(done, ms)),
   reap = orphanedRuntimes,
-  leadsGroup = runtimeLeadsGroup,
   log = console.log,
   ...options
 } = {}) {
-  // The runtime leads its own group, so signalling the group also reclaims the
-  // `codex app-server` child. Fall back to the bare pid when it does not lead,
-  // because a shared group could belong to an unrelated service.
-  const stop = (pid, name) => {
-    if (leadsGroup(pid)) {
-      try {
-        signal(-pid, name);
-        return;
-      } catch {
-        // Group gone already; the per-pid attempt below reports the real state.
-      }
-    }
-    signal(pid, name);
-  };
+  // Group leadership does not establish ownership of a shared daemon. Signal
+  // only the verified runtime; its close handlers release its own connections.
+  // This also applies to orphan runtimes, whose native backend is unknown.
+  const stop = (pid, name) => signal(pid, name);
   const decision = await plan(options);
-  // Reaping needs a known owner to keep; without one every match is ambiguous.
-  const orphans = decision.pid
+  // The same entrypoint may host an independent data domain. Discovery is
+  // diagnostic only; neither an automatic update nor --restart-runtime sweeps it.
+  const orphanCandidates = decision.pid
     ? reap({ root: options.root ?? repositoryRoot, keepPid: decision.pid })
     : [];
-  for (const pid of orphans) {
-    log(`[runtime-replace] 停止本仓库遗留的孤儿运行层 ${pid}`);
-    stop(pid, "SIGTERM");
-  }
+  const orphans = [];
+  if (orphanCandidates.length)
+    log(`[runtime-replace] 发现 ${orphanCandidates.length} 个同入口运行层候选，未核实独立数据域；保留不清理：${orphanCandidates.join(", ")}`);
   if (decision.action !== "replace") {
     log(`[runtime-replace] 跳过运行层替换：${decision.reason}`);
-    return { ...decision, orphans };
+    return { ...decision, orphans, ...(orphanCandidates.length ? {orphanCandidates} : {}) };
   }
-  if (decision.active.length)
+  if (decision.ownedAgents)
+    log(`[runtime-replace] 按显式维护请求停止本运行层自有 Claude/ACP 连接：${JSON.stringify(decision.ownedAgents)}`);
+  if (decision.activityUnknown)
+    log("[runtime-replace] 按显式维护请求替换已核实运行层；部分 Agent 活动未知，不能视为安全空闲");
+  if (decision.active.length && decision.codexBackend === "shared-daemon")
+    log(`[runtime-replace] 保留官方共享服务中的 ${decision.active.length} 个活跃轮次，仅替换看板连接层`);
+  else if (decision.active.length)
     log(
       `[runtime-replace] 按用户要求结束 ${decision.active.length} 个活跃轮次：${decision.active.join(", ")}`,
     );
-  log(`[runtime-replace] 停止过期运行层 ${decision.pid}，新构建将在下次请求时启用`);
+  log(
+    `[runtime-replace] 停止${decision.reason === "forced" ? "当前" : "过期"}运行层 ${decision.pid}，新构建将在下次请求时启用`,
+  );
   stop(decision.pid, "SIGTERM");
   for (let attempt = 0; attempt < 20 && alive(decision.pid); attempt += 1)
     await wait(250);
@@ -192,22 +208,26 @@ export async function replaceSessionRuntime({
     log(`[runtime-replace] 运行层未退出，强制停止 ${decision.pid}`);
     stop(decision.pid, "SIGKILL");
   }
-  for (const pid of orphans)
-    if (alive(pid)) {
-      log(`[runtime-replace] 孤儿运行层未退出，强制停止 ${pid}`);
-      stop(pid, "SIGKILL");
-    }
-  return { ...decision, stopped: true, orphans };
+  return { ...decision, stopped: true, orphans, ...(orphanCandidates.length ? {orphanCandidates} : {}) };
 }
 
 if (
   process.argv[1] &&
   resolve(process.argv[1]) === fileURLToPath(import.meta.url)
 ) {
-  try {
-    await replaceSessionRuntime({ env: loadStartupEnv(repositoryRoot) });
-  } catch (error) {
-    console.error(`[runtime-replace] ${error.message}`);
+  const args = process.argv.slice(2);
+  if (args.some((arg) => arg !== "--restart-runtime")) {
+    console.error("[runtime-replace] 只接受 --restart-runtime");
     process.exitCode = 1;
+  } else {
+    try {
+      await replaceSessionRuntime({
+        env: loadStartupEnv(repositoryRoot),
+        force: args.includes("--restart-runtime"),
+      });
+    } catch (error) {
+      console.error(`[runtime-replace] ${error.message}`);
+      process.exitCode = 1;
+    }
   }
 }

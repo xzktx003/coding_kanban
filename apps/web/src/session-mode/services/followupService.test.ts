@@ -109,6 +109,34 @@ it("keeps uncertain delivery after a generic 500 or missing acknowledgement", as
     [{ status: "uncertain", text: "unknown" }],
   );
 });
+it("keeps the last queue snapshot and records an unavailable read error", async () => {
+  const lastKnown = {
+    authority: "native" as const,
+    revision: 7,
+    paused: null,
+    items: [{
+      id: "native_saved",
+      threadId: "a",
+      authority: "native" as const,
+      text: "previously visible queue item",
+      images: [],
+      parameters: {},
+      mode: "queue" as const,
+      status: "queued" as const,
+      createdAt: 1,
+      fingerprint: "saved",
+      nativeQueuedSubmissionId: "native-queue-id",
+    }],
+  };
+  useFollowupStore.setState({ threads: { a: lastKnown }, errors: {} });
+  api.getJsonWithOptions.mockRejectedValueOnce(
+    new SessionApiError("official queue state is unavailable", 409, "FOLLOWUP_READ_UNAVAILABLE"),
+  );
+
+  await expect(followupService.load("a")).rejects.toThrow("official queue state is unavailable");
+  expect(useFollowupStore.getState().threads.a).toEqual(lastKnown);
+  expect(useFollowupStore.getState().errors.a).toContain("official queue state is unavailable");
+});
 it("retains accepted delivery when a rejection arrives after its sent receipt", async () => {
   api.postJsonWithOptions.mockImplementationOnce(async (_path, data) => {
     reconcileDeliveryEchoes("a", {
@@ -803,3 +831,4 @@ it("a new account queue read never reuses the previous account's pending read", 
   expect(api.getJsonWithOptions).toHaveBeenCalledTimes(2);
   expect(useFollowupStore.getState().threads["scope-read"].revision).toBe(2);
 });
+vi.mock("./nativeOperationContext", () => ({ readNativeOperationContext: vi.fn(async () => ({ scopeToken: "fixture-runtime-scope", namespace: "fixture-history" })) }));

@@ -17,7 +17,7 @@ import type {
   McpServerElicitationAction,
   McpServerElicitationRequestParams,
 } from "@session/bindings/v2";
-import { respondToMcpElicitation } from "@session/services";
+import { respondToMcpElicitation } from "@session/services/apiAdapt/codex";
 
 /// Codex tags privileged approval elicitations through `_meta`; mirrors
 /// codex-rs `protocol/src/mcp_approval_meta.rs`.

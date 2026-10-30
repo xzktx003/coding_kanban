@@ -11,7 +11,6 @@ import { useAcpStore } from "@session/stores/useAcpStore";
 import { selectedAgentCard } from "@session/stores/useAgentCenterStore";
 import { useAgentSettingsStore } from "@session/stores/useAgentSettingsStore";
 import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
-import { useSessionActionConfirmation } from "./useSessionActionConfirmation";
 import { toast } from "@session/components/ui/use-toast";
 
 const focusCCInput = () =>
@@ -27,7 +26,6 @@ export function NewAgentButton({
   icon: Icon = SquarePen,
 }: Props) {
   const { t } = useTranslation("sidebar");
-  const { ask, confirmation } = useSessionActionConfirmation();
   const creatingRef = useRef(false);
   const [creating, setCreating] = useState(false);
   const { cwd, setCwd } = useWorkspaceStore();
@@ -50,39 +48,17 @@ export function NewAgentButton({
       creatingRef.current = true;
       setCreating(true);
       try {
-        const original = useAcpStore.getState();
-        if (acpActive && original.running) {
-          const accepted = await ask({
-            title: "中断当前任务并新建会话？",
-            description:
-              "新建 ACP 会话会停止当前正在执行的任务。当前记录会保留，取消后继续原任务。",
-            confirmLabel: "中断并新建",
-          });
-          const current = useAcpStore.getState();
-          if (
-            !accepted ||
-            current.connectionId !== original.connectionId ||
-            current.sessionId !== original.sessionId ||
-            current.active !== original.active ||
-            current.agentId !== original.agentId ||
-            useWorkspaceStore.getState().cwd !== cwd
-          )
-            return;
-        }
         if (project && project !== cwd) setCwd(project);
 
         if (acpActive) {
           setView("agent");
-          // One agent process hosts many sessions, and `session/new` carries its
-          // own cwd, so a new chat — in this project or another — is a single
-          // JSON-RPC round trip. Respawning the CLI costs seconds.
+          // Keep busy/uncertain owners alive; the helper creates an independent
+          // connection for the new target when sharing the process is unsafe.
           const target = project ?? cwd;
           if (
             acpConnectionId &&
             target &&
-            (await acpFreshSession(acpConnectionId, target, {
-              allowInterrupt: original.running,
-            }))
+            (await acpFreshSession(acpConnectionId, target))
           ) {
             return;
           }
@@ -115,7 +91,6 @@ export function NewAgentButton({
     },
     [
       acpActive,
-      ask,
       acpConnectionId,
       acpRestart,
       cwd,
@@ -185,7 +160,6 @@ export function NewAgentButton({
           </div>
         )}
       </Button>
-      {confirmation}
     </>
   );
 }

@@ -14,6 +14,7 @@ const calls = vi.hoisted(() => ({
   install: vi.fn(),
   read: vi.fn(),
   compact: false,
+  handleInstall:vi.fn(),
 }));
 vi.mock("sonner", () => ({
   toast: Object.assign(calls.notice, { error: calls.error, dismiss: vi.fn() }),
@@ -29,8 +30,10 @@ vi.mock("@session/services", () => ({
   readSkillGroups: vi.fn(async () => ({ groups: [] })),
 }));
 vi.mock("../hooks", () => ({
-  usePluginsViewContext: () => ({ handlePluginDetail: vi.fn() }),
+  usePluginsViewContext: () => ({ handlePluginDetail: vi.fn(),handlePluginInstall:calls.handleInstall }),
 }));
+vi.mock("@session/lib/eventStream",()=>({openEventStream:()=>()=>{}}));
+vi.mock("../pluginOperations",()=>({performPluginOperation:calls.install}));
 vi.mock("./useExternalUrl", () => ({
   useExternalUrl: () => ({ openExternalUrl: vi.fn() }),
 }));
@@ -54,7 +57,7 @@ const detail = {
 beforeEach(() => {
   calls.notice.mockClear();
   calls.error.mockClear();
-  calls.install.mockReset().mockResolvedValue({ appsNeedingAuth: [] });
+  calls.install.mockReset().mockResolvedValue({status:"accepted",authPolicy:"ON_INSTALL",appsNeedingAuth:[]});
   calls.read.mockResolvedValue({ plugin: detail });
   calls.compact = false;
   vi.stubGlobal(
@@ -71,19 +74,20 @@ for (const surface of ["marketplace", "detail"] as const) {
   for (const compact of [false, true])
     it(`${surface} installation notice has its own class and current ${compact ? "compact" : "desktop"} position`, async () => {
       const { result } = renderHook(() => {
-        const catalog = usePluginsMarketplace();
         const view = usePluginsView();
+        calls.handleInstall.mockImplementation(view.handlePluginInstall);
+        const catalog = usePluginsMarketplace();
         return surface === "marketplace"
           ? () => catalog.handleInstall(marketplace, summary)
           : () => view.handlePluginInstall(detail);
       });
       // Resolve the current viewport independently of the hook's mount.
       calls.compact = compact;
-      await act(() => result.current());
+      await act(async() => {await result.current();});
       expect(calls.notice).toHaveBeenCalledWith(
-        "Plugin installed",
+        "插件安装状态已确认",
         expect.objectContaining({
-          description: "Fixture Plugin is ready in the composer.",
+          description: "Fixture Plugin",
           className: "session-plugin-notice",
           position: compact ? "bottom-center" : "top-right",
         }),
@@ -93,17 +97,18 @@ for (const surface of ["marketplace", "detail"] as const) {
 
   it(`${surface} install failure retains diagnostic text and the same scoped notice options`, async () => {
     const { result } = renderHook(() => {
-      const catalog = usePluginsMarketplace();
       const view = usePluginsView();
+      calls.handleInstall.mockImplementation(view.handlePluginInstall);
+      const catalog = usePluginsMarketplace();
       return surface === "marketplace"
         ? () => catalog.handleInstall(marketplace, summary)
         : () => view.handlePluginInstall(detail);
     });
     calls.compact = true;
     calls.install.mockRejectedValue(new Error("fixture install failed"));
-    await act(() => result.current());
+    await act(async() => {await result.current();});
     expect(calls.error).toHaveBeenCalledWith(
-      "Install failed",
+      "插件操作失败",
       expect.objectContaining({
         description: "fixture install failed",
         className: "session-plugin-notice",

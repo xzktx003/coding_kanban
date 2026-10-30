@@ -50,6 +50,7 @@ import {
 } from "./nativeReasoningOptions";
 import { NativeServiceTierControl } from "./NativeServiceTierControl";
 import { recentModelConfigs, rememberRecentModel } from "./recentModelConfigs";
+import { isCodexOperationScopeCurrent, type CodexOperationScope } from "@session/services/codexOperationScope";
 
 // Native impl-517ea8aeeec5 dt(percent): 28px thumb / 2 minus 1px.
 const POWER_ENDPOINT_INSET = 13;
@@ -103,9 +104,13 @@ function isVisibleComposerEditor(editor: HTMLElement) {
 export function NativeModelSelector({
   threadId,
   draftOwner,
+  initiallyOpen = false,
+  initialScope,
 }: {
   threadId: string | null;
   draftOwner?: string;
+  initiallyOpen?: boolean;
+  initialScope?: CodexOperationScope;
 }) {
   const settings = useThreadModelSettings(threadId);
   const { openAiModels, providerItems, loading, error, reload, modelStatus, hasModelSnapshot } =
@@ -807,6 +812,10 @@ export function NativeModelSelector({
     // Keep the captured root/owner/layer, FI seed and focus action unchanged.
     changeOpen(value);
   }
+  useLayoutEffect(() => {
+    if (!initiallyOpen || !triggerRef.current?.isConnected || (initialScope && !isCodexOperationScopeCurrent(initialScope))) return;
+    changeTriggerOpen(true);
+  }, [initiallyOpen]);
   return (
     <DropdownMenu modal={openedLayer.current?.modal ?? true} open={open} onOpenChange={changeTriggerOpen}>
       <DropdownMenuTrigger asChild>

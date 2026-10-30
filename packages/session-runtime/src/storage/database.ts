@@ -1,10 +1,26 @@
 import Database from "better-sqlite3";
+import { acpHistorySessionId } from "../acp/history-identity.js";
 import { mkdirSync } from "node:fs";
 import { join, isAbsolute } from "node:path";
 import { randomUUID } from "node:crypto";
+import {
+  acpRecentHistory,
+  acpHistoryDetail,
+  acpHistoryImage,
+  deleteAcpHistoryProjection,
+} from "../acp/history-projection.js";
+import {
+  historySessionIdentity,
+  type RecentHistoryOptions,
+} from "../core/recent-history.js";
 
 export interface AcpSessionRecord {
   sessionId: string;
+  nativeSessionId: string | null;
+  runtimeInstance: string | null;
+  connectionId: string | null;
+  historyScope: "scoped" | "legacy";
+  hasUpdates?: boolean;
   agentId: string;
   agentTitle: string | null;
   cwd: string;
@@ -88,7 +104,16 @@ const camel = (row: unknown): Record<string, unknown> =>
       v,
     ]),
   );
-const session = (row: unknown) => camel(row) as unknown as AcpSessionRecord;
+const session = (row: unknown): AcpSessionRecord => {
+  const value = camel(row);
+  return {
+    ...value,
+    historyScope:
+      value.nativeSessionId && value.runtimeInstance && value.connectionId
+        ? "scoped"
+        : "legacy",
+  } as unknown as AcpSessionRecord;
+};
 const bot = (row: unknown): BotRecord => {
   const result = camel(row);
   for (const k of ["pinned", "archived", "notificationsEnabled"])
@@ -122,6 +147,9 @@ export class SessionDatabase {
     for (const [table, column, type] of [
       ["automation_runs", "cwd", "TEXT"],
       ["acp_sessions", "bot_id", "TEXT"],
+      ["acp_sessions", "native_session_id", "TEXT"],
+      ["acp_sessions", "runtime_instance", "TEXT"],
+      ["acp_sessions", "connection_id", "TEXT"],
       ["bots", "allowed_bot_ids", "TEXT NOT NULL DEFAULT '[]'"],
     ] as const) {
       const cols = this.db.prepare(`PRAGMA table_info(${table})`).all() as {
@@ -136,17 +164,51 @@ export class SessionDatabase {
   }
   upsertSession(input: {
     sessionId: string;
+    nativeSessionId?: string;
+    runtimeInstance?: string;
+    connectionId?: string;
     agentId: string;
     agentTitle?: string | null;
     cwd: string;
     botId?: string | null;
   }) {
     validDirectory(input.cwd);
+    historySessionIdentity(input.sessionId);
+    const scoped =
+      input.nativeSessionId !== undefined ||
+      input.runtimeInstance !== undefined ||
+      input.connectionId !== undefined;
+    if (
+      scoped &&
+      (!input.nativeSessionId ||
+        !input.runtimeInstance ||
+        !input.connectionId ||
+        input.sessionId !==
+          acpHistorySessionId(
+            input.runtimeInstance,
+            input.connectionId,
+            input.agentId,
+            input.nativeSessionId,
+          ))
+    )
+      throw new Error(
+        "ACP history source owner identity is incomplete or does not match",
+      );
     const now = new Date().toISOString();
     this.db.transaction(() => {
+      const previous = this.getSessionInfo(input.sessionId);
+      if (
+        previous &&
+        (scoped || previous.historyScope === "scoped") &&
+        (previous.nativeSessionId !== (input.nativeSessionId ?? null) ||
+          previous.runtimeInstance !== (input.runtimeInstance ?? null) ||
+          previous.connectionId !== (input.connectionId ?? null) ||
+          previous.agentId !== input.agentId)
+      )
+        throw new Error("ACP history source is already bound to another owner");
       this.db
         .prepare(
-          `INSERT INTO acp_sessions(session_id,agent_id,agent_title,cwd,bot_id,title,created_at,updated_at) VALUES(?,?,?,?,?,NULL,?,?) ON CONFLICT(session_id) DO UPDATE SET agent_id=excluded.agent_id,agent_title=excluded.agent_title,cwd=excluded.cwd,bot_id=excluded.bot_id`,
+          `INSERT INTO acp_sessions(session_id,agent_id,agent_title,cwd,bot_id,title,created_at,updated_at,native_session_id,runtime_instance,connection_id) VALUES(?,?,?,?,?,NULL,?,?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET agent_id=excluded.agent_id,agent_title=excluded.agent_title,cwd=excluded.cwd,bot_id=excluded.bot_id`,
         )
         .run(
           input.sessionId,
@@ -156,18 +218,24 @@ export class SessionDatabase {
           input.botId ?? null,
           now,
           now,
+          input.nativeSessionId ?? null,
+          input.runtimeInstance ?? null,
+          input.connectionId ?? null,
         );
-      if (input.botId) {
-        this.db
+      // A quiet scoped source may still be running, replaying or have unknown
+      // delivery. Another connection cannot infer that its owner is disposable.
+      // Keep the old unbound import cleanup, never prune modern source owners.
+      if (input.botId && !scoped) {
+        for (const old of this.db
           .prepare(
-            "DELETE FROM acp_session_updates WHERE session_id IN (SELECT session_id FROM acp_sessions WHERE bot_id=? AND title IS NULL AND session_id!=?)",
+            "SELECT session_id FROM acp_sessions WHERE bot_id=? AND title IS NULL AND session_id!=? AND native_session_id IS NULL AND runtime_instance IS NULL AND connection_id IS NULL AND NOT EXISTS(SELECT 1 FROM acp_session_updates WHERE acp_session_updates.session_id=acp_sessions.session_id)",
           )
-          .run(input.botId, input.sessionId);
-        this.db
-          .prepare(
-            "DELETE FROM acp_sessions WHERE bot_id=? AND title IS NULL AND session_id!=?",
-          )
-          .run(input.botId, input.sessionId);
+          .all(input.botId, input.sessionId) as { session_id: string }[]) {
+          deleteAcpHistoryProjection(this.db, old.session_id);
+          this.db
+            .prepare("DELETE FROM acp_sessions WHERE session_id=?")
+            .run(old.session_id);
+        }
       }
     })();
   }
@@ -175,8 +243,8 @@ export class SessionDatabase {
     const raw = JSON.stringify(payload);
     if (raw === undefined) throw new Error("Invalid transcript payload");
     const now = new Date().toISOString();
-    this.db.transaction(() => {
-      this.db
+    return this.db.transaction(() => {
+      const inserted = this.db
         .prepare(
           "INSERT INTO acp_session_updates(session_id,payload,created_at) VALUES(?,?,?)",
         )
@@ -184,6 +252,7 @@ export class SessionDatabase {
       this.db
         .prepare("UPDATE acp_sessions SET updated_at=? WHERE session_id=?")
         .run(now, id);
+      return Number(inserted.lastInsertRowid);
     })();
   }
   setTitleIfEmpty(id: string, title: string) {
@@ -204,7 +273,7 @@ export class SessionDatabase {
   listBotSessions(id: string, limit = 100) {
     return this.db
       .prepare(
-        "SELECT * FROM acp_sessions WHERE bot_id=? AND title IS NOT NULL ORDER BY updated_at DESC LIMIT ?",
+        "SELECT * FROM acp_sessions WHERE bot_id=? AND (title IS NOT NULL OR EXISTS(SELECT 1 FROM acp_session_updates WHERE acp_session_updates.session_id=acp_sessions.session_id)) ORDER BY updated_at DESC LIMIT ?",
       )
       .all(id, capped(limit))
       .map(session);
@@ -218,8 +287,39 @@ export class SessionDatabase {
         .all(id) as { payload: string }[]
     ).map((row) => JSON.parse(row.payload) as unknown);
   }
+  getRecentUpdates(id: string, options: RecentHistoryOptions = {}) {
+    historySessionIdentity(id);
+    return acpRecentHistory(this.db, id, options);
+  }
+  getSessionInfo(id: string) {
+    historySessionIdentity(id);
+    const row = this.db
+      .prepare(
+        "SELECT acp_sessions.*, EXISTS(SELECT 1 FROM acp_session_updates WHERE acp_session_updates.session_id=acp_sessions.session_id) AS has_updates FROM acp_sessions WHERE session_id=?",
+      )
+      .get(id);
+    return row
+      ? {
+          ...session(row),
+          hasUpdates: Boolean((row as { has_updates: number }).has_updates),
+        }
+      : undefined;
+  }
+  getUpdateDetail(
+    id: string,
+    itemId: string,
+    options: { offset: number; limit: number },
+  ) {
+    historySessionIdentity(id);
+    return acpHistoryDetail(this.db, id, itemId, options);
+  }
+  getUpdateImage(id: string, itemId: string, index: number, download = false) {
+    historySessionIdentity(id);
+    return acpHistoryImage(this.db, id, itemId, index, download);
+  }
   deleteSession(id: string) {
     this.db.transaction(() => {
+      deleteAcpHistoryProjection(this.db, id);
       this.db
         .prepare("DELETE FROM acp_session_updates WHERE session_id=?")
         .run(id);
@@ -344,6 +444,10 @@ export class SessionDatabase {
   }
   deleteBot(id: string) {
     this.db.transaction(() => {
+      for (const session of this.db
+        .prepare("SELECT session_id FROM acp_sessions WHERE bot_id=?")
+        .all(id) as { session_id: string }[])
+        deleteAcpHistoryProjection(this.db, session.session_id);
       this.db
         .prepare(
           "DELETE FROM acp_session_updates WHERE session_id IN (SELECT session_id FROM acp_sessions WHERE bot_id=?)",

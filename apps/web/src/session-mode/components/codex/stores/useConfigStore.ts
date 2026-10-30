@@ -22,6 +22,7 @@ export interface ModelSelection {
 /** The persisted new-chat defaults. One `localStorage` key per field. */
 export interface ConfigData {
   sandbox: SandboxMode;
+  permissions?: string | null;
   approvalPolicy: AskForApproval;
   approvalsReviewer: ApprovalsReviewer;
   reasoningEffort: ReasoningEffort;
@@ -41,6 +42,7 @@ export interface ConfigStore extends ConfigData {
   setModelSelection: (selection: ModelSelection) => void;
   setModelProvider: (provider: Provider) => void;
   setAccessMode: (sandbox: SandboxMode) => void;
+  setPermissions: (permissions: string | null) => void;
   setApprovalsReviewer: (reviewer: ApprovalsReviewer) => void;
   setReasoningEffort: (effort: ReasoningEffort) => void;
   setServiceTier: (serviceTier: string | null) => void;
@@ -90,6 +92,7 @@ const VERSION = 3;
 const defaults: ConfigData = {
   webSearchRequest: false,
   sandbox: "danger-full-access",
+  permissions: null,
   approvalPolicy: "never",
   approvalsReviewer: "user",
   reasoningEffort: "medium",
@@ -119,6 +122,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
  */
 const validators: Record<Field, (value: unknown) => boolean> = {
   sandbox: oneOf("read-only", "workspace-write", "danger-full-access"),
+  permissions: (value) => value === null || (typeof value === "string" && value.length > 0 && value.length <= 4096),
   approvalPolicy: (value) =>
     oneOf("untrusted", "on-request", "never")(value) ||
     (isRecord(value) && isRecord(value.granular)),
@@ -264,7 +268,8 @@ const store = create<ConfigStore>()((set, get) => {
     // One permission decision: splitting the pair across keys must not let a
     // reload assemble a combination no menu row can produce.
     setAccessMode: (sandbox: SandboxMode) =>
-      choose({ sandbox, approvalPolicy: SANDBOX_APPROVAL_MAP[sandbox] }),
+      choose({ sandbox, permissions: null, approvalPolicy: SANDBOX_APPROVAL_MAP[sandbox] }),
+    setPermissions: (permissions) => choose({ permissions }),
     setApprovalsReviewer: (approvalsReviewer) => choose({ approvalsReviewer }),
 
     setReasoningEffort: (reasoningEffort: ReasoningEffort) =>

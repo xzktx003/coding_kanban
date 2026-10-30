@@ -1,8 +1,7 @@
 // Handles opening a session: agent card setup, view switch, and message loading.
 import { useCallback } from 'react';
-import { fromSdkMessages } from '@session/components/cc/utils/fromSdkMessages';
 import type { SdkSessionInfo } from '@session/lib/sessions';
-import { ccGetSessionMessages } from '@session/services/apiAdapt/cc';
+import { refreshClaudeHistory } from '@session/services/followedSessionAuxSync';
 import { useAgentCenterStore, useLayoutStore } from '@session/stores';
 import { useCCStore } from '@session/stores/cc';
 import { useAgentSettingsStore } from '@session/stores/useAgentSettingsStore';
@@ -10,7 +9,7 @@ import { useWorkspaceStore } from '@session/stores/useWorkspaceStore';
 
 interface UseSessionSelectionArgs {
   directory: string;
-  onSelectSession?: (sessionId: string, project?: string) => void;
+  onSelectSession?: (sessionId: string, project?: string) => void | Promise<void>;
 }
 
 export function useSessionSelection({ directory, onSelectSession }: UseSessionSelectionArgs) {
@@ -22,8 +21,6 @@ export function useSessionSelection({ directory, onSelectSession }: UseSessionSe
     activeSessionIds,
     activeSessionId,
     isLoading,
-    addMessageToSession,
-    setSessionLoading,
     sessionMessagesMap,
   } = useCCStore();
 
@@ -43,18 +40,18 @@ export function useSessionSelection({ directory, onSelectSession }: UseSessionSe
       setCurrentAgentCardId(session.session_id);
       setView('agent');
       if (onSelectSession) {
-        onSelectSession(session.session_id, sessionProject);
+        void Promise.resolve(onSelectSession(session.session_id, sessionProject)).catch((error) => {
+          console.error('Failed to select Claude session:', error);
+        });
       }
-      // Load JSONL history immediately so the card shows messages without requiring "Resume".
+      // Public selection uses the same bounded readonly reader as restoration.
+      // Its owner-scoped metadata keeps failures visible and retryable; history
+      // completion must not clear an independently running Agent's loading state.
       const sid = session.session_id;
       if (!sessionMessagesMap[sid]?.length) {
-        void (async () => {
-          const sdkMessages = await ccGetSessionMessages(sid);
-          for (const msg of fromSdkMessages(sdkMessages, sid)) {
-            addMessageToSession(sid, msg);
-          }
-          setSessionLoading(sid, false);
-        })();
+        void refreshClaudeHistory(sid).catch((error) => {
+          console.error('Failed to read Claude session history:', error);
+        });
       }
     },
     [
@@ -66,8 +63,6 @@ export function useSessionSelection({ directory, onSelectSession }: UseSessionSe
       setView,
       onSelectSession,
       sessionMessagesMap,
-      addMessageToSession,
-      setSessionLoading,
     ]
   );
 

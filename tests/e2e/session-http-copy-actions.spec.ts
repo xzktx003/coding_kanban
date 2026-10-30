@@ -137,7 +137,7 @@ test("normal conversation copy actions transfer exact text on LAN HTTP", async (
     await rowMenu.locator("xpath=ancestor::*[contains(@class, 'session-nav-row')][1]").hover();
     await expect(rowMenu).toHaveCSS("pointer-events", "auto");
     await rowMenu.click();
-    await page.getByRole("menuitem", { name: "Copy Id", exact: true }).click();
+    await page.getByRole("menuitem", { name: "复制会话 ID", exact: true }).click();
     const state = await saveEvidence(
       page,
       info.outputPath("conversation-http-copy.json"),

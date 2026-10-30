@@ -1,6 +1,11 @@
 import { expect, it, vi } from "vitest";
 import type { ServerNotification } from "../bindings";
 import { mergeHistoryPage } from "./sessionHistoryPages";
+import { convertThreadHistoryToEvents } from "../utils/threadHistoryConverter";
+import {
+  markCachedTurnExecutionUnverified,
+  isCachedTurnExecutionUnverified,
+} from "./cachedTurnExecutionView";
 const item = (turnId: string, text: string): ServerNotification => ({
   method: "item/completed",
   params: {
@@ -15,6 +20,32 @@ const item = (turnId: string, text: string): ServerNotification => ({
     },
     completedAtMs: 0,
   },
+});
+it("publishes fresh native certainty even when its interrupted body equals the unverified cache JSON", () => {
+  const cached: ServerNotification = {
+    method: "turn/completed",
+    params: {
+      threadId: "a",
+      turn: {
+        id: "turn",
+        status: "interrupted",
+        startedAt: 1,
+        completedAt: 2,
+        durationMs: 10,
+        items: [],
+        itemsView: "full",
+        error: null,
+      },
+    },
+  };
+  markCachedTurnExecutionUnverified(cached);
+  const before = [cached];
+  const verified = structuredClone(cached);
+  expect(isCachedTurnExecutionUnverified(verified)).toBe(false);
+  const result = mergeHistoryPage([verified], before, before, ["turn"]);
+  expect(result).not.toBe(before);
+  expect(isCachedTurnExecutionUnverified(result[0])).toBe(false);
+  expect(JSON.stringify(result)).toBe(JSON.stringify(before));
 });
 it("refreshes the recent page without deleting earlier cached turns", () => {
   const before = [item("old", "older"), item("last", "partial")];
@@ -89,6 +120,73 @@ it("unchanged recent pages compare only replacement items instead of serializing
       ([value]) => Array.isArray(value) && value.length > 100,
     );
     expect(serializedEvents).toHaveLength(0);
+  } finally {
+    serialize.mockRestore();
+  }
+});
+
+it("reconciles native hook counters exactly without serializing chat bodies", () => {
+  const history = {
+    id: "a",
+    turns: [
+      {
+        id: "hook-turn",
+        status: "completed",
+        items: [],
+        hookRuns: [
+          {
+            id: "hook",
+            eventName: "postToolUse",
+            handlerType: "command",
+            executionMode: "sync",
+            scope: "turn",
+            source: "project",
+            sourcePath: "/repo/hooks.json",
+            displayOrder: "9007199254740994",
+            status: "completed",
+            statusMessage: null,
+            startedAt: "9007199254740995",
+            completedAt: "9007199254740996",
+            durationMs: "1",
+            entries: [{ kind: "feedback", text: "Hook completed" }],
+          },
+        ],
+      },
+    ],
+  } as any;
+  const before = [
+    item("old", "large retained reply ".repeat(32768)),
+    ...convertThreadHistoryToEvents(history),
+  ];
+  const page = convertThreadHistoryToEvents(history);
+  const serialize = vi.spyOn(JSON, "stringify");
+  try {
+    expect(mergeHistoryPage(page, before, before, ["hook-turn"])).toBe(before);
+    expect(serialize).not.toHaveBeenCalled();
+
+    history.turns[0].hookRuns[0].startedAt = "9007199254740996";
+    const updated = mergeHistoryPage(
+      convertThreadHistoryToEvents(history),
+      before,
+      before,
+      ["hook-turn"],
+    );
+    expect(updated).not.toBe(before);
+    expect(updated[0]).toBe(before[0]);
+    const hook = updated.find((event) => event.method === "hook/completed");
+    expect((hook?.params as any).run.startedAt).toBe(9007199254740996n);
+  } finally {
+    serialize.mockRestore();
+  }
+});
+
+it("does not serialize an unchanged large replacement reply", () => {
+  const before = [item("large", "会话🙂 reply ".repeat(65536))];
+  const page = structuredClone(before);
+  const serialize = vi.spyOn(JSON, "stringify");
+  try {
+    expect(mergeHistoryPage(page, before, before, ["large"])).toBe(before);
+    expect(serialize).not.toHaveBeenCalled();
   } finally {
     serialize.mockRestore();
   }

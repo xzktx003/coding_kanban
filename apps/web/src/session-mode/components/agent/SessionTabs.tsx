@@ -47,6 +47,7 @@ import {
   SESSION_TAB_MIME,
 } from "./sessionTabDrag";
 import { createSessionTabInsertionMarker } from "./sessionTabPreview";
+import { toast } from "sonner";
 
 const SessionTab = memo(function SessionTab({
   card,
@@ -73,6 +74,9 @@ const SessionTab = memo(function SessionTab({
 }) {
   const project = useSessionProject(card);
   const renameRef = useRef<HTMLSpanElement>(null);
+  const [windowAction, setWindowAction] = useState<
+    typeof import("@session/services/openSessionWindow").openSessionWindow | null
+  >(null);
   const groupTree = useSessionSplitStore((s) => (selected ? s.tree : null));
   const groups = groupTree ? splitGroups(groupTree) : [];
   const threads = useCodexStore((s) => s.threads);
@@ -145,7 +149,9 @@ const SessionTab = memo(function SessionTab({
         </button>
       </span>
       {selected && (
-        <DropdownMenu>
+        <DropdownMenu onOpenChange={(open) => {
+          if (open && !windowAction) void import("@session/services/openSessionWindow").then(module => setWindowAction(() => module.openSessionWindow), () => toast.error("新窗口入口未能加载，请关闭菜单后重试。"));
+        }}>
           <DropdownMenuTrigger asChild>
             <button
               type="button"
@@ -156,6 +162,12 @@ const SessionTab = memo(function SessionTab({
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
+            <DropdownMenuItem disabled={!windowAction} onSelect={() => {
+              try { windowAction?.({ kind: card.kind, id: card.id, cwd: card.worktreePath || card.cwd }); }
+              catch (error) { toast.error(error instanceof Error ? error.message : "无法打开新窗口"); }
+            }}>
+              在新窗口打开
+            </DropdownMenuItem>
             <DropdownMenuItem
               onSelect={() =>
                 renameRef.current

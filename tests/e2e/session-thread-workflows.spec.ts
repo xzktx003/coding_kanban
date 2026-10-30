@@ -693,7 +693,16 @@ for (const width of [1440, 390])
         await codeFence
           .getByRole("button", { name: "代码块更多操作", exact: true })
           .click();
-        await expect(popup.getByRole("menu")).toBeVisible();
+        await expect(popup.getByRole("menu")).toBeVisible().catch(async error => {
+          await test.info().attach("plan-table-menu.json", { contentType: "application/json", body: JSON.stringify(await popup.evaluate(() => ({
+            pointerEvents: document.body.style.pointerEvents,
+            computedPointerEvents: getComputedStyle(document.body).pointerEvents,
+            trigger: document.querySelector('.codex-native-table [data-slot="dropdown-menu-trigger"]')?.outerHTML,
+            layers: [...document.querySelectorAll('[data-slot$="-content"]')].map(n => n.outerHTML.slice(0, 600)),
+            root: document.querySelector('.session-mode')?.getAttribute('class'),
+          }))) });
+          throw error;
+        });
         expect(
           await popup
             .getByRole("menu")
@@ -1002,7 +1011,7 @@ for (const switchOwner of [false, true]) {
     await network.send("Network.enable");
     network.on("Network.requestWillBeSent", (event) => {
       if (
-        new URL(event.request.url).pathname.endsWith("/thread/read") &&
+        /\/thread\/(?:read|metadata)$/.test(new URL(event.request.url).pathname) &&
         JSON.parse(event.request.postData ?? "{}").threadId === "ux-0"
       )
         requestEvidence.push({
@@ -1028,6 +1037,11 @@ for (const switchOwner of [false, true]) {
         (call) =>
           call.path.endsWith("/thread/read") && call.body?.threadId === "ux-0",
       );
+    const metadataReads = () =>
+      fixture.calls.filter(
+        (call) =>
+          call.path.endsWith("/thread/metadata") && call.body?.threadId === "ux-0",
+      );
     try {
       await page.goto("/?mode=session&thread=ux-0&turn=turn-0", {
         waitUntil: "domcontentloaded",
@@ -1044,6 +1058,7 @@ for (const switchOwner of [false, true]) {
         reads(),
         "No history request may precede the first account observation",
       ).toHaveLength(0);
+      expect(metadataReads()).toHaveLength(0);
       if (switchOwner) {
         await page.evaluate(async () => {
           const module = (path: string) =>
@@ -1123,10 +1138,11 @@ for (const switchOwner of [false, true]) {
           page.locator('.codex-native-user[data-owner-turn="turn-0"]'),
         ).toBeVisible();
       }
-      // Selecting a transcript also fetches missing model metadata once. It is
-      // a distinct existing reader, not a second URL open or a body retry.
+      // Selecting a transcript fetches missing model metadata through its
+      // bounded endpoint, without a second URL open or full body read.
       const expectedReads = switchOwner ? 1 : 2;
-      await expect.poll(() => reads().length).toBe(expectedReads);
+      await expect.poll(() => reads().length).toBe(1);
+      await expect.poll(() => metadataReads().length).toBe(switchOwner ? 0 : 1);
       const frames = (request: any) =>
         request.initiator.stack?.callFrames ?? [];
       const fromLink = requestEvidence.filter((request) =>
@@ -1135,6 +1151,7 @@ for (const switchOwner of [false, true]) {
         ),
       );
       const fromMetadata = requestEvidence.filter((request) =>
+        new URL(request.url).pathname.endsWith("/thread/metadata") &&
         frames(request).some(
           (frame: any) => frame.functionName === "readInitialThreadMetadata",
         ),

@@ -87,3 +87,7 @@ CLI 0.159.2 的 paginated history thread 明确拒绝原生 detached review。�
 ## 2026-10-27：运行状态与精确引导恢复
 
 queue 入队后等待会话空闲；运行中的即时追加使用「立即引导」或切换引导模式，不自动替用户改变发送方式。标签转圈和引导按钮共同依赖当前真实轮次；旧聊天历史可能将仍在执行的同一轮重建为 interrupted，因此不能仅用独立历史判断执行状态。现由当前运行层的小型只读活动快照恢复，历史正文仍走裁剪通道，规则、保护及回归见 [执行状态权威来源](session-execution-state.md)。
+
+## 2026-10-30：归档会话只读状态不可用
+
+原生 daemon 对 archived thread 的 `thread/queue/list` 返回 JSON-RPC `-32600`，而 `thread/goal/get` 返回同码 `thread not found`，没有专用 archived code/data。网关不得把这类读取错误当成空队列或空 Goal；followups 只读失败使用稳定的 `FOLLOWUP_READ_UNAVAILABLE`，保留浏览器已有队列并记录读取错误。goal/get 仅对精确 `RpcError(-32600)` 映射为 `NATIVE_READ_UNAVAILABLE`，不推断 thread 一定 archived。所有上游 5xx 保持未知错误，不得变成确定失败或 `not-admitted`。

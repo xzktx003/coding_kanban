@@ -4,7 +4,9 @@ import { SessionTopNavigation } from "./SessionTopNavigation";
 import { useAgentCenterStore } from "../../stores/useAgentCenterStore";
 import { useLayoutStore } from "../../stores/useLayoutStore";
 const viewport = vi.hoisted(() => ({ mobile: false }));
-vi.mock("@session/hooks/use-mobile", () => ({ useIsMobile: () => viewport.mobile }));
+vi.mock("@session/hooks/use-mobile", () => ({
+  useIsMobile: () => viewport.mobile,
+}));
 vi.mock("../../DataImportDialog", () => ({ DataImportDialog: () => null }));
 beforeEach(() => {
   viewport.mobile = false;
@@ -36,7 +38,11 @@ it("reports unsynchronized followed state separately from an empty set", async (
   useAgentCenterStore.setState({ sharedTabsInitialized: false });
   render(<SessionTopNavigation status="ready" />);
   expect(
-    await screen.findByRole("button", { name: "状态待同步" }, { timeout: 5000 }),
+    await screen.findByRole(
+      "button",
+      { name: "状态待同步" },
+      { timeout: 5000 },
+    ),
   ).toBeTruthy();
 });
 
@@ -143,7 +149,35 @@ it("mode selection preserves the current secondary page instead of acting as a h
 });
 
 it("desktop agent view uses the persistent dock instead of duplicate hidden tool entries", () => {
- render(<SessionTopNavigation status="ready" />);
- fireEvent.keyDown(screen.getByRole("button", {name:"更多功能"}), {key:"Enter"});
- for (const name of ["文件浏览器","VS Code","终端"]) expect(screen.queryByRole("menuitem", {name})).toBeNull();
+  render(<SessionTopNavigation status="ready" />);
+  fireEvent.keyDown(screen.getByRole("button", { name: "更多功能" }), {
+    key: "Enter",
+  });
+  for (const name of ["文件浏览器", "VS Code", "终端"])
+    expect(screen.queryByRole("menuitem", { name })).toBeNull();
+});
+it("mobile moves theme and synchronization details into More while keeping an accessible status marker", async () => {
+  viewport.mobile = true;
+  const { useThemeStore } = await import("../../stores/settings/useThemeStore");
+  const { useSessionSyncStore } =
+    await import("../../stores/useSessionSyncStore");
+  useThemeStore.setState({ theme: "dark" });
+  useSessionSyncStore.setState({
+    connection: "reconnecting",
+    connectionError: "fixture reconnect",
+  });
+  render(<SessionTopNavigation status="ready" />);
+  expect(screen.queryByRole("button", { name: "切换为浅色模式" })).toBeNull();
+  const more = screen.getByRole("button", { name: "更多功能" });
+  expect(more.getAttribute("data-attention")).toBe("true");
+  fireEvent.keyDown(more, { key: "Enter" });
+  expect(
+    await screen.findByRole("menuitem", { name: /实时连接恢复中/ }),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("menuitem", { name: "切换为浅色模式" }));
+  expect(useThemeStore.getState().theme).toBe("light");
+  useSessionSyncStore.setState({
+    connection: "connected",
+    connectionError: null,
+  });
 });

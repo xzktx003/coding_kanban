@@ -785,3 +785,163 @@
     display: none;
   }
 }
+.session-mode .session-sync-indicator {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 5px;
+  min-height: 30px;
+  padding: 4px 7px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--session-pending);
+  font-size: 12px;
+  cursor: pointer;
+}
+.session-mode .session-sync-indicator:hover,
+.session-mode .session-sync-indicator[aria-expanded="true"] {
+  background: var(--accent);
+  border-color: var(--border);
+}
+.session-mode .session-sync-indicator[data-urgent="true"] {
+  color: var(--destructive);
+}
+.session-mode .session-sync-indicator:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.session-mode .session-sync-details {
+  width: min(340px, calc(100vw - 24px));
+  padding: 12px;
+  font-size: 12px;
+}
+.session-mode .session-sync-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.session-mode .session-sync-heading button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.session-mode .session-sync-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+  overflow-wrap: anywhere;
+}
+.session-mode .session-sync-row small {
+  color: var(--muted-foreground);
+  font-size: inherit;
+}
+.session-mode .session-sync-retry {
+  margin-top: 12px;
+  color: var(--primary);
+  text-decoration: underline;
+  cursor: pointer;
+}
+@media (max-width: 640px) {
+  .session-mode .session-sync-label {
+    display: none;
+  }
+  .session-mode .session-sync-indicator {
+    min-width: 36px;
+    min-height: 36px;
+    justify-content: center;
+  }
+}
+.session-mode .session-optional-panel-error {
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: 12px;
+  background: var(--background);
+  color: var(--foreground);
+  font-size: 13px;
+}
+.session-mode .session-optional-panel-error p {
+  margin: 8px 0;
+  color: var(--muted-foreground);
+}
+.session-mode .session-optional-panel-error button {
+  min-height: 36px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.session-mode .session-optional-panel-overlay {
+  position: fixed;
+  z-index: 60;
+  top: 72px;
+  right: 16px;
+  width: min(420px, calc(100vw - 32px));
+  box-shadow: 0 8px 28px #0002;
+}
+
+/* Narrow navigation keeps full touch targets; secondary actions remain in More. */
+.session-mode .session-top-more {
+  position: relative;
+}
+.session-mode .session-top-more[data-attention="true"]::after {
+  content: "";
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  top: 5px;
+  right: 5px;
+  border-radius: 50%;
+  background: var(--session-pending);
+  box-shadow: 0 0 0 2px var(--sidebar);
+}
+@media (max-width: 1000px) {
+  .session-mode .session-top-nav button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .session-mode .session-top-nav .workbench-mode-switch {
+    height: 44px;
+    padding: 0;
+    border: 0;
+    box-shadow: inset 0 0 0 1px var(--mode-switch-border);
+  }
+  .session-mode .session-top-nav .session-top-schedule,
+  .session-mode .session-top-nav .session-global-layout,
+  .session-mode .session-top-nav .session-global-new,
+  .session-mode .session-top-nav .session-global-git {
+    display: none;
+  }
+  .session-mode .session-menu-new,
+  .session-mode .session-menu-schedule {
+    display: flex;
+  }
+}
+@media (max-width: 900px) {
+  .session-mode .session-top-nav .session-brand-mark {
+    display: none;
+  }
+}
+@media (max-width: 767px) {
+  .session-mode .session-top-nav {
+    padding-inline: 4px;
+    gap: 2px;
+  }
+  .session-mode .session-main-menu [role="menuitem"] {
+    min-height: 44px;
+  }
+  .session-mode .session-top-nav .workbench-mode-switch {
+    height: 44px;
+    padding: 0;
+    border: 0;
+    box-shadow: inset 0 0 0 1px var(--mode-switch-border);
+  }
+  .session-mode .session-top-nav .workbench-mode-switch .mode-switch-label {
+    height: 44px;
+  }
+}

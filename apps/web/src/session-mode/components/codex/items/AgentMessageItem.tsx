@@ -1,3 +1,4 @@
+import { StreamingCodexMarkdown } from "../presentation/StreamingCodexMarkdown";
 import { memo, useEffect, useMemo, useRef } from "react";
 import { NativeHookStats } from "./NativeHookStats";
 import { NativeMemoryCitations } from "./NativeMemoryCitations";
@@ -54,8 +55,8 @@ export const AgentMessageItem = memo(function AgentMessageItem({
   const isWindowFocused = useWindowFocus();
   const inspection = useTranscriptInspection();
   const owner = useCodexContentOwner(threadId);
-  // Keep live segments separate: review directives and Markdown are parsed only
-  // after completion, without joining the bounded streaming buffer every token.
+  // Review directives use the final document. Live Markdown parses a bounded
+  // tail and memoized stable blocks without joining the full streaming buffer.
   const review = useMemo(
     () =>
       streaming
@@ -96,7 +97,7 @@ export const AgentMessageItem = memo(function AgentMessageItem({
       >
         {streaming ? (
           <div
-            data-codex-streaming-text
+            data-codex-streaming-text={streamingPreview ? "" : undefined}
             className="whitespace-pre-wrap break-words leading-relaxed"
           >
             {streamingPreview ? (
@@ -112,15 +113,13 @@ export const AgentMessageItem = memo(function AgentMessageItem({
                 ))}
                 {streamingPreview.tailCurrent}
               </>
-            ) : streamingSegments ? (
-              <>
-                {streamingSegments.map((segment, index) => (
-                  <span key={index}>{segment}</span>
-                ))}
-                {streamingCurrent}
-              </>
             ) : (
-              text
+              <StreamingCodexMarkdown
+                key={`${threadId ?? ""}:${turnId ?? ""}:${itemId ?? ""}`}
+                segments={streamingSegments}
+                current={streamingCurrent ?? text}
+                threadId={threadId}
+              />
             )}
           </div>
         ) : (

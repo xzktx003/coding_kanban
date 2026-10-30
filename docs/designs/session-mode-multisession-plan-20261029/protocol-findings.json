@@ -1,0 +1,79 @@
+{
+  "baseline": "f6699ba064059009529a50b0c126cbed4402f093",
+  "officialVersion": "26.51007.21434",
+  "offsetUnit": "zero-based UTF-16 code units",
+  "runtimeTestedThisPlanningRound": false,
+  "resume": {
+    "meaning": "Explicit new empty-input turn, not a history read or automatic resume",
+    "chain": [
+      [
+        "app-initial-fee819fe4f22.js",
+        5698686,
+        "bFa -> ewa onResume:_s"
+      ],
+      [
+        "app-initial-fee819fe4f22.js",
+        5612913,
+        "ONa.handleResumeInterruptedTask"
+      ],
+      [
+        "app-initial-fee819fe4f22.js",
+        5613616,
+        "resume_interrupted_task trigger"
+      ],
+      [
+        "app-initial-fee819fe4f22.js",
+        2968532,
+        "qQr -> manager.startEmptyTurn"
+      ],
+      [
+        "app-initial-c4ebaa710049.js",
+        5009384,
+        "startEmptyTurn -> vkn"
+      ],
+      [
+        "app-initial-c4ebaa710049.js",
+        4853794,
+        "vkn prepare conversation/status"
+      ],
+      [
+        "app-initial-c4ebaa710049.js",
+        4879740,
+        "turn/start with continuationInput or []"
+      ]
+    ],
+    "eligibility": [
+      [
+        "app-initial-fee819fe4f22.js",
+        5270833,
+        "tCa: interrupted and some retryable failures"
+      ],
+      [
+        "app-initial-fee819fe4f22.js",
+        5336427,
+        "lwa latest-turn eligibility"
+      ],
+      [
+        "app-initial-fee819fe4f22.js",
+        5319155,
+        "ewa: existing/resumable/not running/no Goal/empty editor"
+      ]
+    ],
+    "local": [
+      "apps/web/src/session-mode/services/codexService.ts:728 (read-only threadResume alias)",
+      "apps/web/src/session-mode/services/apiAdapt/codex.ts:96 (native thread/resume API)",
+      "codexService.turnStart supports userInputOverride: []"
+    ],
+    "implementationRequired": "Dedicated stable intent, settings capture, exact turn guard, receipt reconciliation, and native acceptance evidence"
+  },
+  "worktree": {
+    "schema": "apps/web/src/session-mode/bindings/v2/ThreadForkParams.ts:42 (cwd); :46 (runtimeWorkspaceRoots)",
+    "wrapper": "apps/web/src/session-mode/services/codexService.ts:1087 only accepts turn boundaries, omits cwd",
+    "caller": "apps/web/src/session-mode/components/codex/composer/slashCommands.ts:279 creates worktree then forks without cwd and changes UI/card cwd",
+    "limit": "Static request/UI mismatch; no observed write to incorrect repository claimed."
+  },
+  "officialAssetSha256": {
+    "app-initial-fee819fe4f22.js": "460201045b5f5a4255fda737c9baa4768367a973d735cb37f3467bfe6af95316",
+    "app-initial-c4ebaa710049.js": "50e2af3d8c3d0e3c52612beb2d95940cc818dfe979d6d85a9fa61af5526640bc"
+  }
+}

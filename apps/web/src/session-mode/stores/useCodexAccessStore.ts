@@ -41,6 +41,10 @@ function publish(id: string, next: AccessEntry) {
       old?.access?.state !== next.access?.state ||
       old?.access?.reason !== next.access?.reason ||
       old?.access?.generation !== next.access?.generation ||
+      old?.access?.sharedDaemon !== next.access?.sharedDaemon ||
+      old?.access?.attached !== next.access?.attached ||
+      old?.access?.loaded !== next.access?.loaded ||
+      old?.access?.activeTurnId !== next.access?.activeTurnId ||
       !old
     ) {
       entries[id] = next;
@@ -84,6 +88,22 @@ export function refreshCodexAccess(id: string): Promise<AccessEntry> {
           generation: Number.isSafeInteger(access.generation)
             ? access.generation
             : 0,
+          ...(typeof access.sharedDaemon === "boolean"
+            ? { sharedDaemon: access.sharedDaemon }
+            : {}),
+          ...(typeof access.attached === "boolean"
+            ? { attached: access.attached }
+            : {}),
+          ...(typeof access.loaded === "boolean"
+            ? { loaded: access.loaded }
+            : {}),
+          ...(access.activeTurnId === null ||
+          (typeof access.activeTurnId === "string" &&
+            access.activeTurnId.length > 0 &&
+            access.activeTurnId.length <= 512 &&
+            !/[\u0000-\u001f\u007f]/u.test(access.activeTurnId))
+            ? { activeTurnId: access.activeTurnId }
+            : {}),
         },
       } as AccessEntry;
     })

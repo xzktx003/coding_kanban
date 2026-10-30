@@ -1,0 +1,35 @@
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+const f = vi.hoisted(() => ({ request: vi.fn(), stop: vi.fn(), event: null as null | ((event: any) => void) }));
+vi.mock("./transport", () => ({ createMcpAppTransport: () => ({ current: () => true, request: f.request }) }));
+vi.mock("@session/lib/eventStream", () => ({ openEventStream: (options: any) => { f.event = options.onEvent; return f.stop; } }));
+import { McpAppView } from "./McpAppView";
+import { TranscriptDetailVisibility } from "@session/components/codex/hooks/transcriptDetailVisibility";
+const context = { contextToken:"a".repeat(64),identity:"b".repeat(64),server:"local",tool:"show",resourceUri:"ui://app",html:"<html><body>app HTML</body></html>",csp:{},toolInput:{},toolResult:null,toolInfo:{} };
+beforeEach(() => { vi.clearAllMocks(); f.request.mockImplementation(async (action) => action === "context" ? {...context} : {}); });
+afterEach(cleanup);
+it("loads no widget body before explicit opening and revokes the context when closed", async () => {
+  render(<McpAppView threadId="one" turnId="turn" itemId="item" />);
+  expect(f.request).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button",{name:"打开应用"}));
+  await screen.findByTitle("MCP 应用 show");
+  expect(f.request.mock.calls[0].slice(0,2)).toEqual(["context",{threadId:"one",turnId:"turn",itemId:"item"}]);
+  fireEvent.click(screen.getByRole("button",{name:"关闭应用"}));
+  await waitFor(()=>expect(f.request).toHaveBeenCalledWith("revoke",{contextToken:context.contextToken}));
+  expect(screen.queryByTitle("MCP 应用 show")).toBeNull(); expect(f.stop).toHaveBeenCalled();
+});
+it("immediately releases hidden transcript resources and rejects late account-authority views", async () => {
+  const view=render(<TranscriptDetailVisibility.Provider value={true}><McpAppView threadId="one" turnId="turn" itemId="item" /></TranscriptDetailVisibility.Provider>);
+  fireEvent.click(screen.getByRole("button",{name:"打开应用"})); await screen.findByTitle("MCP 应用 show");
+  view.rerender(<TranscriptDetailVisibility.Provider value={false}><McpAppView threadId="one" turnId="turn" itemId="item" /></TranscriptDetailVisibility.Provider>);
+  expect(screen.queryByTitle("MCP 应用 show")).toBeNull();
+  view.rerender(<TranscriptDetailVisibility.Provider value={true}><McpAppView threadId="one" turnId="turn" itemId="item" /></TranscriptDetailVisibility.Provider>);
+  await screen.findByTitle("MCP 应用 show");
+  act(()=>f.event?.({event:"codex:notification",payload:{method:"account/updated",params:{}}}));
+  expect(screen.queryByTitle("MCP 应用 show")).toBeNull();
+  expect(screen.getByRole("alert").textContent).toContain("应用连接或账号已变化");
+  view.rerender(<TranscriptDetailVisibility.Provider value={false}><McpAppView threadId="one" turnId="turn" itemId="item" /></TranscriptDetailVisibility.Provider>);
+  view.rerender(<TranscriptDetailVisibility.Provider value={true}><McpAppView threadId="one" turnId="turn" itemId="item" /></TranscriptDetailVisibility.Provider>);
+  expect(screen.queryByTitle("MCP 应用 show")).toBeNull();
+  expect(f.request.mock.calls.filter(([action])=>action==="call")).toHaveLength(0);
+});

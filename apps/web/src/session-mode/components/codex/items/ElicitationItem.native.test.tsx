@@ -6,7 +6,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { respondToMcpElicitation } from "@session/services";
+import { respondToMcpElicitation } from "@session/services/apiAdapt/codex";
 import { SessionApiError } from "@session/services/apiAdapt/shared";
 import { ElicitationItem } from "./ElicitationItem";
 import {
@@ -24,7 +24,7 @@ import {
   useRpcDeliveryStore,
 } from "../stores/rpcLifecycle";
 
-vi.mock("@session/services", () => ({ respondToMcpElicitation: vi.fn() }));
+vi.mock("@session/services/apiAdapt/codex", () => ({ respondToMcpElicitation: vi.fn() }));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
@@ -543,7 +543,7 @@ it("shows one field at a time and single-select advances after the native 180ms 
   expect(send).toHaveBeenCalledTimes(1);
 });
 
-it("keeps keyboard navigation local, ignores text and IME keys, and Escape collapses without a reply", () => {
+it("keeps keyboard navigation local and ignores text and IME keys", () => {
   seed(
     request({
       requestedSchema: {
@@ -565,13 +565,6 @@ it("keeps keyboard navigation local, ignores text and IME keys, and Escape colla
   fireEvent.keyDown(query, { key: "Enter", ctrlKey: true });
   expect(screen.getByText("elicitation.validation.minLength")).toBeTruthy();
   fireEvent.change(query, { target: { value: "saved answer" } });
-  fireEvent.keyDown(query, { key: "Escape" });
-  expect(screen.queryByRole("textbox", { name: "Query" })).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "userInput.expand" }));
-  expect(
-    (screen.getByRole("textbox", { name: "Query" }) as HTMLTextAreaElement)
-      .value,
-  ).toBe("saved answer");
   fireEvent.keyDown(container.querySelector(".codex-elicitation")!, {
     key: "ArrowRight",
   });
@@ -585,6 +578,22 @@ it("keeps keyboard navigation local, ignores text and IME keys, and Escape colla
   });
   expect(screen.getByRole("textbox", { name: "Query" })).toBeTruthy();
   expect(send).not.toHaveBeenCalled();
+});
+
+it("Escape cancels only the focused live MCP form and does not duplicate an uncertain response", async () => {
+  const value = request({ requestedSchema: { type: "object", properties: { query: { type: "string", title: "Query" } } } });
+  seed(value);
+  send.mockImplementation(() => new Promise(() => {}));
+  render(<ElicitationItem currentThreadId="owner" />);
+  const input = screen.getByRole("textbox", { name: "Query" });
+  input.focus();
+  fireEvent.keyDown(input, { key: "Escape", isComposing: true });
+  expect(send).not.toHaveBeenCalled();
+  fireEvent.keyDown(input, { key: "Escape" });
+  await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+  expect(send.mock.calls[0][1]).toBe("cancel");
+  fireEvent.keyDown(input, { key: "Escape" });
+  expect(send).toHaveBeenCalledTimes(1);
 });
 
 it("cancels delayed advance on request switches and retains the original field navigation", async () => {

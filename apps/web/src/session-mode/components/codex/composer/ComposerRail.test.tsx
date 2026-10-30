@@ -3,13 +3,10 @@ import { beforeEach, expect, it, vi } from "vitest";
 import { ComposerRail, ComposerRailItem } from "./ComposerRail";
 
 const motionPreference = vi.hoisted(() => ({ reduced: false }));
-vi.mock("framer-motion", async (original) => ({
-  ...(await original<typeof import("framer-motion")>()),
-  useReducedMotion: () => motionPreference.reduced,
-}));
 
 beforeEach(() => {
   motionPreference.reduced = false;
+  vi.spyOn(window, "matchMedia").mockImplementation(query => ({ media: query, get matches() { return motionPreference.reduced; }, onchange: null, addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: () => true }));
 });
 
 function Fixture({ changes = true, queue = true }) {

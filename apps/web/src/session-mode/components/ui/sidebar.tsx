@@ -4,7 +4,7 @@ import { stableUiContext } from "@session/lib/stableUiContext";
 import * as React from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { PanelLeftIcon } from "lucide-react";
-import { Slot } from "radix-ui";
+import * as Slot from "@radix-ui/react-slot";
 import { isSessionModeActive, listenInSessionMode } from "@session/session-dom";
 
 import { useIsMobile } from "@session/hooks/use-mobile";

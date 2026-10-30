@@ -60,6 +60,75 @@ function history(): AcpHistory & { updates: Map<string, unknown[]> } {
     },
   };
 }
+test(
+  "owned activity counts an initializing ACP process and closing it cannot publish a late connection",
+  { timeout: 10_000 },
+  async () => {
+    const dir = await mkdtemp(join(tmpdir(), "acp-opening-health-")),
+      hub = new EventHub();
+    const service = createAcpService({
+      hub,
+      dataHome: dir,
+      history: history(),
+      env: { ...process.env, HOME: dir },
+    });
+    const waiting = service
+      .connect({
+        cwd: dir,
+        agent: {
+          id: "fixture",
+          name: "Opening",
+          command: process.execPath,
+          args: [
+            "-e",
+            "require('node:readline').createInterface({input:process.stdin}).on('line',()=>{});",
+            "--",
+          ],
+        },
+      })
+      .then(
+        (value) => ({ value, error: undefined }),
+        (error) => ({ value: undefined, error }),
+      );
+    try {
+      const until = Date.now() + 2000;
+      while (service.activitySnapshot().connections === 0 && Date.now() < until)
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      assert.deepEqual(service.activitySnapshot(), {
+        connections: 1,
+        activePrompts: 0,
+        pendingRequests: 0,
+        uncertainSessions: 0,
+      });
+      await service.close();
+      const settled = await waiting;
+      assert.ok(settled.error);
+      assert.equal(settled.value, undefined);
+      assert.deepEqual(service.activitySnapshot(), {
+        connections: 0,
+        activePrompts: 0,
+        pendingRequests: 0,
+        uncertainSessions: 0,
+      });
+      await assert.rejects(
+        service.connect({
+          cwd: dir,
+          agent: {
+            id: "fixture",
+            name: "Closed",
+            command: process.execPath,
+            args: ["-e", "process.exit(0)"],
+          },
+        }),
+        /closed/,
+      );
+    } finally {
+      await service.close();
+      hub.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  },
+);
 async function setup(extra: Record<string, string> = {}) {
   const dir = await mkdtemp(join(tmpdir(), "ts-acp-"));
   const hub = new EventHub();
@@ -110,8 +179,12 @@ test("ACP initializes real stdio process, serializes new/load, preserves history
       "hello",
     );
     assert.equal(result.received.sessionId, "s2");
-    assert.equal(f.db.getUpdates("s2").length, 2);
-    assert.equal((f.db.getUpdates("s2")[0] as any).content.text, "hello");
+    assert.equal(f.db.getUpdates((second as any).historySessionId).length, 2);
+    assert.equal(
+      (f.db.getUpdates((second as any).historySessionId)[0] as any).content
+        .text,
+      "hello",
+    );
     await assert.rejects(
       f.service.prompt(f.start.connectionId, "foreign", "oops"),
       /unknown ACP session/,
@@ -139,11 +212,21 @@ test("ACP initializes real stdio process, serializes new/load, preserves history
 });
 test("permission replies validate connection, session and option and can only resolve once", async () => {
   const f = await setup();
-  const sub = f.hub.subscribe({ agents: "acp" });
+  const sub = f.hub.subscribe({
+    agents: "acp",
+    filter: (event) =>
+      event.event === "acp-message" && event.payload.kind === "permission",
+  });
   try {
     const pending = f.service.prompt(f.start.connectionId, "s1", "permission");
     const event = await sub.next();
     assert.equal(event.value.payload.kind, "permission");
+    assert.deepEqual(f.service.activitySnapshot(), {
+      connections: 1,
+      activePrompts: 1,
+      pendingRequests: 1,
+      uncertainSessions: 0,
+    });
     const id = event.value.payload.requestId as string;
     await assert.rejects(
       f.service.respondPermission(f.start.connectionId, id, "invalid"),
@@ -156,6 +239,12 @@ test("permission replies validate connection, session and option and can only re
     await f.service.respondPermission(f.start.connectionId, id, "yes", "s1");
     assert.deepEqual(await pending, {
       outcome: { outcome: "selected", optionId: "yes" },
+    });
+    assert.deepEqual(f.service.activitySnapshot(), {
+      connections: 1,
+      activePrompts: 0,
+      pendingRequests: 0,
+      uncertainSessions: 0,
     });
     await assert.rejects(
       f.service.respondPermission(f.start.connectionId, id, "yes"),
@@ -249,7 +338,7 @@ test("all ACP HTTP routes run against service and read/delete transcript without
     const get = await app.inject({
       method: "POST",
       url: "/api/acp/session",
-      payload: { session_id: "s1" },
+      payload: { session_id: f.start.historySessionId },
     });
     assert.equal(get.json().length, 2);
     assert.equal(
@@ -257,7 +346,7 @@ test("all ACP HTTP routes run against service and read/delete transcript without
         await app.inject({
           method: "POST",
           url: "/api/acp/delete-session",
-          payload: { session_id: "s1" },
+          payload: { session_id: f.start.historySessionId },
         })
       ).statusCode,
       200,
@@ -419,7 +508,11 @@ test("pending permission identities have a byte bound independent of replay hist
 
 test("a delayed permission response cannot approve a later turn reusing a native RPC id", async () => {
   const f = await setup();
-  const sub = f.hub.subscribe({ agents: "acp" });
+  const sub = f.hub.subscribe({
+    agents: "acp",
+    filter: (event) =>
+      event.event === "acp-message" && event.payload.kind === "permission",
+  });
   try {
     const first = f.service.prompt(f.start.connectionId, "s1", "permission");
     const firstEvent = await sub.next();
@@ -545,14 +638,14 @@ test("ACP sessions and raw updates survive a real SQLite restart and reads launc
     assert.equal(records.length, 1);
     assert.equal(records[0].title, "persist me");
     assert.equal(records[0].agentTitle, "Fixture");
-    assert.equal(service.getSession(start.sessionId!).length, 2);
+    assert.equal(service.getSession(start.historySessionId!).length, 2);
     assert.throws(
       () => service.get(start.connectionId),
       /unknown ACP connection/,
     );
-    service.deleteSession(start.sessionId!);
+    service.deleteSession(start.historySessionId!);
     assert.deepEqual(service.listSessions(), []);
-    assert.deepEqual(service.getSession(start.sessionId!), []);
+    assert.deepEqual(service.getSession(start.historySessionId!), []);
   } finally {
     await service.close();
     db.close();
@@ -597,3 +690,87 @@ test("ACP retains stop authority after stdout EOF but unregisters synchronously 
     await f.cleanup();
   }
 });
+
+test(
+  "ACP execution states keep exact background owners and distinguish terminal cancellation from unknown delivery",
+  { timeout: 10_000 },
+  async () => {
+    const f = await setup(),
+      events = f.hub.subscribe({ agents: "acp", since: 0 });
+    try {
+      await f.service.prompt(f.start.connectionId, "s1", "normal");
+      const running = f.service.prompt(f.start.connectionId, "s1", "wait");
+      const deadline = Date.now() + 2000;
+      while (
+        f.service.activitySnapshot().activePrompts !== 1 &&
+        Date.now() < deadline
+      )
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      assert.equal(f.service.activitySnapshot().activePrompts, 1);
+      await f.service.cancel(f.start.connectionId, "s1");
+      await running;
+      const { client } = await f.service.connect({
+        agent: f.custom,
+        cwd: f.dir,
+      });
+      await client.newSession(f.dir);
+      await assert.rejects(
+        client.prompt("s1", "wait", [], 30),
+        /DELIVERY_UNKNOWN/,
+      );
+      const last = f.hub.publish("acp-audit-boundary", {}),
+        states: any[] = [];
+      for (;;) {
+        const event = await events.next();
+        assert.equal(event.done, false);
+        if (event.value!.seq === last.seq) break;
+        if (
+          event.value!.event === "acp-message" &&
+          event.value!.payload.kind === "execution-state"
+        )
+          states.push(event.value!.payload);
+      }
+      const first = states.filter(
+          (state) => state.connectionId === f.start.connectionId,
+        ),
+        second = states.filter(
+          (state) => state.connectionId === client.connectionId,
+        );
+      assert.deepEqual(
+        first.map((state) => state.running),
+        [true, false, true, false],
+      );
+      assert.ok(
+        first.every(
+          (state) =>
+            state.sessionId === "s1" &&
+            state.agentId === "fixture" &&
+            state.runtimeInstance === f.start.runtimeInstance &&
+            state.deliveryUnknown === false &&
+            state.lifecycleUnknown === false,
+        ),
+      );
+      assert.deepEqual(
+        second.map((state) => ({
+          running: state.running,
+          unknown: state.deliveryUnknown,
+        })),
+        [
+          { running: true, unknown: false },
+          { running: false, unknown: true },
+        ],
+      );
+      assert.ok(
+        states.every(
+          (state) =>
+            Array.isArray(state.pendingRequestIds) &&
+            state.pendingRequestIds.length === 0,
+        ),
+      );
+      assert.equal(f.service.activitySnapshot().uncertainSessions, 1);
+    } finally {
+      await events.return();
+      await f.cleanup();
+    }
+  },
+);

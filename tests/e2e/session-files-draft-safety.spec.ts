@@ -1,10 +1,11 @@
 import { expect, test } from "@playwright/test";
 import { installSessionUxFixture, seedSessionUx } from "./session-ux-fixture";
 
-test("real file editor preserves full documents and unsaved per-file drafts across tools with guarded hidden input", async ({
+for(const width of [1440,393])test(`real file editor preserves full documents and unsaved per-file drafts across tools with guarded hidden input (${width}px)`, async ({
   page,
 }) => {
   test.setTimeout(90000);
+  await page.setViewportSize({width,height:900});
   const complete = Array.from(
     { length: 503 },
     (_, i) => `完整文档行 ${i}`,
@@ -257,9 +258,13 @@ test("real file editor preserves full documents and unsaved per-file drafts acro
   await page.getByRole("button", { name: "保存文件（Ctrl+S）" }).click();
   await expect(page.getByRole("alert")).toContainText("草稿已保留");
   expect(await read()).toBe("B保留草稿");
-  await expect(
-    page.locator(".session-mode [contenteditable=true]").first(),
-  ).toBeHidden();
+  await page.getByRole("button",{name:"关闭文件 b.ts",exact:true}).click();
+  const closeDialog=page.getByRole("dialog",{name:"文件尚未保存"});
+  await expect(closeDialog).toBeVisible();
+  await closeDialog.getByRole("button",{name:"取消",exact:true}).click();
+  await expect(closeDialog).toHaveCount(0);expect(await read()).toBe("B保留草稿");
+  if(width<768)await expect(page.locator(".session-mode .session-dock-main")).toHaveAttribute("inert","");
+  else await expect(page.locator(".session-mode [contenteditable=true]").first()).toBeHidden();
   for (let i = 0; i < 20; i++) {
     await page.keyboard.press("Tab");
     expect(
@@ -269,7 +274,7 @@ test("real file editor preserves full documents and unsaved per-file drafts acro
     ).toBe(false);
   }
   await page.screenshot({
-    path: ".dev-runtime/session-uiux/files-draft-safety.png",
+    path: `.dev-runtime/session-uiux/files-draft-safety-${width}.png`,
   });
   expect(
     fileRequests

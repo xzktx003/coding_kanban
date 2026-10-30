@@ -668,7 +668,7 @@ it("waits for the selected native editor group before enabling its input", async
       blockedByOtherApp: true,
     }),
   );
-  expect(screen.getByText("另一实例占用 · 请点原生 Retry")).toBeTruthy();
+  expect(screen.getByText("另一实例占用 · 请点原生「重试」")).toBeTruthy();
   act(() =>
     report?.(`new:${firstWindowId}`, {
       ready: true,

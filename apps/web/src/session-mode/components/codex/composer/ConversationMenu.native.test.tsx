@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { act } from "react";
 import { expect, it, vi } from "vitest";
 import { useCodexStore } from "../stores/useCodexStore";
@@ -19,7 +19,7 @@ import {
   sessionDraftKey,
   useSessionDraftStore,
 } from "@session/stores/useSessionDraftStore";
-import { resetAppActionHistory } from "./appActionHistory";
+import { resetAppActionHistory, canRedoAppAction } from "./appActionHistory";
 import { rememberClosedTab, resetClosedTabs } from "@session/stores/closedSessionTabs";
 import { ConversationMenu } from "./ConversationMenu";
 
@@ -27,6 +27,15 @@ import * as sessionTabs from "@session/stores/sessionTabSelect";
 import { resetViewedChats } from "./recentView";
 import { toast } from "sonner";
 import { threadAccess } from "@session/services/apiAdapt/codex";
+vi.mock("@session/services/sessionManagementClient", () => ({
+  setSharedSessionPin: vi.fn(async (item, value, expected) => {
+    const store = usePinStore.getState();
+    if (store.isPinned(item.id, item.kind) !== value) store.togglePin(item);
+    return { namespace: "fixture", kind: item.kind, id: item.id, revision: (expected?.revision ?? 0) + 1, value };
+  }),
+  setSharedSessionUnread: vi.fn(async (kind, id) => useSessionAttentionStore.getState().markUnread(kind, id)),
+  markSharedSessionsRead: vi.fn(async ids => useSessionAttentionStore.getState().markFollowedRead(ids)),
+}));
 const request = vi.hoisted(() => vi.fn());
 const collaboration = vi.hoisted(() => ({ mode: "default" as "default" | "plan" }));
 const searchFiles = vi.hoisted(() => vi.fn());
@@ -37,6 +46,7 @@ const gitCreateBranch = vi.hoisted(() => vi.fn());
 const archiveThread = vi.hoisted(() => vi.fn());
 const deleteThread = vi.hoisted(() => vi.fn());
 const threadFork = vi.hoisted(() => vi.fn());
+vi.mock("@session/services/nativeOperationContext", () => ({ readNativeOperationContext: async () => ({ scopeToken: "fork-scope", namespace: "fork-domain" }) }));
 vi.mock("sonner", () => ({ toast: { message: vi.fn(), success: vi.fn(), error: vi.fn() } }));
 vi.mock("@session/features/thread-workflows/actions", () => ({
   threadWorkflowActions: { request },
@@ -339,6 +349,7 @@ it("opens GitHub merge options for the thread branch", async () => {
 });
 
 it("forks the open thread into a new followed chat", async () => {
+  useCodexStore.setState({ currentThreadId: "original-owner", threads: [{ id: "original-owner", cwd: "/fixture/project" } as never] });
   threadFork.mockResolvedValue({
     id: "forked-chat",
     name: "侧边聊天",
@@ -350,7 +361,7 @@ it("forks the open thread into a new followed chat", async () => {
     key: "ArrowDown",
   });
   fireEvent.click(await screen.findByRole("menuitem", { name: "分叉聊天" }));
-  await waitFor(() => expect(threadFork).toHaveBeenCalledWith("original-owner"));
+  await waitFor(() => expect(threadFork).toHaveBeenCalledWith("original-owner", { activate: false, expectedScope: "fork-scope" }));
   expect(useCodexStore.getState().currentThreadId).toBe("forked-chat");
   expect(useAgentCenterStore.getState().currentAgentCardId).toBe("forked-chat");
   expect(
@@ -360,6 +371,21 @@ it("forks the open thread into a new followed chat", async () => {
   expect(
     useAgentCenterStore.getState().cards.some((card) => card.id === "forked-chat"),
   ).toBe(true);
+});
+it("does not steal the newly selected conversation when a menu fork acknowledgement arrives late", async () => {
+  let finish!: (value: unknown) => void;
+  threadFork.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+  useCodexStore.setState({ currentThreadId: "original-owner", threads: [{ id: "original-owner", cwd: "/fixture/late-fork" } as never] });
+  render(<ConversationMenu threadId="original-owner" title="当前会话" />);
+  fireEvent.keyDown(screen.getByRole("button", { name: "当前会话的更多操作" }), { key: "ArrowDown" });
+  fireEvent.click(await screen.findByRole("menuitem", { name: "分叉聊天" }));
+  await waitFor(() => expect(threadFork).toHaveBeenCalledWith("original-owner", { activate: false, expectedScope: "fork-scope" }));
+  useCodexStore.setState({ currentThreadId: "new-selection" });
+  useAgentCenterStore.setState({ currentAgentCardId: "new-selection", currentAgentCardKind: "codex" });
+  await act(async () => finish({ id: "late-menu-fork", cwd: "/fixture/late-fork", turns: [] }));
+  expect(useCodexStore.getState().currentThreadId).toBe("new-selection");
+  expect(useAgentCenterStore.getState().currentAgentCardId).toBe("new-selection");
+  expect(useAgentCenterStore.getState().cards.some(card => card.id === "late-menu-fork")).toBe(true);
 });
 
 it("opens the search and switch sheet", async () => {
@@ -815,7 +841,7 @@ it("marks every followed Codex chat read", async () => {
     key: "ArrowDown",
   });
   fireEvent.click(await screen.findByRole("menuitem", { name: "全部标为已读" }));
-  expect(toast.message).toHaveBeenCalledWith("已全部标为已读");
+  await waitFor(() => expect(toast.message).toHaveBeenCalledWith("已全部标为已读"));
   expect(
     useSessionAttentionStore.getState().receipts["codex:original-owner"].read,
   ).toContain("reply");
@@ -1204,7 +1230,8 @@ it("archives the open thread only after confirmation", async () => {
   });
   fireEvent.click(await screen.findByRole("menuitem", { name: "归档聊天" }));
   const dialog = await screen.findByRole("dialog", { name: "归档聊天" });
-  expect(dialog.textContent).toContain("将归档此聊天，并从关注列表移出。Agent 不会被停止。");
+  expect(dialog.textContent).toContain("普通归档仅适用于空闲且没有待发内容");
+  expect(within(dialog).getByRole("button", { name: "停止并归档" })).toBeTruthy();
   expect(archiveThread).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "确认归档" }));
   await waitFor(() => expect(archiveThread).toHaveBeenCalledWith("original-owner"));
@@ -1246,6 +1273,7 @@ it("toggles the open thread pin with the plugin label", async () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: "置顶/取消置顶聊天" }));
   };
   await open();
+  await waitFor(() => expect(usePinStore.getState().pinned).toHaveLength(1));
   expect(usePinStore.getState().pinned).toEqual([
     {
       kind: "codex",
@@ -1255,7 +1283,7 @@ it("toggles the open thread pin with the plugin label", async () => {
     },
   ]);
   await open();
-  expect(usePinStore.getState().isPinned("original-owner")).toBe(false);
+  await waitFor(() => expect(usePinStore.getState().isPinned("original-owner")).toBe(false));
 });
 
 it("shows and hides the shipped changes panel", async () => {
@@ -1295,8 +1323,9 @@ it("restores the same terminal tab when redoing open terminal", async () => {
   fireEvent.click(screen.getByRole("menuitem", { name: "撤销上一步操作" }));
   expect(useLayoutStore.getState().terminals).toEqual([]);
   await open();
+  await waitFor(() => expect(canRedoAppAction()).toBe(true));
   fireEvent.click(screen.getByRole("menuitem", { name: "重做上一步操作" }));
-  expect(useLayoutStore.getState().terminals).toEqual([created]);
+  await waitFor(() => expect(useLayoutStore.getState().terminals).toEqual([created]));
   expect(useLayoutStore.getState().activeRightPanelTab).toBe("terminal");
 });
 
@@ -1308,7 +1337,8 @@ it("undoes panel actions from a closed panel without inserting a null tab", asyn
   for(const label of ["打开终端面板","显示/隐藏“变更”面板"]){
     open();fireEvent.click(screen.getByRole("menuitem",{name:label}));
     open();fireEvent.click(screen.getByRole("menuitem",{name:"撤销上一步操作"}));
-    expect(useLayoutStore.getState().activeRightPanelTab).toBeNull();
+    await waitFor(() => expect(useLayoutStore.getState().activeRightPanelTab).toBeNull());
+    await act(async () => { await Promise.resolve(); });
     expect(useLayoutStore.getState().openRightPanelTabs.every(tab=>typeof tab==="string")).toBe(true);
   }
 });
@@ -1336,8 +1366,9 @@ it("undoes and redoes the last shipped app action", async () => {
   expect(useLayoutStore.getState().isRightPanelOpen).toBe(false);
   expect(useLayoutStore.getState().activeRightPanelTab).toBe("files");
   await open();
+  await waitFor(() => expect(canRedoAppAction()).toBe(true));
   fireEvent.click(screen.getByRole("menuitem", { name: "重做上一步操作" }));
-  expect(useLayoutStore.getState().isRightPanelOpen).toBe(true);
+  await waitFor(() => expect(useLayoutStore.getState().isRightPanelOpen).toBe(true));
   expect(useLayoutStore.getState().activeRightPanelTab).toBe("diff");
 });
 

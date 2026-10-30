@@ -429,7 +429,7 @@ function CodexGroupPane({
         )}
         {item && shown && blockedWindowIds.has(item.id) && (
           <div className="codex-window-status" role="status">
-            另一实例占用 · 请点原生 Retry
+            另一实例占用 · 请点原生「重试」
           </div>
         )}
         {item && shown && activeId !== item.id && (
@@ -1844,7 +1844,7 @@ export default function CodexWorkbench({
       await new Promise<void>((resolve) => window.setTimeout(resolve, 250));
       finishHandoff(hostInstanceId);
       setHandoffNotice(
-        "旧实例已释放，请在被占用的原生会话中点击 Retry 恢复。其它窗口可继续使用。",
+        "旧实例已释放，请在被占用的原生会话中点击「重试」恢复。其它窗口可继续使用。",
       );
     } catch (cause) {
       setHandoffError(

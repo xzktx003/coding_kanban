@@ -20,7 +20,7 @@ import { recentModelConfigs, resetRecentModels } from "./recentModelConfigs";
 import { useComposerDraftStore } from "./v2/drafts";
 
 const api = vi.hoisted(() => ({ listModels: vi.fn(), listOtherModels: vi.fn(), listConfigProviders: vi.fn(), listProviderPresets: vi.fn() }));
-vi.mock("@session/services/apiAdapt", async (original) => ({ ...(await original<typeof import("@session/services/apiAdapt")>()), ...api }));
+vi.mock("@session/services/apiAdapt/codex", async (original) => ({ ...(await original<typeof import("@session/services/apiAdapt/codex")>()), ...api }));
 const A = "e7-default-a", B = "e7-default-b", CWD = "/fixture/e7";
 const TERRA = "gpt-5.6-terra", SOL = "gpt-5.6-sol", EMPTY = "e7-known-empty", UNKNOWN = "e7-unknown";
 const TL = "E7 Terra", SL = "E7 Sol", DRAFT = "E7 原草稿\n保持另一会话与附件";

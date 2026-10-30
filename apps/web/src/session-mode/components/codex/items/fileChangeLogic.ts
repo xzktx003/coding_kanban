@@ -2,6 +2,7 @@ import type { ServerNotification } from "@session/bindings";
 import type { FileUpdateChange } from "@session/bindings/v2";
 import type { ThreadItem } from "@session/bindings/v2";
 import type { SavedPatchBatch } from "@agent-orchestrator/shared";
+import type { RenderTermination } from "../presentation/renderTermination";
 import { isTranscriptMetadataOnly } from "../presentation/transcriptMetadata";
 import { getDiffCounts, normalizeUnifiedDiff } from "@session/utils/diff";
 import { splitNativePatchFiles as splitUnifiedDiffByFile } from "@session/features/nativePatchPaths";
@@ -16,8 +17,9 @@ export type AggregatedFileChange = {
 };
 
 export type RenderEventContext = {
+  executionUnverified?: boolean;
   messageTimestamp?: { ms: number; label: string };
-  renderTermination?: "completed" | "interrupted" | "failed" | "inProgress";
+  renderTermination?: RenderTermination;
   rollbackTurns?: number;
   events?: ServerNotification[];
   eventIndex?: number;

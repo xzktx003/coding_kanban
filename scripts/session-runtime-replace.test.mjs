@@ -13,10 +13,11 @@ const ready = (overrides = {}) => async () => ({
   url: "http://127.0.0.1:45678/api/session/health",
   binaryState: "older",
   pid: 123,
+  ownedAgents: { cc: { connections: 0, activeTurns: 0, pendingRequests: 0 }, acp: { connections: 0, activePrompts: 0, pendingRequests: 0, uncertainSessions: 0 } },
   ...overrides,
 });
 
-test("a stale runtime is replaced, and active turns are stopped rather than blocking", async () => {
+test("automatic stale replacement preserves private active turns; explicit maintenance can stop them", async () => {
   const idle = await planRuntimeReplacement({
     status: ready(),
     listActive: async () => [],
@@ -31,10 +32,12 @@ test("a stale runtime is replaced, and active turns are stopped rather than bloc
     status: ready(),
     listActive: async () => ["t1", "t2"],
   });
-  assert.equal(busy.action, "replace");
-  assert.equal(busy.reason, "active-turns-stopped");
-  // The caller must be able to tell the user exactly what it is ending.
+  assert.equal(busy.action, "skip");
+  assert.equal(busy.reason, "active-turns");
   assert.deepEqual(busy.active, ["t1", "t2"]);
+  const explicit = await planRuntimeReplacement({ status: ready(), listActive: async () => ["t1", "t2"], force: true });
+  assert.equal(explicit.action, "replace");
+  assert.equal(explicit.reason, "active-turns-stopped");
 });
 
 test("nothing is replaced without proof that this repository owns a stale runtime", async () => {
@@ -57,6 +60,38 @@ test("nothing is replaced without proof that this repository owns a stale runtim
   }
 });
 
+test("an explicit restart replaces the current runtime without probing unrelated builds", async () => {
+  const current = await planRuntimeReplacement({
+    status: ready({ binaryState: "current", pid: 9 }),
+    listActive: async () => [],
+    force: true,
+  });
+  assert.deepEqual(current, {
+    action: "replace",
+    reason: "forced",
+    pid: 9,
+    active: [],
+  });
+
+  const busy = await planRuntimeReplacement({
+    status: ready({ binaryState: "current", pid: 9 }),
+    listActive: async () => ["live"],
+    force: true,
+  });
+  assert.equal(busy.action, "replace");
+  assert.deepEqual(busy.active, ["live"]);
+
+  const unknown = await planRuntimeReplacement({
+    status: ready({ binaryState: "unknown", pid: 9 }),
+    listActive: async () => {
+      throw new Error("must not probe an unverified build");
+    },
+    force: true,
+  });
+  assert.equal(unknown.action, "skip");
+  assert.equal(unknown.reason, "unknown-build");
+});
+
 test("an unreadable thread list is never treated as an idle runtime", async () => {
   const plan = await planRuntimeReplacement({
     status: ready(),
@@ -66,6 +101,26 @@ test("an unreadable thread list is never treated as an idle runtime", async () =
   });
   assert.equal(plan.action, "skip");
   assert.equal(plan.reason, "active-unknown");
+});
+
+test("shared daemon tasks survive replacement and only the runtime pid is signalled", async () => {
+  const decision = await planRuntimeReplacement({
+    status: ready({ codexBackend: "shared-daemon" }),
+    listActive: async () => ["shared-turn"],
+  });
+  assert.equal(decision.reason, "shared-tasks-preserved");
+  assert.equal(decision.codexBackend, "shared-daemon");
+  const sent = [];
+  await replaceSessionRuntime({
+    plan: async () => decision,
+    signal: (pid, name) => sent.push([pid, name]),
+    alive: () => false,
+    wait: async () => {},
+    reap: () => [],
+    leadsGroup: () => true,
+    log: () => {},
+  });
+  assert.deepEqual(sent, [[123, "SIGTERM"]]);
 });
 
 test("active discovery pages through the list and rejects looping or malformed cursors", async () => {
@@ -93,6 +148,9 @@ test("active discovery pages through the list and rejects looping or malformed c
     }),
     /HTTP 503/,
   );
+  await assert.rejects(activeSessionThreads({origin:"http://127.0.0.1:45678",fetcher:async()=>({ok:true,json:async()=>({data:[]})})}),/不完整/);
+  let cursor = 0;
+  await assert.rejects(activeSessionThreads({origin:"http://127.0.0.1:45678",fetcher:async()=>({ok:true,json:async()=>({data:[],nextCursor:`page-${++cursor}`})})}),/页数|未读完/);
 });
 
 test("replacement stops the stale runtime gracefully and escalates only if it survives", async () => {
@@ -145,7 +203,7 @@ test("group leadership is read from pgid and tolerates spaces in the comm field"
   );
 });
 
-test("stopping signals the whole group so the native child goes with it", async () => {
+test("group leadership does not grant ownership of other processes", async () => {
   const sent = [];
   await replaceSessionRuntime({
     plan: async () => ({ action: "replace", reason: "idle", pid: 77, active: [] }),
@@ -156,7 +214,7 @@ test("stopping signals the whole group so the native child goes with it", async 
     leadsGroup: () => true,
     log: () => {},
   });
-  assert.deepEqual(sent, [[-77, "SIGTERM"]]);
+  assert.deepEqual(sent, [[77, "SIGTERM"]]);
 
   // A runtime that does not lead its group may share it with another service.
   const shared = [];
@@ -202,7 +260,7 @@ test("orphan detection claims only this package's own leaked runtimes", () => {
   );
 });
 
-test("reaping needs a known owner, and stops leaked runtimes even when the plan skips", async () => {
+test("same-entrypoint candidates are read-only diagnostics, including when the selected runtime is skipped", async () => {
   const signals = [];
   const ambiguous = await replaceSessionRuntime({
     plan: async () => ({ action: "skip", reason: "unverified-owner" }),
@@ -222,7 +280,30 @@ test("reaping needs a known owner, and stops leaked runtimes even when the plan 
     alive: (pid) => stubborn.has(pid),
     log: () => {},
   });
-  assert.deepEqual(skipped.orphans, [77]);
-  // A skip returns before escalation, so the orphan only gets SIGTERM here.
-  assert.deepEqual(signals, [[77, "SIGTERM"]]);
+  assert.deepEqual(skipped.orphans, []);
+  assert.deepEqual(skipped.orphanCandidates, [77]);
+  assert.deepEqual(signals, []);
+});
+
+test("automatic replacement never stops owned Claude/ACP connections or treats missing counts as idle", async () => {
+  for (const ownedAgents of [
+    { cc: { connections: 1, activeTurns: 0, pendingRequests: 0 }, acp: { connections: 0, activePrompts: 0, pendingRequests: 0, uncertainSessions: 0 } },
+    { cc: { connections: 0, activeTurns: 0, pendingRequests: 0 }, acp: { connections: 1, activePrompts: 1, pendingRequests: 1, uncertainSessions: 0 } },
+  ]) {
+    const decision = await planRuntimeReplacement({ status: ready({ codexBackend: "shared-daemon", ownedAgents }), listActive: async () => ["shared"] });
+    assert.equal(decision.action,"skip");
+    assert.equal(decision.reason,"owned-agents-connected");
+    const explicit = await planRuntimeReplacement({ status: ready({codexBackend:"shared-daemon",ownedAgents}),listActive:async()=>["shared"],force:true });
+    assert.equal(explicit.action,"replace");
+    assert.equal(explicit.reason,"owned-agents-stopped");
+  }
+  const missing=await planRuntimeReplacement({status:ready({ownedAgents:undefined}),listActive:async()=>[]});
+  assert.equal(missing.action,"skip");assert.equal(missing.reason,"owned-activity-unknown");
+});
+test("explicit verified maintenance reports unknown activity without inventing an idle state or sweeping another data home",async()=>{
+  const decision=await planRuntimeReplacement({status:ready({ownedAgents:undefined}),listActive:async()=>{throw new Error("offline native");},force:true});
+  assert.equal(decision.action,"replace");assert.equal(decision.activityUnknown,true);
+  const sent=[];
+  const result=await replaceSessionRuntime({plan:async()=>decision,reap:()=>[456],signal:(pid,name)=>sent.push([pid,name]),alive:()=>false,log:()=>{}});
+  assert.deepEqual(sent,[[123,"SIGTERM"]]);assert.deepEqual(result.orphanCandidates,[456]);
 });

@@ -18,6 +18,7 @@ import {
 import { Input } from "@session/components/ui/input";
 import { Label } from "@session/components/ui/label";
 import { Separator } from "@session/components/ui/separator";
+import { usePairingStore } from "@session/stores/usePairingStore";
 import { openEventStream } from "@session/lib/eventStream";
 import { buildUrl, isTauri } from "@session/hooks/runtime";
 import {
@@ -38,6 +39,7 @@ interface CodexAuthProps {
 interface OwnedLogin {
   epoch: number;
   source: string;
+  pairing: string;
   instance: string | null;
   loginId: string | null;
   dispatched: boolean;
@@ -46,6 +48,13 @@ interface OwnedLogin {
   early: AccountLoginCompletedNotification[];
   supportsMutations: boolean;
 }
+
+const pairingIdentity = (state = usePairingStore.getState()) => {
+  const desktop = state.desktops.find(
+    (device) => device.host === state.selectedHost,
+  );
+  return JSON.stringify([state.selectedHost, desktop?.port, desktop?.token]);
+};
 
 export function CodexAuth({ onAuthenticated }: CodexAuthProps = {}) {
   const isTauriRuntime = isTauri();
@@ -74,7 +83,8 @@ export function CodexAuth({ onAuthenticated }: CodexAuthProps = {}) {
       lifecycle.current.active &&
       pendingLogin.current === attempt &&
       lifecycle.current.epoch === attempt.epoch &&
-      buildUrl("/health") === attempt.source,
+      buildUrl("/health") === attempt.source &&
+      pairingIdentity() === attempt.pairing,
     [],
   );
 
@@ -132,12 +142,34 @@ export function CodexAuth({ onAuthenticated }: CodexAuthProps = {}) {
     }
   }, []);
 
+  useEffect(
+    () =>
+      usePairingStore.subscribe((state, previous) => {
+        if (pairingIdentity(state) === pairingIdentity(previous)) return;
+        lifecycle.current.epoch++;
+        lifecycle.current.read++;
+        pendingLogin.current = null;
+        setAccountResponse(null);
+        setApiKey("");
+        setIsLoggingIn(false);
+        setLoginLink("");
+        setDeviceCode("");
+        setCanCancelLogin(false);
+        setCancelPhase("idle");
+        setLastStatus(null);
+        setLastError("连接设备或凭据已改变，请在当前设备重新开始登录。");
+        void refreshAccount(false);
+      }),
+    [refreshAccount],
+  );
+
   const handleLogin = useCallback(
     async (params: LoginAccountParams) => {
       if (pendingLogin.current) return;
       const attempt: OwnedLogin = {
         epoch: lifecycle.current.epoch,
         source: buildUrl("/health"),
+        pairing: pairingIdentity(),
         instance: null,
         loginId: null,
         dispatched: false,

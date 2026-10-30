@@ -1,3 +1,4 @@
+import { changeNativeQueue } from "./nativeQueueAction";
 import { threadPermissionParameters } from "./threadPermissionProjection";
 import {
   stableSubmissionId,
@@ -26,6 +27,7 @@ import type {
 import { useCodexStore } from "../components/codex/stores";
 import { assertCodexSendAccess } from "../stores/useCodexAccessStore";
 import { MutationNotStartedError } from "./MutationNotStartedError";
+import { readNativeOperationContext } from "./nativeOperationContext";
 import { captureCodexOperationScope, isCodexOperationScopeCurrent } from "./codexOperationScope";
 import {
   assertCodexThreadInput,
@@ -148,7 +150,8 @@ export async function submissionId(
   revision: SubmissionEdit,
   data: Omit<FollowupSubmit, "id">,
 ) {
-  return stableSubmissionId(owner, revision, data);
+  const { expectedScope: _scope, ...content } = data;
+  return stableSubmissionId(owner, revision, content);
 }
 export const followupService = {
   async load(id: string, options?: { signal?: AbortSignal }) {
@@ -250,6 +253,9 @@ export const followupService = {
     }
     if (!isCodexOperationScopeCurrent(operationScope))
       throw new MutationNotStartedError("连接目标已切换，消息尚未发送，草稿已保留");
+    const nativeContext = await readNativeOperationContext();
+    if (typeof nativeContext.scopeToken !== "string" || !nativeContext.scopeToken || !isCodexOperationScopeCurrent(operationScope))
+      throw new MutationNotStartedError("运行服务范围尚未确认，消息未发送，草稿已保留");
     beginDeliveryEcho({ ...submittedData, id });
     const echoKey = JSON.stringify([threadId, id]);
     const submittedEcho = useCodexDeliveryStore.getState().entries[echoKey];
@@ -266,7 +272,7 @@ export const followupService = {
             (signal) =>
               postJsonWithOptions<FollowupThread>(
                 "/followups/submit",
-                { ...submittedData, id },
+                { ...submittedData, id, expectedScope: nativeContext.scopeToken },
                 { suppressToast: true, signal },
               ),
             15_000,
@@ -293,7 +299,7 @@ export const followupService = {
         } catch {
           throw unconfirmed();
         }
-        const receipt = result.items.find((message) => message.id === id);
+        const receipt = result.items.find((message) => message.id === id || message.nativeClientUserMessageId === id);
         if (
           !receipt ||
           !["queued", "sending", "sent", "failed", "uncertain"].includes(
@@ -302,7 +308,7 @@ export const followupService = {
         )
           throw unconfirmed();
       }
-      const item = result.items.find((m) => m.id === id);
+      const item = result.items.find((m) => m.id === id || m.nativeClientUserMessageId === id);
       if (!item) throw new Error("消息提交回执不完整");
       if (item.status === "failed" || item.status === "uncertain")
         throw new Error(
@@ -320,24 +326,18 @@ export const followupService = {
     if (action.type === "resume" || action.type === "pause")
       revision = (await this.load(threadId)).revision;
     try {
-      return accept(
-        threadId,
-        await postJsonWithOptions<FollowupThread>(
-          "/followups/change",
-          { threadId, revision, action },
-          { suppressToast: true },
-        ),
-      );
+      return accept(threadId, await changeNativeQueue(threadId, revision, action));
     } finally {
       void this.load(threadId).catch(() => {});
     }
   },
   async stop(threadId: string, turnId: string) {
+    const context = await readNativeOperationContext();
     return accept(
       threadId,
       await postJsonWithOptions<FollowupThread>(
         "/followups/stop",
-        { threadId, turnId },
+        { threadId, turnId, expectedScope: context.scopeToken },
         { suppressToast: true },
       ),
     );

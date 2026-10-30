@@ -1,5 +1,5 @@
 import { CloudUpload, GitCommit, ListTodo } from "lucide-react";
-import { useCallback, useState } from "react";
+import { lazy, Suspense, useCallback, useState } from "react";
 import { Button } from "@session/components/ui/button";
 import {
   DropdownMenu,
@@ -13,15 +13,21 @@ import { useToast } from "@session/components/ui/use-toast";
 import { gitCommit, gitPush } from "@session/services/apiAdapt/git";
 import { useGitStatsStore } from "@session/stores/useGitStatsStore";
 import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
-import { GitCommitDialog } from "./GitCommitDialog";
+import { OptionalSessionPanel } from "@session/components/layout/OptionalSessionPanel";
+const GitCommitDialog = lazy(() =>
+  import("./GitCommitDialog").then((module) => ({
+    default: module.GitCommitDialog,
+  })),
+);
 
 export function GitActions({ path }: { path?: string } = {}) {
-  const workspace = useWorkspaceStore(s => s.cwd);
+  const workspace = useWorkspaceStore((s) => s.cwd);
   const cwd = path ?? workspace;
   const { refreshStats } = useGitStatsStore();
   const { toast } = useToast();
 
   const [isCommitDialogOpen, setIsCommitDialogOpen] = useState(false);
+  const [commitVisited, setCommitVisited] = useState(false);
 
   const refreshGitStats = useCallback(() => {
     if (!cwd) return;
@@ -78,7 +84,10 @@ export function GitActions({ path }: { path?: string } = {}) {
 
           <DropdownMenuItem
             className="gap-2 text-xs cursor-pointer"
-            onClick={() => setIsCommitDialogOpen(true)}
+            onClick={() => {
+              setCommitVisited(true);
+              setIsCommitDialogOpen(true);
+            }}
           >
             <GitCommit className="size-3.5 text-primary" />
             <span>提交更改…</span>
@@ -94,11 +103,39 @@ export function GitActions({ path }: { path?: string } = {}) {
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <GitCommitDialog
-        isOpen={isCommitDialogOpen}
-        onClose={() => setIsCommitDialogOpen(false)}
-        onConfirm={confirmGitCommit}
-      />
+      {commitVisited && (
+        <OptionalSessionPanel
+          label="提交表单"
+          overlay
+          visible={isCommitDialogOpen}
+          onClose={() => setIsCommitDialogOpen(false)}
+        >
+          <Suspense
+            fallback={
+              isCommitDialogOpen ? (
+                <div
+                  role="status"
+                  className="session-optional-panel-error session-optional-panel-overlay"
+                >
+                  正在加载提交表单…
+                  <button
+                    type="button"
+                    onClick={() => setIsCommitDialogOpen(false)}
+                  >
+                    取消加载提交表单
+                  </button>
+                </div>
+              ) : null
+            }
+          >
+            <GitCommitDialog
+              isOpen={isCommitDialogOpen}
+              onClose={() => setIsCommitDialogOpen(false)}
+              onConfirm={confirmGitCommit}
+            />
+          </Suspense>
+        </OptionalSessionPanel>
+      )}
     </>
   );
 }

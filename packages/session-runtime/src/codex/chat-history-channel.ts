@@ -77,13 +77,25 @@ export function registerChatHistoryChannel(
   readCurrentTurn?: ReadCurrentChatTurn,
 ) {
   const reads = new Map<AbortController, Promise<unknown>>();
-  const queue: Array<{ run: () => Promise<void> }> = [];
+  const queue: Array<{
+    priority: "interactive" | "background";
+    run: () => Promise<void>;
+  }> = [];
+  let foregroundBurst = 0;
   let active = false;
   let closing = false;
   const pump = () => {
     if (active || closing) return;
-    const job = queue.shift();
+    const background = queue.findIndex((job) => job.priority === "background");
+    const foreground = queue.findIndex((job) => job.priority === "interactive");
+    const index =
+      background >= 0 && (foreground < 0 || foregroundBurst >= 3)
+        ? background
+        : foreground;
+    const job = index < 0 ? undefined : queue.splice(index, 1)[0];
     if (!job) return;
+    foregroundBurst =
+      job.priority === "background" ? 0 : Math.min(3, foregroundBurst + 1);
     active = true;
     void job.run().finally(() => {
       active = false;
@@ -103,6 +115,11 @@ export function registerChatHistoryChannel(
     }
     if (url.searchParams.size !== 1)
       return reply.code(400).send({ error: "CHAT_HISTORY_INVALID_VIEW" });
+    // This is gateway scheduling metadata, never a native RPC parameter.
+    const priority =
+      request.headers["x-session-read-priority"] ?? "interactive";
+    if (priority !== "interactive" && priority !== "background")
+      return reply.code(400).send({ error: "CHAT_HISTORY_INVALID_PRIORITY" });
     if (
       request.body &&
       typeof request.body === "object" &&
@@ -138,7 +155,8 @@ export function registerChatHistoryChannel(
     const settled = new Promise<void>((resolve) => {
       finish = resolve;
     });
-    const job = {
+    const job: (typeof queue)[number] = {
+      priority,
       run: async () => {
         try {
           const currentTurn = await currentExecution(

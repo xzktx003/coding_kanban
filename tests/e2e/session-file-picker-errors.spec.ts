@@ -26,7 +26,7 @@ for (const failure of ["oversize", "upload"] as const) {
     await page.getByRole("button", { name: "附加文件", exact: true }).click();
     const chooserPromise = page.waitForEvent("filechooser");
     await page
-      .getByRole("button", { name: "文件和文件夹", exact: true })
+      .getByRole("button", { name: "上传设备文件", exact: true })
       .click();
     const chooser = await chooserPromise;
     await chooser.setFiles({

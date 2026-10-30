@@ -4,6 +4,8 @@ import type {
   GetAccountRateLimitsResponse,
   GetAccountResponse,
 } from "@session/bindings/v2";
+import { usePairingStore } from "@session/stores/usePairingStore";
+import { useCodexStore } from "@session/components/codex/stores/useCodexStore";
 import { openEventStream } from "@session/lib/eventStream";
 import {
   getJsonWithOptions,
@@ -59,6 +61,21 @@ export function NativeCodexUsage({
         void controller.refresh(true);
       },
     });
+    const pairing = (state: ReturnType<typeof usePairingStore.getState>) => {
+      const device = state.desktops.find(
+        (value) => value.host === state.selectedHost,
+      );
+      return JSON.stringify([state.selectedHost, device?.port, device?.token]);
+    };
+    const stopPairing = usePairingStore.subscribe((state, previous) => {
+      if (pairing(state) !== pairing(previous)) void controller.refresh(true);
+    });
+    const accountScope = (state: ReturnType<typeof useCodexStore.getState>) =>
+      JSON.stringify([state.accountNamespace, state.account?.type]);
+    const stopAccount = useCodexStore.subscribe((state, previous) => {
+      if (accountScope(state) !== accountScope(previous))
+        void controller.refresh(true);
+    });
     const focus = () => {
       void controller.refresh();
     };
@@ -70,6 +87,8 @@ export function NativeCodexUsage({
     window.addEventListener("session-runtime-restarted", runtimeRestarted);
     return () => {
       close();
+      stopPairing();
+      stopAccount();
       window.clearInterval(timer);
       window.removeEventListener("focus", focus);
       window.removeEventListener("session-runtime-restarted", runtimeRestarted);

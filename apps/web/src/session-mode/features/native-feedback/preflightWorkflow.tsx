@@ -1,6 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { lazy, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { NativeFeedbackDialog } from "@session/components/codex/composer/NativeFeedbackDialog";
+import { DeferredComposerPanel } from "@session/components/codex/composer/DeferredComposerPanel";
 import { useCodexStore } from "@session/components/codex/stores";
 import { authHeaders, buildUrl } from "@session/hooks/runtime";
 import {
@@ -27,6 +27,11 @@ import { feedbackPreflightMessage } from "./preflightMessages";
 import { startFeedbackUpload } from "./service";
 
 const READ_TIMEOUT_MS = 15000;
+const NativeFeedbackDialog = lazy(() =>
+  import("@session/components/codex/composer/NativeFeedbackDialog").then(
+    (module) => ({ default: module.NativeFeedbackDialog }),
+  ),
+);
 type Workflow = {
   target: FeedbackTarget;
   identity: string;
@@ -344,31 +349,40 @@ export function FeedbackPreflightWorkflow({
     <>
       <span ref={marker} hidden data-feedback-preflight-host />
       {form && form === current.current && !form.revoked && (
-        <NativeFeedbackDialog
-          threadId={form.target.threadId}
-          owner={form.target.draftOwner}
+        <DeferredComposerPanel
+          label="反馈表单"
           onClose={() => {
             if (!guard(form)) return;
             revoke(form);
             props.current.onClose();
           }}
-          submitFeedback={async (threadId, text, selection) => {
-            if (threadId !== form.target.threadId || !guard(form)) return;
-            const reason = await check(form);
-            if (!guard(form)) return;
-            if (reason !== null) {
-              if (reason !== undefined) notify(reason);
-              return;
-            }
-            // No await between the final scope fence and the existing captured upload handoff.
-            startFeedbackUpload(
-              form.target.threadId,
-              text,
-              selection,
-              form.target.draftOwner,
-            );
-          }}
-        />
+        >
+          <NativeFeedbackDialog
+            threadId={form.target.threadId}
+            owner={form.target.draftOwner}
+            onClose={() => {
+              if (!guard(form)) return;
+              revoke(form);
+              props.current.onClose();
+            }}
+            submitFeedback={async (threadId, text, selection) => {
+              if (threadId !== form.target.threadId || !guard(form)) return;
+              const reason = await check(form);
+              if (!guard(form)) return;
+              if (reason !== null) {
+                if (reason !== undefined) notify(reason);
+                return;
+              }
+              // No await between the final scope fence and the existing captured upload handoff.
+              startFeedbackUpload(
+                form.target.threadId,
+                text,
+                selection,
+                form.target.draftOwner,
+              );
+            }}
+          />
+        </DeferredComposerPanel>
       )}
     </>
   );

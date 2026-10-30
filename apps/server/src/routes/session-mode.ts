@@ -1,4 +1,4 @@
-import { projectCodexChatValue } from "@agent-orchestrator/shared";
+import { projectCodexChatValue, projectAuxiliaryChatEnvelope } from "@agent-orchestrator/shared";
 import { registerSessionItemDetail } from "./session-item-detail.js";
 import { registerSessionFollowupRoutes } from "./session-followups.js";
 import { registerSessionSubagentRoutes } from "./session-subagents.js";
@@ -12,8 +12,13 @@ import { registerSessionGuardianDenialRoutes } from "./session-codex-guardian.js
 import { registerCodexHostRoutes } from "./session-codex-host.js";
 import { registerCodexCloudRoutes } from "./session-codex-cloud.js";
 import { registerSessionGroupsRoutes } from "./session-groups.js";
+import { registerSessionManagementRoutes } from "./session-management.js";
+import { registerSessionLifecycleRoutes } from "./session-lifecycle.js";
+import { registerSessionClientControlRoutes } from "./session-client-control.js";
 import { createCodexHostOwnerResolver } from "../services/codex-host-owner.js";
 import { projectCodexPriorConversation } from "../services/codex-cloud-history.js";
+import { AuxiliaryHistoryError, auxiliaryRecentProvider, auxiliaryRecentRequest, readAuxiliaryRecentResponse } from "../services/auxiliary-history-projection.js";
+import { SessionAuxiliaryHistory, auxiliaryLocalTarget } from "../services/session-auxiliary-history.js";
 import { CodexHostCompanionCredential, prepareCodexHostCompanion } from "../services/codex-host-companion.js";
 import type { VsCodeWebManager } from "../services/vscode-web-manager.js";
 import { saveSessionAttachment } from "../services/session-attachments.js";
@@ -29,6 +34,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import WebSocket from "ws";
 
 interface SessionModeRouteOptions {
+  loadAuxiliaryHistory?: () => Promise<typeof import("@agent-orchestrator/session-runtime/auxiliary-history")>;
   loadDetailChannel?: () => Promise<{
     registerLocalItemDetailChannel: (app: FastifyInstance, dataDir: string) => void;
     registerLocalChatHistoryChannel?: (app: FastifyInstance, dataDir: string, fallback: (request: FastifyRequest, reply: FastifyReply) => unknown, readCurrentTurn?: (threadId: string, signal: AbortSignal) => Promise<Awaited<ReturnType<typeof readSessionCodexActivity>>["turn"]>) => void;
@@ -74,6 +80,19 @@ const chatHistoryPaths = new Set([
   "/api/codex/thread/metadata",
 ]);
 
+const sessionWritePaths = new Set([
+  "/api/codex/turn/start", "/api/codex/turn/steer", "/api/codex/turn/interrupt",
+  "/api/codex/thread/resume", "/api/codex/thread/fork", "/api/codex/thread/archive",
+  "/api/codex/thread/goal/set", "/api/codex/thread/goal/clear", "/api/codex/thread/goal/clear-completed",
+  "/api/codex/thread/settings/update", "/api/codex/thread/queue/add", "/api/codex/thread/queue/start",
+  "/api/codex/thread/queue/update", "/api/codex/thread/queue/delete", "/api/codex/thread/queue/reorder",
+  "/api/codex/thread/rollback", "/api/codex/thread/delete", "/api/codex/thread/compact/start",
+  "/api/codex/mcp/app/call",
+  "/api/codex/realtime/start", "/api/codex/realtime/stop",
+  "/api/codex/realtime/append-text",
+  "/api/codex/review/start",
+]);
+
 function splitSessionSuffix(origin: string, suffix: string) {
   const url = new URL(suffix, origin);
   const chatProjection = url.searchParams.get("view") === CHAT_PROJECTION_VIEW;
@@ -85,7 +104,7 @@ function splitSessionSuffix(origin: string, suffix: string) {
 function projectChatEnvelope(value: unknown): unknown {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
   const envelope = value as Record<string, unknown>;
-  if (envelope.event !== "codex:notification") return value;
+  if (envelope.event !== "codex:notification") return projectAuxiliaryChatEnvelope(value);
   const payload = projectCodexChatValue(envelope.payload);
   return payload === envelope.payload ? value : { ...envelope, payload };
 }
@@ -203,6 +222,7 @@ export function registerSessionModeRoutes(
   });
   let origin = options.origin ? validateOrigin(options.origin).origin : null;
   const fetchUpstream = options.fetch ?? globalThis.fetch;
+  const auxiliaryHistory = options.attachmentRoot ? new SessionAuxiliaryHistory({ attachmentRoot: options.attachmentRoot, origin: () => origin, loadLibrary: options.loadAuxiliaryHistory }) : null;
   registerSessionCodexActivityRoutes(app, { origin: () => origin, fetch: fetchUpstream });
   if (options.attachmentRoot && process.env.SESSION_MODE_ENABLED !== "0") {
     app.register(async (detailScope) => {
@@ -319,6 +339,8 @@ export function registerSessionModeRoutes(
                 options.completionNotifications!.bindings!.record({
                   sessionId: event.sessionId,
                   sessionModeThreadId: event.sessionModeThreadId,
+                  sessionModeScope: event.sessionModeScope,
+                  sessionModeNamespace: event.sessionModeNamespace,
                   completionId: event.completionId ?? event.completedAt,
                   messages: delivery.messages,
                 }),
@@ -333,6 +355,7 @@ export function registerSessionModeRoutes(
           : undefined,
         readThread: async (threadId, turnId) => {
           if (!origin) throw new Error("会话服务尚未连接");
+          const before = await nativeContext();
           const request = async (path: string, body: unknown) => {
             const response = await fetchUpstream(
               `${origin}/api/codex/thread/${path}`,
@@ -363,7 +386,11 @@ export function registerSessionModeRoutes(
             });
             if (!Array.isArray(page.data)) throw new Error("任务历史格式无效");
             const turn = page.data.find((turn: any) => turn.id === turnId);
-            if (turn) return { thread: { ...thread, turns: [turn] } };
+            if (turn) {
+              const after = await nativeContext();
+              if (before.scope !== after.scope || before.namespace !== after.namespace) throw new Error("读取完成记录期间账号或运行范围已变化");
+              return { thread: { ...thread, turns: [turn] }, sessionModeContext: before };
+            }
             cursor = page.nextCursor ?? null;
             if (cursor !== null) {
               if (typeof cursor !== "string" || seen.has(cursor))
@@ -380,6 +407,7 @@ export function registerSessionModeRoutes(
           ),
       })
     : undefined;
+  let lifecycle: ReturnType<typeof registerSessionLifecycleRoutes> | undefined;
   const followups = registerSessionFollowupRoutes(app, {
     origin: () => origin,
     fetch: fetchUpstream,
@@ -388,10 +416,60 @@ export function registerSessionModeRoutes(
       : undefined,
     autoStart: Boolean(options.attachmentRoot),
     completionNotifier,
+    withWrite: (threadId, work) => lifecycle ? lifecycle.write(threadId, work) : work(),
   });
+  const nativeRequest = async (path: string, params?: Record<string, unknown>) => {
+    if (!origin) throw Object.assign(new Error("会话服务尚未连接"), { statusCode: 503 });
+    const response = await fetchUpstream(`${origin}${path}`, {
+      method: params ? "POST" : "GET", headers: params ? { "content-type": "application/json" } : undefined,
+      ...(params ? { body: JSON.stringify(params) } : {}), signal: AbortSignal.timeout(15_000), redirect: "manual",
+    });
+    const value = await response.json() as Record<string, any>;
+    if (!response.ok) throw Object.assign(new Error(typeof value.error === "string" ? value.error : "原生会话状态暂不可用"), { statusCode: response.status });
+    return value;
+  };
+  const nativeContext = async () => {
+    const value = await nativeRequest("/api/internal/codex/operation-context");
+    if (typeof value.scope !== "string" || typeof value.namespace !== "string" || !value.scope || !value.namespace)
+      throw Object.assign(new Error("当前运行服务无法核实账号与运行范围"), { statusCode: 503 });
+    return { scope: value.scope, namespace: value.namespace,
+      ...(typeof value.daemonIdentity === "string" && /^[a-f0-9]{64}$/.test(value.daemonIdentity) ? { daemonIdentity: value.daemonIdentity } : {}),
+    };
+  };
+  lifecycle = registerSessionLifecycleRoutes(app, {
+    file: options.attachmentRoot ? resolve(options.attachmentRoot, "..", "session-lifecycle.json") : undefined,
+    origin: () => origin, fetch: fetchUpstream,
+    context: async () => { const context = await nativeContext(); return { scopeToken: context.scope, namespace: context.namespace, ...(context.daemonIdentity ? { daemonIdentity: context.daemonIdentity } : {}) }; },
+    followups,
+  });
+  const management = registerSessionManagementRoutes(app, {
+    file: options.attachmentRoot ? resolve(options.attachmentRoot, "..", "session-management.json") : undefined,
+    accountScope: async () => { try { return (await nativeContext()).namespace; } catch { return null; } },
+    verifyTarget: async target => {
+      if (target.kind !== "codex") return;
+      const before = await nativeContext();
+      const metadata = await nativeRequest("/api/codex/thread/metadata", { threadId: target.id });
+      const after = await nativeContext();
+      if (metadata.thread?.id !== target.id || before.scope !== after.scope)
+        throw Object.assign(new Error("会话归属已变化，请查看最新状态后重试"), { statusCode: 409 });
+    },
+    nativeRead: async (target, expectedRevision, operation, scope) => {
+      if (!scope) throw Object.assign(new Error("缺少实际阅读时的运行范围，请重新查看回复"), { statusCode: 409 });
+      await nativeRequest("/api/internal/codex/guarded-read-state", { expectedScope: scope, threadId: target.id, expectedRevision, operation });
+    },
+  });
+  registerSessionClientControlRoutes(app, { origin: () => origin, fetch: fetchUpstream, management, write: (threadId, work) => lifecycle!.write(threadId, work) });
   const replyService = new SessionCodexFeishuReplyService({
     attachmentRoot: options.attachmentRoot,
-    submit: (input) => followups.enqueue(input),
+    context: nativeContext,
+    submit: async (input) => {
+      const context = await nativeContext();
+      if (!input.expectedScope || input.expectedScope !== context.scope) throw new Error("原卡片的账号或运行范围已变化，消息尚未提交");
+      const result = await followups.enqueue(input);
+      const message = result.items.find(row => row.id === input.id || row.nativeClientUserMessageId === input.id);
+      if (!message || !["queued", "sending", "sent"].includes(message.status)) throw new Error(message?.error ?? "原会话送达结果待核对，不会重复发送");
+      return result;
+    },
     readThread: async (threadId) => {
       if (!origin) throw new Error("会话服务尚未连接");
       const response = await fetchUpstream(
@@ -536,6 +614,8 @@ export function registerSessionModeRoutes(
         origin,
         suffix,
       );
+      const recentProvider = auxiliaryRecentProvider(request.method, suffix);
+      const localHistoryTarget = auxiliaryHistory ? auxiliaryLocalTarget(request.method, suffix) : null;
       const controller = new AbortController();
       // ACP prompts and local inference can legitimately run for several minutes.
       const longRunning = [
@@ -559,8 +639,12 @@ export function registerSessionModeRoutes(
       // Goal preflight may still be waiting before upstream response headers.
       // Browser cancellation must reach that wait before it can write to native.
       if (pendingGoalMutation) reply.raw.once("close", goalReplyClosed);
+      // Bounded recent reads wait for validation before sending any response.
+      // A completed POST can therefore be abandoned before upstream headers.
+      if (recentProvider || localHistoryTarget) reply.raw.once("close", goalReplyClosed);
       try {
-        const response = await fetchUpstream(`${origin}${upstreamSuffix}`, {
+        const recentRequest = recentProvider ? auxiliaryRecentRequest(recentProvider, suffix, request.body) : null;
+        const forward = () => fetchUpstream(`${origin}${upstreamSuffix}`, {
           method: request.method,
           headers:
             request.method === "POST"
@@ -573,6 +657,15 @@ export function registerSessionModeRoutes(
           signal: controller.signal,
           redirect: "manual",
         });
+        const writeThread = lifecycle && request.method === "POST" && sessionWritePaths.has(pathname) && typeof (request.body as any)?.threadId === "string"
+          ? (request.body as { threadId: string }).threadId : undefined;
+        const response = localHistoryTarget ? await auxiliaryHistory!.response(localHistoryTarget, suffix, request.body, controller.signal)
+          : writeThread ? await lifecycle!.write(writeThread, forward) : await forward();
+        if (recentRequest) {
+          const value = await readAuxiliaryRecentResponse(response, recentRequest, controller.signal);
+          clearTimeout(timeout);
+          return reply.code(response.status).headers({ "cache-control": "no-store", "x-content-type-options": "nosniff" }).send(value);
+        }
         clearTimeout(timeout);
         reply.code(response.status);
         for (const name of [
@@ -581,6 +674,9 @@ export function registerSessionModeRoutes(
           "cache-control",
           "etag",
           "x-content-type-options",
+          "x-history-image-width",
+          "x-history-image-height",
+          "x-history-image-revision",
         ]) {
           const value = response.headers.get(name);
           if (value) reply.header(name, value);
@@ -630,6 +726,13 @@ export function registerSessionModeRoutes(
         });
         return reply.send(stream);
       } catch (error) {
+        if (error instanceof AuxiliaryHistoryError) {
+          controller.abort();
+          return reply.code(error.statusCode).headers({ "cache-control": "no-store", "x-content-type-options": "nosniff" }).send({ error: error.message, code: error.code });
+        }
+        const statusCode = (error as { statusCode?: number })?.statusCode;
+        if (statusCode && statusCode >= 400 && statusCode < 500)
+          return reply.code(statusCode).send({ error: error instanceof Error ? error.message : "当前会话操作暂不可用", code: "SESSION_LIFECYCLE_BLOCKED", deliveryStage: "not-admitted" });
         request.log.warn(
           {
             error: error instanceof Error ? error.message : "upstream failure",
@@ -642,7 +745,7 @@ export function registerSessionModeRoutes(
       } finally {
         clearTimeout(timeout);
         request.raw.off("aborted", abort);
-        if (pendingGoalMutation) reply.raw.off("close", goalReplyClosed);
+        if (pendingGoalMutation || recentProvider || localHistoryTarget) reply.raw.off("close", goalReplyClosed);
       }
     },
   });

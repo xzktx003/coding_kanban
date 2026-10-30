@@ -2,7 +2,7 @@ import { beforeEach, expect, test, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 const api = vi.hoisted(() => ({ allowSleep: vi.fn().mockResolvedValue(undefined), preventSleep: vi.fn().mockResolvedValue(undefined), threadRollback: vi.fn(), threadRead: vi.fn(), turnStart: vi.fn(), respondToPermissionsApproval: vi.fn(), respondToMcpElicitation: vi.fn(), respondToCommandExecutionApproval: vi.fn() }));
 vi.mock('@session/services', () => api);
-vi.mock('@session/services/apiAdapt', () => api);
+vi.mock('@session/services/apiAdapt/codex', () => api);
 import { useCodexStore as store } from '@session/components/codex/stores/useCodexStore';
 import { useSessionState } from '@session/components/common/SessionStatus';
 import { useTurnControl } from '@session/components/codex/hooks/useTurnControl';
@@ -106,14 +106,25 @@ import { resetCodexRuntimeState } from '@session/services/codexService';
 import { reconcileCodexRequests, clearCodexRequests } from '@session/components/codex/hooks/serverRequests';
 import { resetRpcLifecycle, useRpcDeliveryStore } from '@session/components/codex/stores/rpcLifecycle';
 import { SessionApiError } from '@session/services/apiAdapt/shared';
+import { HistoryReadScopeChangedError } from '@session/services/HistoryReadScopeChangedError';
 test('restart invalidates old history requests and permits a new request for the same thread',async()=>{
  let resolve!:(v:any)=>void;
  api.threadRead.mockImplementationOnce(()=>new Promise(r=>resolve=r));
  const old=codexService.threadResume('a');
+ // Navigation consumes scope cancellation silently; the background scheduler
+ // must still know that this shared request did not produce a usable snapshot.
+ const scheduler=codexService.loadThreadHistory('a',undefined,{reportScopeChanges:true});
+ const cancelled=expect(scheduler).rejects.toBeInstanceOf(HistoryReadScopeChangedError);
+ await vi.waitFor(()=>expect(api.threadRead).toHaveBeenCalledOnce());
+ const oldTransport=api.threadRead.mock.calls[0][1].signal;
  resetCodexRuntimeState();
+ expect(oldTransport.aborted).toBe(true);
  api.threadRead.mockResolvedValueOnce({thread:{id:'a',turns:[turn('new')],status:{type:'active',activeFlags:[]}}});
  await codexService.threadResume('a');
- resolve({thread:{id:'a',turns:[turn('old','failed')],status:{type:'systemError'}}});await old;
+ await cancelled;
+ await expect(old).resolves.toBeUndefined();
+ resolve({thread:{id:'a',turns:[turn('old','failed')],status:{type:'systemError'}}});
+ await Promise.resolve();
  expect(store.getState().turnTimingMap.a.turnId).toBe('new');
  expect(store.getState().threadStatusMap.a.type).toBe('active');
 });

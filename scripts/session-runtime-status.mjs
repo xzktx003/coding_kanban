@@ -37,7 +37,11 @@ export async function sessionRuntimeStatus({
   } catch (error) {
     return { state: "unavailable", url, runtimeLog, error: error.message };
   }
-  const result = { state: "ready", url, runtimeLog, binaryState: "unknown" };
+  const result = {
+    state: "ready", url, runtimeLog, binaryState: "unknown",
+    ...(health.codexBackend === "shared-daemon" ? { codexBackend: "shared-daemon" } : {}),
+    ...(readOwnedAgentActivity(health.ownedAgents) ? { ownedAgents: readOwnedAgentActivity(health.ownedAgents) } : {}),
+  };
   try {
     const identity = JSON.parse(
       readFile(resolve(dataHome, "runtime.json"), "utf8"),
@@ -91,6 +95,22 @@ export async function sessionRuntimeStatus({
   } catch {
     return result;
   }
+}
+/** Fixed scalar metadata only. A missing/old health field is unknown, never zero. */
+export function readOwnedAgentActivity(value) {
+  if (!value || typeof value !== "object") return undefined;
+  const fields = { cc: ["connections", "activeTurns", "pendingRequests"], acp: ["connections", "activePrompts", "pendingRequests", "uncertainSessions"] };
+  const result = {};
+  for (const [provider, names] of Object.entries(fields)) {
+    const source = value[provider];
+    if (!source || typeof source !== "object") return undefined;
+    result[provider] = {};
+    for (const name of names) {
+      if (!Number.isSafeInteger(source[name]) || source[name] < 0) return undefined;
+      result[provider][name] = source[name];
+    }
+  }
+  return result;
 }
 export function printRuntimeStatus(result, log = console.log) {
   if (result.state === "disabled")

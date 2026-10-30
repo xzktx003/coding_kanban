@@ -14,6 +14,8 @@ for (const width of [1440, 390])
           const sources: any[] = [];
           (window as any).__accountSources = sources;
           (window as any).__accountSequence = 0;
+          (window as any).__accountRuntimeRestarts = 0;
+          window.addEventListener("session-runtime-restarted", () => { (window as any).__accountRuntimeRestarts++; });
           (window as any).EventSource = class {
             readyState = 1;
             onopen: any = null;
@@ -511,6 +513,7 @@ for (const width of [1440, 390])
           .getByRole("button", { name: "登录 ChatGPT", exact: true })
           .click();
         await expect(auth).toContainText("FIXTURE-ONLY");
+        const restartBefore = await page.evaluate(() => (window as any).__accountRuntimeRestarts);
         runtimeInstance = "ux-fixture-next";
         await emitAccount("account/login/completed", {
           loginId: "fixture-own-login-2",
@@ -525,6 +528,7 @@ for (const width of [1440, 390])
         });
         await page.keyboard.press("Escape");
         await expect(auth).toHaveCount(0);
+        await expect.poll(() => page.evaluate(() => (window as any).__accountRuntimeRestarts), {timeout:15_000}).toBeGreaterThan(restartBefore);
         await openAccountMenu();
         await page
           .getByRole("button", { name: "Add Account", exact: true })

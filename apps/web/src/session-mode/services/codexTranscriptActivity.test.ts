@@ -8,6 +8,10 @@ import {
   needsCodexTranscriptRestore,
   acknowledgeCodexTranscriptRestore,
   forgetCodexTranscript,
+  onCodexTranscriptWarmRestore,
+  requestCodexTranscriptWarmRestore,
+  retainPreparedCodexTranscript,
+  isCodexTranscriptPrepared,
 } from "./codexTranscriptActivity";
 
 afterEach(() => {
@@ -58,4 +62,34 @@ it("can expire again after a failed restore and another visible lifetime", () =>
   expect(isCodexTranscriptDormant("lifecycle")).toBe(false);
   vi.advanceTimersByTime(60_000);
   expect(expiredCodexTranscripts()).toContain("lifecycle");
+});
+
+it("does not wake a dormant observed transcript without an accepting recent-page reader", () => {
+  trackCodexTranscript("lifecycle");
+  markCodexTranscriptDormant("lifecycle");
+  const read = vi.fn();
+  const stop = onCodexTranscriptWarmRestore(
+    read,
+    (id) => id === "a-different-followed-thread",
+  );
+  try {
+    requestCodexTranscriptWarmRestore("lifecycle");
+    expect(isCodexTranscriptDormant("lifecycle")).toBe(true);
+    expect(read).not.toHaveBeenCalled();
+  } finally {
+    stop();
+  }
+});
+
+it("distinguishes visible preview ownership from a committed full transcript renderer", () => {
+  const visible = retainCodexTranscript("lifecycle");
+  expect(isCodexTranscriptPrepared("lifecycle")).toBe(false);
+  const first = retainPreparedCodexTranscript("lifecycle");
+  const second = retainPreparedCodexTranscript("lifecycle");
+  first();
+  first();
+  expect(isCodexTranscriptPrepared("lifecycle")).toBe(true);
+  second();
+  expect(isCodexTranscriptPrepared("lifecycle")).toBe(false);
+  visible();
 });

@@ -84,7 +84,7 @@ beforeEach(() => {
     },
   });
 });
-function open() {
+async function open() {
   const view = render(
     <div className="session-mode">
       <FollowedSessionsMenu />
@@ -94,14 +94,16 @@ function open() {
     screen.getByRole("button", { name: "全部关注会话与窗口组" }),
     { key: "Enter" },
   );
+  await screen.findByRole("menuitem", { name: /持续运行的会话/ });
   return view;
 }
 it("shows shared running, unread, approval and failure markers plus each session's own project", async () => {
-  open();
+  await open();
   const menu = await screen.findByRole("menu");
   const running = within(menu).getByRole("menuitem", {
     name: /持续运行的会话/,
   });
+  await waitFor(() => expect(document.activeElement).toBe(running));
   expect(running.querySelector(".session-status-spin")).not.toBeNull();
   expect(running.getAttribute("aria-current")).toBe("page");
   expect(within(running).getByText("company/api")).toBeTruthy();
@@ -123,7 +125,7 @@ it("shows shared running, unread, approval and failure markers plus each session
   expect(actions.selectTab).not.toHaveBeenCalled();
 });
 it("updates live in an open menu and clears the blue dot once the reply is read", async () => {
-  open();
+  await open();
   const menu = await screen.findByRole("menu");
   act(() =>
     useCodexStore.setState({
@@ -162,6 +164,7 @@ it("does not show stale running markers while offline and keeps navigation disab
     { key: "Enter" },
   );
   const menu = await screen.findByRole("menu");
+  await screen.findByRole("menuitem", { name: /持续运行的会话/ });
   expect(menu.querySelector(".session-status-spin")).toBeNull();
   expect(
     menu.querySelector('[data-state="unknown"] [aria-label="状态待同步"]'),
@@ -171,7 +174,7 @@ it("does not show stale running markers while offline and keeps navigation disab
   expect(actions.selectTab).not.toHaveBeenCalled();
 });
 it("selects exactly the chosen conversation through the existing tab actions", async () => {
-  open();
+  await open();
   const menu = await screen.findByRole("menu");
   fireEvent.click(
     within(menu).getByRole("menuitem", { name: /有新回复的会话/ }),

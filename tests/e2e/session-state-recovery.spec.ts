@@ -229,6 +229,179 @@ test("a lower runtime snapshot resets the stream cursor without refreshing the p
     await stream.close();
   }
 });
+
+test("pending approvals restore from the real Session event snapshot on refresh without expanding permissions or resuming", async ({
+  page,
+  baseURL,
+}) => {
+  const { fixture, stream } = await setup(page, baseURL!);
+  const requests = [
+    {
+      event: "codex/approval-request",
+      payload: {
+        type: "commandExecution",
+        requestId: "approval-ux-0",
+        threadId: "ux-0",
+        turnId: "approval-turn-0",
+        itemId: "approval-item-0",
+        requestToken: "refresh-scope-ux-0",
+        startedAtMs: 1,
+        environmentId: null,
+        command: "cat /fixture/owner/existing-read.txt",
+        cwd: "/fixture/owner",
+        reason: "仅检查当前会话已有读取范围",
+        additionalPermissions: {
+          network: { enabled: false },
+          fileSystem: {
+            read: ["/fixture/owner/existing-read.txt"],
+            write: [],
+          },
+        },
+        availableDecisions: ["accept", "decline"],
+      },
+    },
+    {
+      event: "codex/approval-request",
+      payload: {
+        type: "commandExecution",
+        requestId: "approval-ux-1",
+        threadId: "ux-1",
+        turnId: "approval-turn-1",
+        itemId: "approval-item-1",
+        requestToken: "refresh-scope-ux-1",
+        startedAtMs: 2,
+        environmentId: null,
+        command: "cat /fixture/owner/existing-read.txt",
+        cwd: "/fixture/owner",
+        reason: "刷新后仍保留当前线程权限",
+        additionalPermissions: {
+          network: { enabled: false },
+          fileSystem: {
+            read: ["/fixture/owner/existing-read.txt"],
+            write: [],
+          },
+        },
+        availableDecisions: ["accept", "decline"],
+      },
+    },
+    {
+      event: "codex/permissions-request",
+      payload: {
+        requestId: "permission-ux-1",
+        threadId: "ux-1",
+        turnId: "permission-turn-1",
+        itemId: "permission-item-1",
+        requestToken: "permission-scope-ux-1",
+        startedAtMs: 3,
+        environmentId: null,
+        cwd: "/fixture/owner",
+        reason: "保留本线程现有文件权限摘要",
+        permissions: {
+          network: { enabled: false },
+          fileSystem: {
+            read: ["/fixture/owner/existing-read.txt"],
+            write: [],
+          },
+        },
+      },
+    },
+  ];
+  const emitPendingSnapshot = () =>
+    stream.emit(
+      1,
+      { requests },
+      "codex/pending-requests-snapshot",
+    );
+  const readPending = () =>
+    page.evaluate(async () => {
+      const module = (path: string) =>
+        import(
+          performance
+            .getEntriesByType("resource")
+            .findLast((entry) => new URL(entry.name).pathname === path)?.name ??
+            path
+        );
+      const [{ useApprovalStore }, { usePermissionsStore }] =
+        await Promise.all([
+          module(
+            "/src/session-mode/components/codex/stores/useApprovalStore.ts",
+          ),
+          module(
+            "/src/session-mode/components/codex/stores/usePermissionsStore.ts",
+          ),
+        ]);
+      return {
+        approvals: useApprovalStore.getState().pendingApprovals,
+        permissions: usePermissionsStore.getState().pendingRequests,
+      };
+    });
+  let bridgeReady = false;
+  page.on("console", (message) => {
+    if (message.text().includes("[useSseEventBridge] Setting up"))
+      bridgeReady = true;
+  });
+  try {
+    await page.goto("/?mode=session", { waitUntil: "domcontentloaded" });
+    await page.locator(".session-agent-view [contenteditable=true]").waitFor();
+    await expect.poll(stream.opens).toBeGreaterThan(0);
+    await expect.poll(() => bridgeReady).toBe(true);
+    emitPendingSnapshot();
+
+    const approvalCard = page.locator("[data-codex-approval-surface]");
+    await expect(approvalCard).toContainText("仅检查当前会话已有读取范围");
+    await expect(approvalCard.getByRole("button", { name: "允许一次" })).toBeVisible();
+    await expect(approvalCard.getByRole("button", { name: "拒绝" })).toBeVisible();
+    await expect(approvalCard.getByRole("button", { name: "允许此对话" })).toHaveCount(0);
+    await expect(page.getByText("请在原生界面中完成官方引导", { exact: true })).toHaveCount(0);
+
+    await page.locator('[data-tab-key="codex:ux-1"]').click();
+    await expect(approvalCard).toContainText("刷新后仍保留当前线程权限");
+    await expect(page.getByText("请求额外权限", { exact: true })).toBeVisible();
+    await expect(
+      page.getByText("Read /fixture/owner/existing-read.txt", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByText("Write /fixture/owner/existing-write.txt", { exact: true }),
+    ).toHaveCount(0);
+    await expect(page.getByText("/fixture/owner", { exact: true })).toHaveCount(2);
+    const beforeReload = await readPending();
+    expect(beforeReload.approvals).toEqual([requests[0].payload, requests[1].payload]);
+    expect(beforeReload.permissions).toEqual([requests[2].payload]);
+
+    const previousOpens = stream.opens();
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.locator(".session-agent-view [contenteditable=true]").waitFor();
+    await expect.poll(stream.opens).toBeGreaterThan(previousOpens);
+    emitPendingSnapshot();
+    await expect(approvalCard).toContainText("仅检查当前会话已有读取范围");
+    await expect(approvalCard).not.toContainText("刷新后仍保留当前线程权限");
+    await page.locator('[data-tab-key="codex:ux-1"]').click();
+    await expect(approvalCard).toContainText("刷新后仍保留当前线程权限");
+    await expect(page.getByText("请求额外权限", { exact: true })).toBeVisible();
+    await expect(
+      page.getByText("Read /fixture/owner/existing-read.txt", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByText("Write /fixture/owner/existing-write.txt", { exact: true }),
+    ).toHaveCount(0);
+    await expect(page.getByText("/fixture/owner", { exact: true })).toHaveCount(2);
+    await expect(page.getByText("请在原生界面中完成官方引导", { exact: true })).toHaveCount(0);
+    const afterReload = await readPending();
+    expect(afterReload.approvals).toEqual(beforeReload.approvals);
+    expect(afterReload.permissions).toEqual(beforeReload.permissions);
+    expect(
+      fixture.calls.filter((call) =>
+        /\/(?:thread\/resume|turn\/(?:start|steer|interrupt)|followups\/submit)$/.test(
+          call.path,
+        ),
+      ),
+    ).toEqual([]);
+  } finally {
+    await page.close();
+    await stream.close();
+  }
+});
+
 async function setup(page: Page, baseURL: string) {
   const fixture = await installSessionUxFixture(page, 2);
   const cards = fixture.threads.map((t) => ({

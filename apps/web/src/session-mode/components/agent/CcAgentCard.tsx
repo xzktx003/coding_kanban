@@ -1,4 +1,5 @@
 import { useSessionState } from "../common/SessionStatus";
+import { ensureClaudeSessionForSend } from "@session/services/claudeConnectionRecovery";
 import { useSessionTabActions } from "@session/hooks/useSessionTabs";
 import { Check, RotateCcw, Square } from "lucide-react";
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
@@ -7,7 +8,6 @@ import { Button } from "@session/components/ui/button";
 import {
   ccGetSessionMessages,
   ccInterrupt,
-  ccResumeSession,
 } from "@session/services/apiAdapt/cc";
 import {
   gitApplyWorktreeChanges,
@@ -147,7 +147,7 @@ export function CCAgentCard({
       for (const msg of fromSdkMessages(sdkMessages, card.id)) {
         addMessageToSession(card.id, msg);
       }
-      await ccResumeSession(card.id, {
+      await ensureClaudeSessionForSend(card.id, cwd, {
         cwd,
         permissionMode: options.permissionMode,
         resume: card.id,

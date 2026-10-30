@@ -1,5 +1,5 @@
 import {
-  sessionPortalContainer,
+  useSessionPortalContainer,
   useSessionPortalDocument,
   useSessionInteractionVisible,
   isSessionInteractionVisible,
@@ -26,9 +26,10 @@ function DialogPortal({
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Portal>) {
   const ownerDocument = useSessionPortalDocument();
+  const container = useSessionPortalContainer(ownerDocument ?? undefined);
   return (
     <DialogPrimitive.Portal
-      container={sessionPortalContainer(ownerDocument ?? undefined)}
+      container={container}
       data-slot="dialog-portal"
       {...props}
     />

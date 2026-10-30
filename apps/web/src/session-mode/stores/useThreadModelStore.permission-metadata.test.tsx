@@ -24,7 +24,7 @@ const io = vi.hoisted(() => ({
   unexpected: vi.fn(),
   fetch: vi.fn(),
 }));
-vi.mock("@session/services/apiAdapt", () => ({
+vi.mock("@session/services/apiAdapt/codex", () => ({
   turnStart: io.turnStart,
   threadStart: io.unexpected,
   gitCreateWorktree: io.unexpected,
@@ -42,6 +42,10 @@ vi.mock("@session/services/apiAdapt", () => ({
   allowSleep: io.unexpected,
   preventSleep: io.unexpected,
 }));
+
+vi.mock("@session/services/apiAdapt/git", () => ({ gitCreateWorktree: io.unexpected }));
+vi.mock("@session/services/apiAdapt/skills", () => ({ skillList: io.unexpected }));
+vi.mock("@session/services/apiAdapt/threadOps", () => ({ threadCompactStart: io.unexpected }));
 
 type Profile = { id: string; extends: string | null };
 type Field<T> = { kind: "value"; value: T } | { kind: "invalid" };

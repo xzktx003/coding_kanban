@@ -23,8 +23,8 @@ import { useComposerDraftStore } from "./v2/drafts";
 const api = vi.hoisted(() => ({
   listModels: vi.fn(), listOtherModels: vi.fn(), listConfigProviders: vi.fn(), listProviderPresets: vi.fn(),
 }));
-vi.mock("@session/services/apiAdapt", async (original) => ({
-  ...(await original<typeof import("@session/services/apiAdapt")>()), ...api,
+vi.mock("@session/services/apiAdapt/codex", async (original) => ({
+  ...(await original<typeof import("@session/services/apiAdapt/codex")>()), ...api,
 }));
 
 const A = "e3-shared-picker-a", B = "e3-shared-picker-b";

@@ -1,0 +1,33 @@
+import { expect, test } from "@playwright/test";
+import { installSessionUxFixture } from "./session-ux-fixture";
+for(const width of [1440,393])test(`number navigation swaps real chat/window targets and persists without sending at ${width}`,async({page})=>{
+  await page.setViewportSize({width,height:900});
+  const fixture=await installSessionUxFixture(page,3);
+  const cards=fixture.threads.map(thread=>({kind:"codex",id:thread.id,cwd:thread.cwd,preview:thread.name}));
+  await page.route("**/api/session/tabs",route=>route.fulfill({json:{cards,initialized:true,revision:1,sequence:0}}));
+  await page.addInitScript(cards=>{
+    if(!localStorage.getItem("kanban.session.agent-center-store"))localStorage.setItem("kanban.session.agent-center-store",JSON.stringify({version:5,state:{cards,currentAgentCardId:"ux-0",currentAgentCardKind:"codex",cardsViewMode:"solo",sharedTabsInitialized:true}}));
+    if(!localStorage.getItem("kanban.session.layout-storage"))localStorage.setItem("kanban.session.layout-storage",JSON.stringify({version:0,state:{view:"agent",isSidebarOpen:false,isRightPanelOpen:false}}));
+    if(!localStorage.getItem("kanban.session.split-layout"))localStorage.setItem("kanban.session.split-layout",JSON.stringify({version:1,state:{activeGroupId:"number-first",tree:{type:"split",id:"number-root",direction:"horizontal",ratio:50,first:{type:"group",id:"number-first",keys:["codex:ux-0","codex:ux-2"],selected:"codex:ux-0"},second:{type:"group",id:"number-second",keys:["codex:ux-1"],selected:"codex:ux-1"}}}}));
+  },cards);
+  await page.goto("/?mode=session",{waitUntil:"domcontentloaded"});
+  const editor=page.locator(".session-codex-composer [contenteditable=true]").first();
+  const target=(id:string)=>page.locator(`.session-codex-composer[data-owner-thread="${id}"] [contenteditable=true]`);
+  await expect(target("ux-0")).toBeVisible();
+  await editor.press("ControlOrMeta+Shift+2");
+  await expect(target("ux-2")).toBeVisible();await editor.fill("Keep ux-2 draft");
+  await editor.press("ControlOrMeta+/");
+  const sheet=page.getByRole("dialog",{name:"键盘快捷方式",exact:true});
+  await expect(sheet).toBeVisible();
+  await sheet.getByRole("radio",{name:"优先切换关注会话",exact:true}).check();
+  await expect(sheet.getByRole("status")).toHaveText("数字键导航偏好已保存");
+  await sheet.getByRole("button",{name:"关闭面板",exact:true}).click();
+  await editor.press("ControlOrMeta+Shift+2");await expect(target("ux-1")).toBeVisible();
+  await editor.press("ControlOrMeta+Shift+1");await expect(target("ux-0")).toBeVisible();
+  await editor.press("ControlOrMeta+Alt+Shift+2");await expect(target("ux-2")).toBeVisible();
+  await expect(editor).toHaveText("Keep ux-2 draft");
+  await page.reload({waitUntil:"domcontentloaded"});
+  await expect(target("ux-2")).toBeVisible();
+  await editor.press("ControlOrMeta+Shift+2");await expect(target("ux-1")).toBeVisible();
+  expect(fixture.calls.filter(call=>/\/(?:turn\/(?:start|interrupt)|thread\/(?:resume|fork)|followups\/submit)$/.test(call.path))).toEqual([]);
+});

@@ -3,6 +3,8 @@ import {
   createContext,
   createElement,
   useContext,
+  useLayoutEffect,
+  useState,
   useSyncExternalStore,
   type ReactNode,
 } from "react";
@@ -30,6 +32,15 @@ export function sessionPortalContainer(
   return (
     activeDocument?.querySelector<HTMLElement>(".session-mode") ?? undefined
   );
+}
+
+/** Rendering may still see a loading root which this commit is replacing. */
+export function useSessionPortalContainer(ownerDocument?: Document) {
+  const [container, setContainer] = useState<HTMLElement>();
+  useLayoutEffect(() => {
+    setContainer(sessionPortalContainer(ownerDocument));
+  }, [ownerDocument]);
+  return container;
 }
 
 export function isSessionModeActive(): boolean {
@@ -135,7 +146,9 @@ export function releaseUnusedPointerFence(ownerDocument?: Document): void {
     ownerDocument ?? (typeof document !== "undefined" ? document : undefined);
   const body = activeDocument?.body;
   if (!body || body.style.pointerEvents !== "none") return;
-  if (activeDocument?.querySelector('[data-state="open"][data-slot$="-content"]'))
+  if (
+    activeDocument?.querySelector('[data-state="open"][data-slot$="-content"]')
+  )
     return;
   body.style.removeProperty("pointer-events");
 }

@@ -1,5 +1,7 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import multipart from "@fastify/multipart";
+import { resolve } from "node:path";
+import { WorkspaceEnvironments } from "../services/workspace-environments.js";
 import { guessMimeType } from "../services/file-system-utils.js";
 import {
   WorkspaceFiles,
@@ -56,6 +58,7 @@ export function registerWorkspaceFileRoutes(
     const files = options.trashHome
       ? new WorkspaceFiles(options.trashHome, options.roots)
       : null;
+    const environments = options.trashHome ? new WorkspaceEnvironments(resolve(options.trashHome, "..", "workspace-environments"), options.roots) : null;
     const prefix = "/api/session/workspace-files/";
     scope.setErrorHandler((error, request, reply) => {
       const status =
@@ -122,9 +125,19 @@ export function registerWorkspaceFileRoutes(
       kind: "file" | "directory";
       destination: string;
       id: string;
+      environments: unknown;
+      cwd: string;
+      intentId: string;
+      confirmed: boolean;
     }
     for (const action of [
       "visualization",
+      "list",
+      "reference",
+      "environment-list",
+      "environment-save",
+      "environment-run",
+      "environment-receipt",
       "read",
       "version",
       "save",
@@ -147,6 +160,18 @@ export function registerWorkspaceFileRoutes(
             throw new WorkspaceFileError("缺少项目目录");
           reply.header("cache-control", "no-store");
           switch (action) {
+            case "environment-list":
+              return environments!.list(b.root);
+            case "environment-save":
+              return environments!.save(b.root, { version: b.version ?? "", environments: b.environments });
+            case "environment-run":
+              return environments!.run(b.root, { cwd: b.cwd, id: b.id, version: b.version ?? "", intentId: b.intentId, confirmed: b.confirmed });
+            case "environment-receipt":
+              return environments!.receipt(b.root, b.intentId);
+            case "list":
+              return files!.list(b.root, b.path);
+            case "reference":
+              return files!.reference(b.root, b.path);
             case "visualization": {
               if (typeof b.path !== "string" || !/[.]html?$/i.test(b.path))
                 throw new WorkspaceFileError("可视化预览只支持 HTML 文件", 415);

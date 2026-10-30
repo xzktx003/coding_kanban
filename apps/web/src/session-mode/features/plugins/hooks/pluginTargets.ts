@@ -1,5 +1,9 @@
-import type { AbsolutePathBuf } from '@session/bindings/AbsolutePathBuf';
-import type { PluginDetail, PluginMarketplaceEntry, PluginSummary } from '@session/bindings/v2';
+import type { AbsolutePathBuf } from "@session/bindings/AbsolutePathBuf";
+import type {
+  PluginDetail,
+  PluginMarketplaceEntry,
+  PluginSummary,
+} from "@session/bindings/v2";
 
 /**
  * Request-target helpers ported from the codex TUI plugin catalog
@@ -21,16 +25,28 @@ export interface PluginEntry {
   marketplace: PluginMarketplaceEntry;
   plugin: PluginSummary;
 }
+/** A display identity includes its marketplace even when native ids coincide. */
+export function pluginEntryKey(
+  marketplace: Pick<PluginMarketplaceEntry, "name" | "path">,
+  plugin: Pick<PluginSummary, "id" | "name">,
+): string {
+  return JSON.stringify([
+    marketplace.path,
+    marketplace.name,
+    plugin.id,
+    plugin.name,
+  ]);
+}
 
 interface PreferredLocalSource {
   marketplacePath: AbsolutePathBuf;
   pluginName: string;
   installed: boolean;
-  installPolicy: PluginSummary['installPolicy'];
+  installPolicy: PluginSummary["installPolicy"];
 }
 
 function isRemote(plugin: PluginSummary): boolean {
-  return plugin.source?.type === 'remote';
+  return plugin.source?.type === "remote";
 }
 
 function remoteIdentity(plugin: PluginSummary): string | null {
@@ -39,7 +55,7 @@ function remoteIdentity(plugin: PluginSummary): string | null {
 
 /** Local marketplace copies of remote plugins, keyed by remote plugin id. */
 export function preferredLocalSources(
-  marketplaces: PluginMarketplaceEntry[]
+  marketplaces: PluginMarketplaceEntry[],
 ): Map<string, PreferredLocalSource> {
   const sources = new Map<string, PreferredLocalSource>();
   marketplaces.forEach((marketplace) => {
@@ -67,7 +83,7 @@ export function preferredLocalSources(
 export function pluginRequestTarget(
   marketplace: PluginMarketplaceEntry,
   plugin: PluginSummary,
-  preferred: Map<string, PreferredLocalSource>
+  preferred: Map<string, PreferredLocalSource>,
 ): PluginRequestTarget | null {
   const remoteId = remoteIdentity(plugin);
 
@@ -89,16 +105,26 @@ export function pluginRequestTarget(
   const pluginName = isRemote(plugin) && remoteId ? remoteId : plugin.name;
 
   if (marketplace.path) {
-    return { marketplacePath: marketplace.path, remoteMarketplaceName: null, pluginName };
+    return {
+      marketplacePath: marketplace.path,
+      remoteMarketplaceName: null,
+      pluginName,
+    };
   }
   if (remoteId) {
-    return { marketplacePath: null, remoteMarketplaceName: marketplace.name, pluginName };
+    return {
+      marketplacePath: null,
+      remoteMarketplaceName: marketplace.name,
+      pluginName,
+    };
   }
   return null;
 }
 
 /** Same resolution, for an already-loaded detail page. */
-export function pluginDetailRequestTarget(detail: PluginDetail): PluginRequestTarget | null {
+export function pluginDetailRequestTarget(
+  detail: PluginDetail,
+): PluginRequestTarget | null {
   return pluginRequestTarget(
     {
       name: detail.marketplaceName,
@@ -107,8 +133,41 @@ export function pluginDetailRequestTarget(detail: PluginDetail): PluginRequestTa
       plugins: [],
     },
     detail.summary,
-    new Map()
+    new Map(),
   );
+}
+
+/** A detail response may enrich only the exact source that was requested. */
+export function assertPluginDetailTarget(
+  detail: PluginDetail,
+  expected: PluginRequestTarget,
+): void {
+  if (
+    !detail ||
+    typeof detail !== "object" ||
+    !detail.summary ||
+    typeof detail.summary.id !== "string" ||
+    typeof detail.summary.name !== "string" ||
+    !Array.isArray(detail.apps) ||
+    !Array.isArray(detail.skills) ||
+    !Array.isArray(detail.hooks) ||
+    !Array.isArray(detail.appTemplates) ||
+    !Array.isArray(detail.mcpServers)
+  )
+    throw new Error("服务返回的插件详情无效");
+  if (
+    new TextEncoder().encode(JSON.stringify(detail)).byteLength >
+    2 * 1024 * 1024
+  )
+    throw new Error("插件详情超过 2 MiB 读取预算");
+  const actual = pluginDetailRequestTarget(detail);
+  if (
+    !actual ||
+    actual.marketplacePath !== expected.marketplacePath ||
+    actual.remoteMarketplaceName !== expected.remoteMarketplaceName ||
+    actual.pluginName !== expected.pluginName
+  )
+    throw new Error("插件详情来源与请求的市场或插件不匹配");
 }
 
 /** plugin/uninstall takes the remote id for remote plugins, the local id otherwise. */
@@ -117,13 +176,16 @@ export function pluginUninstallId(plugin: PluginSummary): string | null {
   return plugin.id;
 }
 
-function isPreferredEntry(candidate: PluginEntry, existing: PluginEntry): boolean {
+function isPreferredEntry(
+  candidate: PluginEntry,
+  existing: PluginEntry,
+): boolean {
   const c = candidate.plugin;
   const e = existing.plugin;
   if (c.installed !== e.installed) return c.installed;
 
-  const cAdmin = c.installPolicy === 'INSTALLED_BY_DEFAULT';
-  const eAdmin = e.installPolicy === 'INSTALLED_BY_DEFAULT';
+  const cAdmin = c.installPolicy === "INSTALLED_BY_DEFAULT";
+  const eAdmin = e.installPolicy === "INSTALLED_BY_DEFAULT";
   if (cAdmin !== eAdmin) return cAdmin;
 
   const cLocalShare = !!c.shareContext && !isRemote(c);

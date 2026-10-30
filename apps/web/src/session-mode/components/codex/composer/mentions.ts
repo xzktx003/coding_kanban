@@ -4,11 +4,12 @@ import {
   pluginInputMention,
   usePluginCapabilityRevision,
 } from "@session/features/plugins/pluginInputs";
+import { capturePluginScope,isPluginScopeCurrent,usePluginCatalogRevision } from "@session/features/plugins/pluginScope";
+import { useAgentInteractionVisible } from "@session/session-dom";
 import type { PluginSummary, SkillMetadata } from "@session/bindings/v2";
 import { fileSrc } from "@session/hooks/runtime";
-import { pluginInstalled } from "@session/services";
-import { codexService } from "@session/services/codexService";
 import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
+import { loadMentionCandidates } from "./mentionCandidateReads";
 
 /**
  * Installed capability entry. Enabled VSIX plugins use @DisplayName together
@@ -136,21 +137,20 @@ export function matchesMention(item: MentionItem, query: string): boolean {
 export function useMentionItems() {
   const cwd = useWorkspaceStore((state) => state.cwd);
   const revision = usePluginCapabilityRevision((state) => state.revision);
+  const scopeRevision=usePluginCatalogRevision(),visible=useAgentInteractionVisible();
   const [snapshot, setSnapshot] = useState<{
     cwd: string | null;
     items: MentionItem[];
-  }>({ cwd, items: [] });
+    scope:ReturnType<typeof capturePluginScope>;
+  }>({ cwd, items: [],scope:capturePluginScope() });
   const requestVersion = useRef(0);
 
   const refresh = useCallback(async () => {
-    const request = ++requestVersion.current;
-    const cwds = cwd ? [cwd] : [];
-
-    const [pluginResult, skillResult] = await Promise.allSettled([
-      pluginInstalled({ cwds }),
-      codexService.listSkills(cwd),
-    ]);
-    if (request !== requestVersion.current) return;
+    const request = ++requestVersion.current,scope=capturePluginScope();
+    const [pluginResult, skillResult] = await loadMentionCandidates({
+      cwd, revision, scopeRevision, scope,
+    });
+    if (request !== requestVersion.current||!isPluginScopeCurrent(scope)) return;
 
     const mentions: MentionItem[] = [];
 
@@ -186,17 +186,17 @@ export function useMentionItems() {
       (a, b) =>
         a.sortRank - b.sortRank || a.displayName.localeCompare(b.displayName),
     );
-    setSnapshot({ cwd, items: mentions });
-  }, [cwd]);
+    setSnapshot({ cwd, items: mentions,scope });
+  }, [cwd, revision, scopeRevision]);
 
   useEffect(() => {
-    void refresh();
+    if(visible)void refresh();
     return () => {
       requestVersion.current++;
     };
-  }, [refresh, revision]);
+  }, [refresh, revision,scopeRevision,visible]);
 
-  return { items: snapshot.cwd === cwd ? snapshot.items : [], refresh };
+  return { items: snapshot.cwd === cwd&&isPluginScopeCurrent(snapshot.scope) ? snapshot.items : [], refresh };
 }
 
 /** Entries that ship an icon, for the composer plus menu. */

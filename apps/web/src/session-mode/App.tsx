@@ -2,6 +2,7 @@ import { resetCodexRuntimeState } from "@session/services/codexService";
 import { startInputFacadeSync } from "./stores/useInputStore";
 import { startCCInputFacadeSync } from "./stores/cc/useCCInputStore";
 import { useCCBackgroundEvents } from "@session/hooks/useCCBackgroundEvents";
+import { useAcpEvents } from "@session/components/acp/useAcpEvents";
 import { useCodexStore } from "@session/components/codex/stores";
 import { codexService } from "@session/services/codexService";
 import { useAcpStore } from "@session/stores/useAcpStore";
@@ -14,10 +15,9 @@ import { I18nextProvider } from "react-i18next";
 import "./App.css";
 
 import { useBotActivity } from "@session/components/bot/useBotActivity";
-import { useCodexEvents } from "@session/components/codex/hooks";
+import { useCodexEvents } from "@session/components/codex/hooks/useCodexEvents";
 import { QuitDialog } from "@session/components/dialogs";
-import { AppLayout } from "@session/components/layout";
-import { MobileShell } from "@session/components/mobile/MobileShell";
+import { AppLayout } from "@session/components/layout/AppLayout";
 import { PairingView } from "@session/components/pairing/PairingView";
 import { TelemetryConsentDialog } from "@session/components/settings/TelemetryConsentDialog";
 import { NativeFeedbackUploads } from "@session/features/native-feedback/NativeFeedbackUploads";
@@ -26,7 +26,7 @@ import { NativeMcpAuthentication } from "@session/features/native-mcp-auth/Nativ
 import { Toaster } from "@session/components/ui/toaster";
 import { TooltipProvider } from "@session/components/ui/tooltip";
 import { ThemeProvider } from "@session/contexts/ThemeContext";
-import { HistoryProjectsDialog } from "@session/features/ProjectSelector";
+import { DeferredHistoryProjectsDialog as HistoryProjectsDialog } from "@session/features/ProjectSelector/DeferredHistoryProjectsDialog";
 import { TodoCaptureHint } from "@session/features/todos/TodoCaptureHint";
 import { isDesktopTauri, isPhone } from "@session/hooks/runtime";
 import { useAppDeepLink } from "@session/hooks/useAppDeepLink";
@@ -34,18 +34,20 @@ import { useDoubleShiftCapture } from "@session/hooks/useDoubleShiftCapture";
 import { useUrlParamThread } from "@session/hooks/useUrlParamThread";
 import { hasActiveWork } from "@session/lib/hasActiveWork";
 import { i18n, initializeSessionI18n } from "@session/lib/i18n";
-import {
-  initSettingsSync,
-  loadRemoteSettings,
-  loadSettings,
-} from "@session/lib/settings";
+import { initSettingsSync } from "@session/lib/settings";
+import { useSessionSettings } from "@session/lib/useSessionSettings";
 import { reportAppActive } from "@session/lib/telemetry";
-import { initializeCodexAsync } from "@session/services/apiAdapt";
+import { initializeCodexAsync } from "@session/services/apiAdapt/lifecycle";
 import { usePairingStore } from "@session/stores/usePairingStore";
 import type { InitializeResponse } from "./bindings";
 
 const AboutView = lazy(() => import("@session/views/AboutView"));
 const UsagePanel = lazy(() => import("@session/views/UsagePanel"));
+const MobileShell = lazy(() =>
+  import("@session/components/mobile/MobileShell").then((module) => ({
+    default: module.MobileShell,
+  })),
+);
 
 function AppShell() {
   useEffect(() => {
@@ -57,25 +59,16 @@ function AppShell() {
     };
   }, []);
   useCCBackgroundEvents();
+  const acpConnectionId = useAcpStore((state) => state.connectionId);
+  useAcpEvents(acpConnectionId);
   const [quitDialogOpen, setQuitDialogOpen] = useState(false);
-  const [settingsReady, setSettingsReady] = useState(false);
+  useSessionSettings();
   // True once codex backend signals it is ready; only desktop Tauri has a
   // local backend to initialize — mobile and web talk to a remote one.
   const [codexReady, setCodexReady] = useState(!isDesktopTauri());
 
   useEffect(() => {
-    // A phone has no settings file of its own: the projects it shows are the
-    // paired desktop's. `/api/settings` is the direct route; reading the file
-    // over the remote filesystem API is the fallback if that answers nothing.
-    const load = isPhone()
-      ? loadRemoteSettings().then((ok) => (ok ? undefined : loadSettings()))
-      : loadSettings();
-    load
-      .catch((error) => console.warn("Unable to load session settings", error))
-      .finally(() => {
-        setSettingsReady(true);
-        reportAppActive();
-      });
+    reportAppActive();
   }, []);
   useEffect(() => {
     // Only the machine that owns the settings file writes it back — a phone
@@ -130,7 +123,6 @@ function AppShell() {
     const recover = () => {
       const thread = useCodexStore.getState().currentThreadId;
       resetCodexRuntimeState();
-      useAcpStore.getState().setActive(false);
       toast.info("会话服务已重启，正在恢复历史。");
       if (thread)
         void codexService
@@ -151,13 +143,15 @@ function AppShell() {
   // them app-wide, not only while the Bot sidebar is showing.
   useBotActivity();
 
-  // Wait for settings load before rendering
-  if (!settingsReady) return null;
-
   // A phone gets its own two-screen shell instead of the desktop layout. It
   // shows the projects the desktop has added and nothing more — adding or
   // removing them stays on the machine that owns them.
-  if (isPhone()) return <MobileShell />;
+  if (isPhone())
+    return (
+      <Suspense fallback={<div role="status">正在准备会话…</div>}>
+        <MobileShell />
+      </Suspense>
+    );
 
   return (
     <>

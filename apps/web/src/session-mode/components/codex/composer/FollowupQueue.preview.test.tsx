@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { FollowupQueueContent } from "./FollowupQueue";
 import { ComposerRail, ComposerRailItem } from "./ComposerRail";
@@ -52,10 +58,15 @@ function overflow(element: HTMLElement) {
     value: 20,
   });
 }
-it("renders native one-line rich preview without a heading or a nested text button", () => {
+it("renders native one-line rich preview without a heading or a nested text button", async () => {
   const view = render(<Fixture />);
   const trigger = screen.getByRole("group", { name: /预览排队消息 1/ });
-  expect(trigger.querySelector("strong")?.textContent).toBe("bold");
+  await act(async () => {
+    await vi.dynamicImportSettled();
+  });
+  await waitFor(() =>
+    expect(trigger.querySelector("strong")?.textContent).toBe("bold"),
+  );
   expect(trigger.querySelector("code")?.textContent).toBe("code");
   expect(trigger.querySelector("h1")).toBeNull();
   expect(view.container.querySelector("button button")).toBeNull();

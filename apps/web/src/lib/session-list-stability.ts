@@ -12,6 +12,8 @@ export function sameJsonValue(previous: unknown, next: unknown): boolean {
   )
     return false;
   if (Array.isArray(previous) !== Array.isArray(next)) return false;
+  if (Array.isArray(previous) && previous.length !== (next as unknown[]).length)
+    return false;
   const left = previous as Record<string, unknown>;
   const right = next as Record<string, unknown>;
   const keys = Object.keys(left);

@@ -1,0 +1,40 @@
+{
+  "date": "2026-10-29",
+  "baseline": "f6699ba064059009529a50b0c126cbed4402f093",
+  "status": "proposal-review-pending",
+  "feature_rows": 174,
+  "scenario_rows": 55,
+  "new_scenarios": 10,
+  "checks": {
+    "broken_local_links": [],
+    "whitespace_issues": [],
+    "json_valid": true
+  },
+  "files": [
+    {
+      "path": "session-mode-multisession-development-plan-20261029.md",
+      "bytes": 49401,
+      "sha256": "d0f8c05d23ab50c116563f71806bc1f476b6b9727724e47263a522fb9bee7747"
+    },
+    {
+      "path": "session-mode-multisession-plan-20261029/scope-matrix.md",
+      "bytes": 44595,
+      "sha256": "7f4068c6991e14abdbb0dd3cb3aa158eef7189aace67c72d0244bd4be4e2ae88"
+    },
+    {
+      "path": "session-mode-multisession-plan-20261029/scope-matrix.json",
+      "bytes": 65437,
+      "sha256": "db8c95e76320f1ce9f2e02b57ad2b4d044ba249aeae9bac9b3f113aaf7ba34e9"
+    },
+    {
+      "path": "session-mode-multisession-plan-20261029/protocol-findings.json",
+      "bytes": 2669,
+      "sha256": "09482590125d0d3a0667b671d52c8116615e866b28b4b74ef68fdc68d26892b8"
+    },
+    {
+      "path": "session-mode-multisession-plan-20261029/decisions.json",
+      "bytes": 2904,
+      "sha256": "08e72ce1d5940e0395c7ff3e005f406dafa2a5b6c17d4e757b9050d56f94d53b"
+    }
+  ]
+}

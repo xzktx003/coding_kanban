@@ -1,6 +1,6 @@
 import { codexRuntimeState } from "@session/utils/codexRuntimeState";
 import { useCodexStore } from '@session/components/codex/stores';
-import { listAutomationRuns } from '@session/services/apiAdapt';
+import { listAutomationRuns } from '@session/services/apiAdapt/automation';
 import { useCCStore } from '@session/stores/cc';
 import { useAcpStore } from '@session/stores/useAcpStore';
 

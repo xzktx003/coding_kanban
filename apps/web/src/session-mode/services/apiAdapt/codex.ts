@@ -1,3 +1,4 @@
+import { lifecycleMutation } from "../lifecycleMutation";
 import { estimateTranscriptBytes } from "../codexTranscriptMemoryBudget";
 import type { SubagentThread } from "@agent-orchestrator/shared";
 import {
@@ -84,11 +85,11 @@ export async function listModels() {
 
 export async function threadStart(
   params: ThreadStartParams,
-  options?: { signal?: AbortSignal },
+  options?: { signal?: AbortSignal;expectedScope?:string },
 ) {
   return await postJsonWithOptions<ThreadStartResponse>(
     "/api/codex/thread/start",
-    params,
+    {...params,...(options?.expectedScope?{expectedScope:options.expectedScope}:{})},
     options,
   );
 }
@@ -112,7 +113,11 @@ export async function threadRead(
     cursor?: string | null;
     afterTurnId?: string;
   },
-  options?: { suppressToast?: boolean; signal?: AbortSignal },
+  options?: {
+    suppressToast?: boolean;
+    signal?: AbortSignal;
+    readPriority?: "interactive" | "background";
+  },
 ): Promise<
   ThreadReadResponse &
     Partial<ThreadResumeResponse> & {
@@ -435,6 +440,10 @@ export interface CodexAccess {
     | "unknown";
   reason: string;
   generation: number;
+  sharedDaemon?: boolean;
+  attached?: boolean;
+  loaded?: boolean;
+  activeTurnId?: string | null;
 }
 export function threadAccess(
   threadId: string,
@@ -460,8 +469,8 @@ export function threadMetadata(
   );
 }
 
-export async function threadFork(params: ThreadForkParams) {
-  return await postJson<ThreadForkResponse>("/api/codex/thread/fork", params);
+export async function threadFork(params: ThreadForkParams,options?:{expectedScope?:string}) {
+  return await postJson<ThreadForkResponse>("/api/codex/thread/fork", {...params,...(options?.expectedScope?{expectedScope:options.expectedScope}:{})});
 }
 
 export async function threadRollback(
@@ -486,18 +495,26 @@ export async function turnInterrupt(params: TurnInterruptParams) {
   return await postJson("/api/codex/turn/interrupt", params);
 }
 
-export async function listThreads(params: ThreadListParams) {
-  return await postJson<ThreadListResponse>("/api/codex/thread/list", {
-    ...params,
-  });
+export async function listThreads(
+  params: ThreadListParams,
+  options?: { signal?: AbortSignal; suppressToast?: boolean },
+) {
+  return options
+    ? await postJsonWithOptions<ThreadListResponse>(
+        "/api/codex/thread/list",
+        { ...params },
+        options,
+      )
+    : await postJson<ThreadListResponse>("/api/codex/thread/list", { ...params });
 }
 
-export async function archiveThread(threadId: ThreadId) {
-  return await postJson("/api/codex/thread/archive", { threadId });
+export async function archiveThread(threadId: ThreadId, options?: { mode?: "idle" | "stop"; expectedTurnId?: string }) {
+  return lifecycleMutation("archive", threadId, { mode: options?.mode ?? "idle", ...(options?.expectedTurnId ? { expectedTurnId: options.expectedTurnId } : {}) });
 }
 
 export async function unarchiveThread(threadId: ThreadId) {
-  return await postJson("/api/codex/thread/unarchive", { threadId });
+  const context = await getJson<{ scopeToken: string }>("/lifecycle/context");
+  return await postJson("/lifecycle/restore", { threadId, expectedScope: context.scopeToken });
 }
 
 export async function deleteThread(threadId: ThreadId) {
@@ -505,8 +522,7 @@ export async function deleteThread(threadId: ThreadId) {
 }
 
 export async function renameThread(threadId: ThreadId, name: string) {
-  const params = { threadId, name };
-  return await postJson("/api/codex/thread/rename", params);
+  return lifecycleMutation("rename", threadId, { name });
 }
 
 export async function getAccount() {
@@ -739,8 +755,8 @@ export async function pluginInstalled(params: PluginInstalledParams) {
   );
 }
 
-export async function pluginRead(params: PluginReadParams) {
-  return await postJson<PluginReadResponse>("/api/codex/plugin/read", params);
+export async function pluginRead(params: PluginReadParams,options?:{signal?:AbortSignal}) {
+  return await postJsonWithOptions<PluginReadResponse>("/api/codex/plugin/read", params,options);
 }
 
 export async function pluginInstall(params: PluginInstallParams) {

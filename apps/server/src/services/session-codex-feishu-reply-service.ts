@@ -11,6 +11,7 @@ export interface SessionCodexFeishuReplyInput {
   messageId: string;
   threadId: string;
   text: string;
+  nativeContext?: { scope: string; namespace: string };
   image?: FeishuImageResource;
 }
 
@@ -18,17 +19,20 @@ interface SessionCodexFeishuReplyServiceOptions {
   readThread(threadId: string): Promise<any>;
   submit(input: FollowupSubmit): Promise<unknown>;
   attachmentRoot?: string;
+  context?(): Promise<{ scope: string; namespace: string }>;
 }
 
 export class SessionCodexFeishuReplyService {
   readonly #readThread: (threadId: string) => Promise<any>;
   readonly #submit: (input: FollowupSubmit) => Promise<unknown>;
   readonly #attachmentRoot?: string;
+  readonly #context: SessionCodexFeishuReplyServiceOptions["context"];
 
   constructor(options: SessionCodexFeishuReplyServiceOptions) {
     this.#readThread = options.readThread;
     this.#submit = options.submit;
     this.#attachmentRoot = options.attachmentRoot;
+    this.#context = options.context;
   }
 
   async send(input: SessionCodexFeishuReplyInput): Promise<void> {
@@ -36,10 +40,20 @@ export class SessionCodexFeishuReplyService {
     const threadId = validThreadId(input.threadId);
     if (typeof input.text !== "string") throw targetUnavailable();
 
+    const expected = input.nativeContext;
+    const verify = async () => {
+      if (!this.#context) return;
+      if (!expected || !expected.scope || !expected.namespace) throw targetUnavailable();
+      const current = await this.#context();
+      if (current.scope !== expected.scope || current.namespace !== expected.namespace) throw targetUnavailable();
+    };
+    await verify();
+
     await this.#assertTarget(threadId);
     const images = input.image
       ? [await this.#saveImage(messageId, input.image)]
       : [];
+    await verify();
     await this.#submit({
       id: `feishu:${messageId}`,
       threadId,
@@ -47,6 +61,7 @@ export class SessionCodexFeishuReplyService {
       images,
       parameters: {},
       mode: "queue",
+      ...(this.#context && expected ? { expectedScope: expected.scope } : {}),
     });
   }
 

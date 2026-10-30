@@ -1,6 +1,6 @@
+import type { RenderTermination } from "../presentation/renderTermination";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { TurnStatus } from "@session/bindings/v2";
 import { NativeToolDisclosure } from "./NativeToolDisclosure";
 import { NativeToolIcon } from "../presentation/NativeToolIcons";
 export function NativeCompactionItem({
@@ -12,7 +12,7 @@ export function NativeCompactionItem({
   running?: boolean;
   startedAtMs?: number | null;
   source?: unknown;
-  termination?: TurnStatus;
+  termination?: RenderTermination;
 }) {
   const { t, i18n } = useTranslation("thread"),
     active = running && !termination;
@@ -35,19 +35,21 @@ export function NativeCompactionItem({
     return () => clearTimeout(timer);
   }, [active, startedAtMs]);
   const label =
-    active && delayed
-      ? (i18n?.language ?? "zh").startsWith("zh")
-        ? "正在压缩上下文 · 可能需要几分钟"
-        : "Compacting context · This can take a few minutes"
-      : t(
-          active
-            ? "activity.compactingContext"
-            : termination && termination !== "completed"
-              ? "activity.compactionInterrupted"
-              : source === "automatic"
-                ? "activity.contextAutomaticallyCompacted"
-                : "activity.contextCompacted",
-        );
+    termination === "unverified"
+      ? "正在核对轮次状态"
+      : active && delayed
+        ? (i18n?.language ?? "zh").startsWith("zh")
+          ? "正在压缩上下文 · 可能需要几分钟"
+          : "Compacting context · This can take a few minutes"
+        : t(
+            active
+              ? "activity.compactingContext"
+              : termination && termination !== "completed"
+                ? "activity.compactionInterrupted"
+                : source === "automatic"
+                  ? "activity.contextAutomaticallyCompacted"
+                  : "activity.contextCompacted",
+          );
   return (
     <NativeToolDisclosure
       className="codex-native-compaction"

@@ -1,3 +1,4 @@
+import { hasMcpAppResource } from "../presentation/mcpAppResource";
 import type { ServerNotification } from "@session/bindings";
 import type { TurnTiming } from "../stores/useCodexStore";
 import type { ActivityDisplayRow } from "./activityRows";
@@ -21,6 +22,7 @@ export function projectTurnWork(
   timing: TurnTiming | undefined,
   opened: ReadonlySet<string>,
   ownerId?: string,
+  liveItem?: { threadId: string; turnId: string; itemId: string },
 ): TranscriptWorkRow[] {
   type Meta = {
     threadId: string;
@@ -153,6 +155,10 @@ export function projectTurnWork(
     if (event.method !== "item/started" && event.method !== "item/completed")
       return false;
     const item = event.params.item;
+    if (item.type === "mcpToolCall" && hasMcpAppResource(item)) return false;
+    // Generated pixels, placeholders and quota notices remain public results,
+    // including when the earlier tool process is collapsed.
+    if (item.type === "imageGeneration") return false;
     // A finished plan is the turn's public document. Keep its open-window
     // control in the transcript; only the streaming delta stays in the fold.
     if (
@@ -207,8 +213,77 @@ export function projectTurnWork(
       startedAtMs: meta.startedAtMs,
       durationMs: meta.durationMs,
       processKeys,
-      expanded: running || !terminal || opened.has(key),
+      expanded: !running && !terminal ? true : opened.has(key),
     });
+  }
+  // Keep the latest public progress and current activity visible in a running
+  // turn. Earlier process rows remain in the event log and can be reopened;
+  // this projection never changes execution state or discards protocol data.
+  const preview = new Map<string, Set<string>>();
+  const latestComment = new Map<string, string>();
+  const latestActivity = new Map<string, string>();
+  const latestOther = new Map<string, string>();
+  for (const row of rows) {
+    const key = owner(row);
+    const work = key ? works.get(key) : undefined;
+    if (!key || !work?.running || !work.processKeys.has(row.key)) continue;
+    const visible = preview.get(key) ?? new Set<string>();
+    preview.set(key, visible);
+    if (row.activity || row.activityEntry || row.item.kind === "cmdGroup") {
+      latestActivity.set(key, row.key);
+      const active = row.activity
+        ? row.activity.state.kind !== "summary"
+        : row.activityEntry
+          ? row.activityEntry.pending
+          : row.item.kind === "cmdGroup" &&
+            row.item.actionSources.some(
+              (source) => source.status === "inProgress" && !source.termination,
+            );
+      const failed = row.activity?.entries.some((entry) =>
+        entry.kind === "command"
+          ? entry.source.status === "failed" ||
+            entry.source.status === "declined"
+          : entry.kind === "event" &&
+            "status" in entry.item &&
+            (entry.item.status === "failed" ||
+              entry.item.status === "declined"),
+      );
+      if (active || failed) visible.add(row.key);
+      continue;
+    }
+    if (row.item.kind !== "event") continue;
+    const event = row.item.event;
+    if (
+      event.method === "turn/plan/updated" ||
+      event.method === "item/plan/delta" ||
+      ((event.method === "item/started" || event.method === "item/completed") &&
+        event.params.item.type === "plan")
+    )
+      visible.add(row.key);
+    if (
+      event.method === "item/agentMessage/delta" ||
+      ((event.method === "item/started" || event.method === "item/completed") &&
+        event.params.item.type === "agentMessage")
+    )
+      latestComment.set(key, row.key);
+    else latestOther.set(key, row.key);
+  }
+  for (const [key, visible] of preview) {
+    const comment = latestComment.get(key);
+    const streamingComment =
+      liveItem &&
+      turnWorkKey(liveItem.threadId, liveItem.turnId) === key &&
+      !finalIds.get(key)?.has(liveItem.itemId);
+    if (comment && !streamingComment) visible.add(comment);
+    // When no activity is pending, retain the last native activity summary.
+    // It is a compact status, with its original disclosure and source identity.
+    const activity = latestActivity.get(key);
+    if (activity && ![...visible].some((id) => id !== comment))
+      visible.add(activity);
+    if (!visible.size && !streamingComment) {
+      const other = latestOther.get(key);
+      if (other) visible.add(other);
+    }
   }
   const result: TranscriptWorkRow[] = [],
     emitted = new Set<string>();
@@ -224,7 +299,12 @@ export function projectTurnWork(
       row.item.event.method === "item/started" &&
       row.item.event.params.item.type === "userMessage";
     if (work && !emitted.has(work.key) && !user) header(work, row.item);
-    if (!work || work.expanded || !work.processKeys.has(row.key))
+    if (
+      !work ||
+      work.expanded ||
+      !work.processKeys.has(row.key) ||
+      preview.get(work.key)?.has(row.key)
+    )
       result.push(row);
     if (work && user && !emitted.has(work.key)) header(work, row.item);
   }

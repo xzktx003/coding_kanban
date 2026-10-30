@@ -51,6 +51,9 @@ it("toggles only the enabled flag through the shared endpoint", async () => {
   render(<FeishuNotificationSettings />);
 
   const toggle = await screen.findByRole("switch", { name: "飞书完成通知" });
+  await waitFor(() =>
+    expect((toggle as HTMLButtonElement).disabled).toBe(false),
+  );
   fireEvent.click(toggle);
 
   await waitFor(() =>
@@ -69,6 +72,9 @@ it("toggles only the reply flag through the shared endpoint", async () => {
   const toggle = await screen.findByRole("switch", {
     name: "飞书回复继续任务",
   });
+  await waitFor(() =>
+    expect((toggle as HTMLButtonElement).disabled).toBe(false),
+  );
   fireEvent.click(toggle);
 
   await waitFor(() =>

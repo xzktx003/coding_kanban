@@ -1,10 +1,10 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { once } from "node:events";
-import { PassThrough, Readable } from "node:stream";
+import { PassThrough, Readable, type Duplex, type Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import parser, { type Token } from "stream-json/parser.js";
 import type { CodexOptions } from "./client.js";
-import { discoverCodex } from "./executable.js";
+import { connectDaemonStream } from "./daemon.js";
 import { HttpError } from "../core/json.js";
 import { DetailSelector, type DetailRequest } from "./item-detail-selector.js";
 
@@ -30,6 +30,9 @@ export interface DetailMetrics {
   maxOutputQueue: number;
   pid?: number;
   childExited: boolean;
+  transport?: "fixture" | "shared-daemon";
+  connectionClosed?: boolean;
+  nativeScope?: string;
   backpressureMs: number;
 }
 export interface DetailRead {
@@ -43,12 +46,17 @@ export async function readItemDetail(
   wanted: DetailRequest,
   signal: AbortSignal,
 ): Promise<DetailRead> {
-  return readNativeProjection(options, {
-    channel: "detail",
-    method: "thread/read",
-    params: { threadId: wanted.threadId, includeTurns: true },
-    selector: (initialized, ready) => new DetailSelector(wanted, initialized, ready),
-  }, signal);
+  return readNativeProjection(
+    options,
+    {
+      channel: "detail",
+      method: "thread/read",
+      params: { threadId: wanted.threadId, includeTurns: true },
+      selector: (initialized, ready) =>
+        new DetailSelector(wanted, initialized, ready),
+    },
+    signal,
+  );
 }
 
 /** Internal fixed read plans only: HTTP clients never supply methods or launch arguments. */
@@ -58,7 +66,10 @@ export async function readNativeProjection(
     channel: "detail" | "chat" | "legacy";
     method: "thread/read" | "thread/turns/list";
     params: unknown;
-    selector: (initialized: () => void, ready: () => void) => {
+    selector: (
+      initialized: () => void,
+      ready: () => void,
+    ) => {
       consume(token: Token): Buffer[];
       readonly done: boolean;
       end(): void;
@@ -82,6 +93,9 @@ export async function readNativeProjection(
   };
   const controller = new AbortController();
   let child: ChildProcessWithoutNullStreams | undefined;
+  let attached: Duplex | undefined;
+  let input: Writable | undefined;
+  let output: Readable | undefined;
   let nativeExited: Promise<void> | undefined;
   let resolveReady!: () => void, rejectReady!: (e: unknown) => void;
   const ready = new Promise<void>((resolve, reject) => {
@@ -121,7 +135,7 @@ export async function readNativeProjection(
   const stopPipeline = () => {
     tokens.destroy(controller.signal.reason);
     body.destroy(controller.signal.reason);
-    child?.stdout.destroy();
+    output?.destroy();
   };
   controller.signal.addEventListener("abort", stopPipeline, { once: true });
   const bodyClosed = () => {
@@ -149,9 +163,9 @@ export async function readNativeProjection(
     }
   };
   const send = (method: string, params?: unknown, id?: number) => {
-    if (!child || controller.signal.aborted)
+    if (!input || controller.signal.aborted)
       throw fail(502, "DETAIL_CANCELLED");
-    child.stdin.write(
+    input.write(
       JSON.stringify({
         ...(id === undefined ? {} : { id }),
         method,
@@ -175,48 +189,63 @@ export async function readNativeProjection(
   const finished = (async () => {
     let feeding: Promise<void> | undefined;
     try {
-      const env = options.resolveEnv
+      const env = options.launch && options.resolveEnv
         ? await abortable(options.resolveEnv())
         : (options.env ?? process.env);
       controller.signal.throwIfAborted();
-      const launch = options.launch ?? {
-        command: await abortable(discoverCodex(env)),
-        args: ["app-server", "-c", "thread_unload_delay_secs=2"],
-      };
-      controller.signal.throwIfAborted();
-      child = spawn(launch.command, launch.args, {
-        env,
-        stdio: ["pipe", "pipe", "pipe"],
-      });
-      metrics.pid = child.pid;
-      nativeExited = new Promise<void>((resolve) => {
-        child!.once("exit", () => {
-          metrics.childExited = true;
-          resolve();
+      if (options.launch) {
+        child = spawn(options.launch.command, options.launch.args, {
+          env,
+          stdio: ["pipe", "pipe", "pipe"],
         });
-        child!.once("error", () => {
-          if (!child!.pid) {
+        input = child.stdin;
+        output = child.stdout;
+        metrics.pid = child.pid;
+        metrics.transport = "fixture";
+        nativeExited = new Promise<void>((resolve) => {
+          child!.once("exit", () => {
             metrics.childExited = true;
+            metrics.connectionClosed = true;
             resolve();
-          }
+          });
+          child!.once("error", () => {
+            if (!child!.pid) {
+              metrics.childExited = true;
+              metrics.connectionClosed = true;
+              resolve();
+            }
+          });
         });
-      });
-      child.on("error", () => abort(fail(503, "DETAIL_START_FAILED")));
-      child.stdin.on("error", () => abort(fail(502, "DETAIL_NATIVE_ERROR")));
-      child.stderr.resume(); // Drain and discard; never publish native text or credentials.
+        child.on("error", () => abort(fail(503, "DETAIL_START_FAILED")));
+        child.stderr.resume();
+      } else {
+        const connection = await abortable(
+          connectDaemonStream(env, controller.signal, options.resolveEnv ? () => abortable(options.resolveEnv!()) : undefined),
+        );
+        attached = connection.stream;
+        input = attached;
+        output = attached;
+        metrics.transport = "shared-daemon";
+        metrics.nativeScope = connection.scope;
+        nativeExited = new Promise<void>((resolve) =>
+          attached!.once("close", () => {
+            metrics.connectionClosed = true;
+            resolve();
+          }),
+        );
+      }
+      controller.signal.throwIfAborted();
+      input.on("error", () => abort(fail(502, "DETAIL_NATIVE_ERROR")));
       initTimer = setTimeout(
         () => abort(fail(504, "DETAIL_TIMEOUT")),
         DETAIL_LIMITS.initializeMs,
       );
-      const selector = plan.selector(
-        () => {
-          clearTimeout(initTimer);
-          send("initialized");
-          send(plan.method, plan.params, 2);
-        },
-        resolveReady,
-      );
-      const stdout = child.stdout;
+      const selector = plan.selector(() => {
+        clearTimeout(initTimer);
+        send("initialized");
+        send(plan.method, plan.params, 2);
+      }, resolveReady);
+      const stdout = output;
       async function* chunks() {
         const decoder = new TextDecoder("utf-8", {
           fatal: true,
@@ -257,7 +286,15 @@ export async function readNativeProjection(
       send(
         "initialize",
         {
-          clientInfo: { name: plan.channel === "detail" ? "kanban_detail_reader" : plan.channel === "legacy" ? "kanban_legacy_history_reader" : "kanban_chat_reader", version: "1" },
+          clientInfo: {
+            name:
+              plan.channel === "detail"
+                ? "kanban_detail_reader"
+                : plan.channel === "legacy"
+                  ? "kanban_legacy_history_reader"
+                  : "kanban_chat_reader",
+            version: "1",
+          },
           capabilities: { experimentalApi: true },
         },
         1,
@@ -279,8 +316,8 @@ export async function readNativeProjection(
         : error instanceof HttpError
           ? error
           : fail(
-              child ? 502 : 503,
-              child ? "DETAIL_PROTOCOL_ERROR" : "DETAIL_START_FAILED",
+              input ? 502 : 503,
+              input ? "DETAIL_PROTOCOL_ERROR" : "DETAIL_START_FAILED",
             );
       rejectReady(safe);
       body.destroy(safe);
@@ -292,7 +329,7 @@ export async function readNativeProjection(
       controller.signal.removeEventListener("abort", stopPipeline);
       body.off("close", bodyClosed);
       tokens.destroy();
-      child?.stdout.destroy();
+      output?.destroy();
       await feeding?.catch(() => {});
       if (child) {
         child.stdin.end();
@@ -318,6 +355,12 @@ export async function readNativeProjection(
         child.stdin.destroy();
         child.stdout.destroy();
         child.stderr.destroy();
+      }
+      if (attached) {
+        // Closing a read connection only releases our socket; the official daemon and its
+        // tasks remain owned by the official daemon. No process signal is sent.
+        attached.destroy();
+        await nativeExited;
       }
       occupied.delete(plan.channel);
     }

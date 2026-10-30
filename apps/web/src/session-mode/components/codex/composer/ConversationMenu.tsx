@@ -1,7 +1,10 @@
 import {
   type ComponentProps,
   type RefObject,
+  type ReactNode,
   createContext,
+  lazy,
+  Suspense,
   useContext,
   useEffect,
   useLayoutEffect,
@@ -19,6 +22,8 @@ import { sessionTabSelect } from "@session/stores/sessionTabSelect";
 import { adjacentFollowedCard, nextAttentionCard } from "./nextAttention";
 import { nextRecentViewedCard, recentViewedCards } from "./recentView";
 import { usePinStore } from "@session/stores/usePinStore";
+import { setSharedSessionPin, setSharedSessionUnread, markSharedSessionsRead } from "@session/services/sessionManagementClient";
+import { captureCodexOperationScope, isCodexOperationScopeCurrent } from "@session/services/codexOperationScope";
 import { useLayoutStore } from "@session/stores";
 import { useEditorStore } from "@session/stores/useEditorStore";
 import { createSideChat } from "@session/services/conversationActions";
@@ -58,8 +63,7 @@ import {
   sessionPortalContainer,
   useSessionInteractionVisible,
 } from "@session/session-dom";
-import { SearchChatsSheet } from "./SearchChatsSheet";
-import { KeyboardShortcutsSheet } from "./KeyboardShortcutsSheet";
+import { OptionalSessionPanel } from "../../layout/OptionalSessionPanel";
 import { requestCanvasPrompt, requestDrawingTool } from "./v2/drawingTool";
 import {
   canRedoAppAction,
@@ -67,6 +71,7 @@ import {
   recordAppAction,
   redoAppAction,
   undoAppAction,
+  subscribeAppActionHistory,
 } from "./appActionHistory";
 import {
   DropdownMenu,
@@ -75,12 +80,61 @@ import {
   DropdownMenuTrigger,
 } from "../../ui/dropdown-menu";
 
-import { ConversationOwnerForms } from "./ConversationOwnerForms";
 import {
   captureConversationForm,
   type ConversationFormKind,
   type ConversationOwnerForm,
 } from "./conversationOwnerFormContext";
+import { matchesSessionShortcut } from "@session/services/sessionKeyboardShortcuts";
+import type { CodexOperationScope } from "@session/services/codexOperationScope";
+import type { SupplementalCommandKind } from "./SupplementalCommandDialog";
+import { forkSlashLocal } from "./slashCommands";
+
+const SearchChatsSheet = lazy(() =>
+  import("./SearchChatsSheet").then((m) => ({ default: m.SearchChatsSheet })),
+);
+const KeyboardShortcutsSheet = lazy(() =>
+  import("./KeyboardShortcutsSheet").then((m) => ({
+    default: m.KeyboardShortcutsSheet,
+  })),
+);
+const ConversationOwnerForms = lazy(() =>
+  import("./ConversationOwnerForms").then((m) => ({
+    default: m.ConversationOwnerForms,
+  })),
+);
+const SupplementalCommandDialog = lazy(() => import("./SupplementalCommandDialog").then(module => ({ default: module.SupplementalCommandDialog })));
+
+/** Keep the menu's global commands mounted while only its requested form loads. */
+function DeferredConversationDialog({
+  label,
+  onClose,
+  children,
+}: {
+  label: string;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <OptionalSessionPanel label={label} onClose={onClose} overlay>
+      <Suspense
+        fallback={
+          <div
+            className="session-optional-panel-error session-optional-panel-overlay"
+            role="status"
+          >
+            <strong>正在加载{label}</strong>
+            <button type="button" onClick={onClose}>
+              取消打开
+            </button>
+          </div>
+        }
+      >
+        {children}
+      </Suspense>
+    </OptionalSessionPanel>
+  );
+}
 
 const SelectedActionContext = createContext<(() => void) | undefined>(
   undefined,
@@ -178,6 +232,8 @@ export function ConversationMenu({
   triggerContainer,
   onActionSelected,
   parentMenuId,
+  ownsGlobalShortcuts = false,
+  initialCommand,
 }: {
   threadId: string | null;
   draftOwner?: string;
@@ -189,6 +245,8 @@ export function ConversationMenu({
   triggerContainer?: HTMLElement | null;
   onActionSelected?: () => void;
   parentMenuId?: string;
+  ownsGlobalShortcuts?: boolean;
+  initialCommand?: { id: number; kind: "menu" | "shortcuts" | "search" | "personality"; scope?: CodexOperationScope };
 }) {
   const sessionVisible = useSessionInteractionVisible();
   const copyScope = useRef<object | null>(null);
@@ -208,9 +266,26 @@ export function ConversationMenu({
   );
   const [searchChats, setSearchChats] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [supplemental, setSupplemental] = useState<{ kind: SupplementalCommandKind; threadId: string | null; scope: CodexOperationScope } | null>(null);
+  const openSupplemental = (kind: SupplementalCommandKind) => setSupplemental({ kind, threadId, scope: captureCodexOperationScope() });
   const [, setHistoryTick] = useState(0);
+  const pinWrites = useRef(new Set<string>());
+  useEffect(() => subscribeAppActionHistory(() => setHistoryTick(tick => tick + 1)), []);
   const menuCardId = useRef<string | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const handledInitialCommand = useRef<number | null>(null);
+  useEffect(() => {
+    if (!initialCommand || handledInitialCommand.current === initialCommand.id || !isSessionInteractionVisible()) return;
+    if (initialCommand.kind === "personality" && initialCommand.scope && !isCodexOperationScopeCurrent(initialCommand.scope)) return;
+    if (ownsGlobalShortcuts && (!composerRef?.current?.isConnected || composerRef.current.closest("[hidden], [inert]") || (draftOwner && activeDraftOwner() !== draftOwner))) return;
+    handledInitialCommand.current = initialCommand.id;
+    if (initialCommand.kind === "menu") {
+      menuCardId.current = useAgentCenterStore.getState().currentAgentCardId;
+      if (triggerContainer !== null) setMenuOpen(true);
+    } else if (initialCommand.kind === "shortcuts") setShortcutsOpen(true);
+    else if (initialCommand.kind === "search") setSearchChats(true);
+    else { openSupplemental("personality"); window.dispatchEvent(new Event("codex-open-personality")); }
+  }, [initialCommand, ownsGlobalShortcuts, composerRef, draftOwner, triggerContainer]);
   const modelStatus = useModelCacheStore((state) => state.modelStatus);
   const {
     model,
@@ -295,28 +370,34 @@ export function ConversationMenu({
   useEffect(() => {
     // A persistent owner keeps its forms alive after the parent closes; it does
     // not gain new global shortcut ownership while its entry is absent.
-    if (triggerContainer === null || !sessionVisible) return;
+    if ((triggerContainer === null && !ownsGlobalShortcuts) || !sessionVisible) return;
     const openShortcuts = () => {
       if (isSessionInteractionVisible()) setShortcutsOpen(true);
     };
     const onKey = (event: KeyboardEvent) => {
       // Check the actual root before observer/effect cleanup can run.
       if (!isSessionInteractionVisible()) return;
-      if (
-        event.key !== "/" ||
-        !(event.metaKey || event.ctrlKey) ||
-        event.altKey ||
-        event.shiftKey
-      )
-        return;
+      if (ownsGlobalShortcuts && (!composerRef?.current || composerRef.current.closest('[hidden], [inert]') || (draftOwner && activeDraftOwner() !== draftOwner))) return;
       const target = event.target;
       if (
         target instanceof HTMLElement &&
-        target.closest(".session-mode") === null
+        (target.closest(".session-mode") === null || target.closest('[role="dialog"], [role="alertdialog"], .session-rich-draft, .session-files-editor'))
       )
         return;
-      event.preventDefault();
-      setShortcutsOpen(true);
+      if (matchesSessionShortcut(event, "shortcuts")) {
+        event.preventDefault();
+        event.stopPropagation();
+        setShortcutsOpen(true);
+      } else if (matchesSessionShortcut(event, "search")) {
+        event.preventDefault();
+        event.stopPropagation();
+        setSearchChats(true);
+      } else if (matchesSessionShortcut(event, "personality")) {
+        event.preventDefault();
+        event.stopPropagation();
+        window.dispatchEvent(new Event("codex-open-personality"));
+        openSupplemental("personality");
+      }
     };
     window.addEventListener("codex-open-keyboard-shortcuts", openShortcuts);
     window.addEventListener("keydown", onKey);
@@ -327,7 +408,7 @@ export function ConversationMenu({
       );
       window.removeEventListener("keydown", onKey);
     };
-  }, [triggerContainer, sessionVisible]);
+  }, [triggerContainer, sessionVisible, ownsGlobalShortcuts, composerRef, draftOwner]);
   const cwd = useCodexStore((state) =>
     threadId
       ? state.threads.find((thread) => thread.id === threadId)?.cwd
@@ -420,8 +501,8 @@ export function ConversationMenu({
           搜索文件
         </DropdownMenuItem>
         <DropdownMenuItem
-          disabled={!threadId || !onRename}
-          onSelect={() => onRename?.()}
+          disabled={!threadId}
+          onSelect={() => onRename ? onRename() : openOwnerForm("rename")}
         >
           重命名聊天
         </DropdownMenuItem>
@@ -438,9 +519,10 @@ export function ConversationMenu({
           删除聊天
         </DropdownMenuItem>
         <DropdownMenuItem
-          disabled={!threadId}
+          disabled={!threadId || busy || pinWrites.current.has(threadId ?? "")}
           onSelect={() => {
             if (!threadId) return;
+            if (pinWrites.current.has(threadId)) return;
             const thread = useCodexStore
               .getState()
               .threads.find((item) => item.id === threadId);
@@ -450,15 +532,20 @@ export function ConversationMenu({
               title: thread?.name || thread?.preview || title || "Codex",
               cwd: thread?.cwd ?? "",
             };
-            const wasPinned = usePinStore.getState().isPinned(threadId);
-            usePinStore.getState().togglePin(item);
-            recordAppAction({
-              label: wasPinned ? "取消置顶聊天" : "置顶聊天",
-              undo: () => usePinStore.getState().togglePin(item),
-              redo: () => usePinStore.getState().togglePin(item),
-            });
-            bumpHistory();
-            toast.message(wasPinned ? "已取消置顶聊天" : "已置顶聊天");
+            const wasPinned = usePinStore.getState().isPinned(threadId, "codex");
+            const scope = captureCodexOperationScope();
+            pinWrites.current.add(threadId); bumpHistory();
+            void setSharedSessionPin(item, !wasPinned).then(initial => {
+              if (!isCodexOperationScopeCurrent(scope)) return;
+              let proof = initial;
+              recordAppAction({
+                label: wasPinned ? "取消置顶聊天" : "置顶聊天",
+                current: () => isCodexOperationScopeCurrent(scope),
+                undo: async () => { proof = await setSharedSessionPin(item, wasPinned, proof); },
+                redo: async () => { proof = await setSharedSessionPin(item, !wasPinned, proof); },
+              });
+              toast.message(wasPinned ? "已取消置顶聊天" : "已置顶聊天");
+            }).catch(error => toast.error(error instanceof Error ? error.message : String(error))).finally(() => { pinWrites.current.delete(threadId); bumpHistory(); });
           }}
         >
           置顶/取消置顶聊天
@@ -853,9 +940,7 @@ export function ConversationMenu({
         <DropdownMenuItem
           disabled={!canUndoAppAction()}
           onSelect={() => {
-            const label = undoAppAction();
-            bumpHistory();
-            if (label) toast.message(`已撤销${label}`);
+            void undoAppAction().then(label => { if (label) toast.message(`已撤销${label}`); }).catch(error => toast.error(error instanceof Error ? error.message : String(error)));
           }}
         >
           撤销上一步操作
@@ -863,9 +948,7 @@ export function ConversationMenu({
         <DropdownMenuItem
           disabled={!canRedoAppAction()}
           onSelect={() => {
-            const label = redoAppAction();
-            bumpHistory();
-            if (label) toast.message(`已重做${label}`);
+            void redoAppAction().then(label => { if (label) toast.message(`已重做${label}`); }).catch(error => toast.error(error instanceof Error ? error.message : String(error)));
           }}
         >
           重做上一步操作
@@ -952,12 +1035,9 @@ export function ConversationMenu({
           disabled={!threadId}
           onSelect={() => {
             if (!threadId) return;
-            const marked = useSessionAttentionStore
-              .getState()
-              .markUnread("codex", threadId);
-              toast.message(
-                marked ? "已标记为未读" : "当前聊天没有可标记的回复",
-              );
+            void setSharedSessionUnread("codex", threadId).then(marked => {
+              toast.message(marked ? "已标记为未读" : "当前聊天没有可标记的回复");
+            }).catch(error => toast.error(error instanceof Error ? error.message : String(error)));
           }}
         >
           标记为未读
@@ -1027,43 +1107,8 @@ export function ConversationMenu({
           onSelect={() => {
             if (!threadId) return;
             setBusy(true);
-            void codexService
-              .threadFork(threadId)
-              .then((forked) => {
-                const title = "分叉聊天";
-                  useSessionNameStore
-                    .getState()
-                    .setName("codex", forked.id, title);
-                useCodexStore.setState((state) => ({
-                  threads: [
-                    { ...forked, name: title, preview: title },
-                      ...state.threads.filter(
-                        (thread) => thread.id !== forked.id,
-                      ),
-                  ],
-                }));
-                const center = useAgentCenterStore.getState();
-                if (
-                  !center.cards.some(
-                    (card) => card.id === forked.id && card.kind === "codex",
-                  )
-                ) {
-                  center.addAgentCard(
-                    {
-                      kind: "codex",
-                      id: forked.id,
-                      cwd: forked.cwd,
-                      preview: title,
-                    },
-                    { activate: true },
-                  );
-                }
-                useAgentCenterStore
-                  .getState()
-                  .setCurrentAgentCardId(forked.id, "codex");
-                useCodexStore.getState().setCurrentThreadId(forked.id);
-                toast.message("已分叉聊天");
-              })
+            void forkSlashLocal(threadId, "分叉聊天")
+              .then(() => toast.message("已分叉聊天"))
               .catch((error: unknown) => toast.error(String(error)))
               .finally(() => setBusy(false));
           }}
@@ -1483,6 +1528,7 @@ export function ConversationMenu({
         <DropdownMenuItem
           onSelect={() => {
             window.dispatchEvent(new Event("codex-open-mcp"));
+            openSupplemental("mcp");
           }}
         >
           MCP
@@ -1490,6 +1536,7 @@ export function ConversationMenu({
         <DropdownMenuItem
           onSelect={() => {
             window.dispatchEvent(new Event("codex-open-personality"));
+            openSupplemental("personality");
           }}
         >
           个性
@@ -1523,12 +1570,9 @@ export function ConversationMenu({
               .getState()
               .cards.filter((card) => card.kind === "codex")
               .map((card) => card.id);
-              const cleared = useSessionAttentionStore
-                .getState()
-                .markFollowedRead(ids);
-            toast.message(
-              cleared > 0 ? "已全部标为已读" : "当前没有未读的关注聊天",
-            );
+            void markSharedSessionsRead(ids).then(cleared => {
+              toast.message(cleared > 0 ? "已全部标为已读" : "当前没有未读的关注聊天");
+            }).catch(error => toast.error(error instanceof Error ? error.message : String(error)));
           }}
         >
           全部标为已读
@@ -1781,12 +1825,17 @@ export function ConversationMenu({
       </DropdownMenuContent>
     </DropdownMenu>
     {shortcutsOpen && (
-      <KeyboardShortcutsSheet onClose={() => setShortcutsOpen(false)} />
+      <DeferredConversationDialog label="快捷键" onClose={() => setShortcutsOpen(false)}>
+        <KeyboardShortcutsSheet onClose={() => setShortcutsOpen(false)} />
+      </DeferredConversationDialog>
     )}
       {searchChats && (
-        <SearchChatsSheet onClose={() => setSearchChats(false)} />
+        <DeferredConversationDialog label="搜索聊天" onClose={() => setSearchChats(false)}>
+          <SearchChatsSheet onClose={() => setSearchChats(false)} />
+        </DeferredConversationDialog>
     )}
       {ownerForm && (
+        <DeferredConversationDialog label="会话操作" onClose={() => setOwnerForm(null)}>
         <ConversationOwnerForms
           form={ownerForm}
           onClose={() =>
@@ -1800,7 +1849,9 @@ export function ConversationMenu({
             )
           }
       />
+        </DeferredConversationDialog>
     )}
+      {supplemental && <DeferredConversationDialog label="会话命令" onClose={() => setSupplemental(null)}><SupplementalCommandDialog key={`${supplemental.kind}:${supplemental.threadId}`} kind={supplemental.kind} threadId={supplemental.threadId} targetScope={supplemental.scope} onClose={() => setSupplemental(null)} /></DeferredConversationDialog>}
     </SelectedActionContext.Provider>
   );
 }

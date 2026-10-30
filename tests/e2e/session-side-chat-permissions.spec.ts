@@ -307,8 +307,8 @@ for (const width of [1440, 390]) {
       await page.keyboard.press("Escape");
       await expect(trigger).toBeFocused();
       await check("escape");
-      // Use the actual store-driven notice and alert, retaining business I/O
-      // interception; no message is submitted to manufacture these states.
+      // Restoring a stored model notice is not a picker commit. It stays
+      // silent; user-operation warnings have their own native toast tests.
       await page.evaluate(async () => {
         const path = "/src/session-mode/stores/useThreadModelStore.ts";
         const { useThreadModelStore } = await import(
@@ -332,10 +332,10 @@ for (const width of [1440, 390]) {
           },
         }));
       });
-      await expect(side.locator(".session-compact-status")).toContainText(
+      await expect(side.locator(".session-compact-status")).not.toContainText(
         "模型已从",
       );
-      layouts.push({ phase: "long-model-notice", value: await layout() });
+      layouts.push({ phase: "restored-notice-is-silent", value: await layout() });
       const metadata = await page.evaluate(async () => {
         const path =
           "/src/session-mode/components/codex/stores/useCodexStore.ts";
@@ -389,7 +389,8 @@ for (const width of [1440, 390]) {
             thread.id === "ux-side" ? metadata : thread,
           ),
         }));
-        useComposerDraftStore.setState({ error: "fixture storage error" });
+        const { sessionDraftKey } = await load("/src/session-mode/stores/useSessionDraftStore.ts");
+        useComposerDraftStore.setState((state: any) => ({ status: { ...state.status, [sessionDraftKey("codex", "ux-side")]: { phase: "error", error: "fixture storage error" } } }));
       }, metadata);
       const recheck = side.getByRole("button", {
         name: "重新核对",

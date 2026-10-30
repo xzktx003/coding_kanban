@@ -31,8 +31,8 @@ const api = vi.hoisted(() => ({
 
 // Keep the actual hook/cache, thread/config stores, nested Trigger and Radix.
 // Only the four external catalog reads are fixtures; no transport is allowed.
-vi.mock("@session/services/apiAdapt", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@session/services/apiAdapt")>()),
+vi.mock("@session/services/apiAdapt/codex", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@session/services/apiAdapt/codex")>()),
   ...api,
 }));
 

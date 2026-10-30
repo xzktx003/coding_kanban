@@ -1,5 +1,7 @@
 import type { ServerNotification } from "@session/bindings";
-import type { ThreadItem, TurnStatus } from "@session/bindings/v2";
+import type { ThreadItem } from "@session/bindings/v2";
+import { isCachedTurnExecutionUnverified } from "@session/services/cachedTurnExecutionView";
+import type { RenderTermination } from "../presentation/renderTermination";
 
 type TextItem = Extract<
   ThreadItem,
@@ -18,7 +20,7 @@ export function projectTranscriptItems(events: ServerNotification[]) {
   const items = new Map<string, Projection>();
   const replacements = new Map<number, ServerNotification>();
   const hidden = new Set<number>();
-  const termination = new Map<number, TurnStatus>();
+  const termination = new Map<number, RenderTermination>();
   const byTurn = new Map<string, Set<string>>();
   const plans = new Map<string, number>();
   const tracked = new Set([
@@ -62,7 +64,7 @@ export function projectTranscriptItems(events: ServerNotification[]) {
   const finishTurn = (
     threadId: string,
     turnId: string,
-    status: TurnStatus,
+    status: RenderTermination,
     finalItems: ThreadItem[] = [],
   ) => {
     const final = new Map(finalItems.map((item) => [item.id, item]));
@@ -79,7 +81,13 @@ export function projectTranscriptItems(events: ServerNotification[]) {
             ? params.itemId
             : undefined;
       const snapshot = itemId ? final.get(itemId) : undefined;
-      if (snapshot) {
+      if (
+        snapshot &&
+        (status !== "unverified" ||
+          ("status" in snapshot &&
+            snapshot.status !== "inProgress" &&
+            snapshot.status !== "in_progress"))
+      ) {
         const safe =
           snapshot.type === "reasoning"
             ? { ...snapshot, content: [] }
@@ -94,7 +102,7 @@ export function projectTranscriptItems(events: ServerNotification[]) {
       } else {
         // Render metadata only: an ended turn is not evidence of item success.
         termination.set(previous.index, status);
-        items.set(key, { ...previous, done: true });
+        items.set(key, { ...previous, done: status !== "unverified" });
       }
     }
   };
@@ -105,7 +113,9 @@ export function projectTranscriptItems(events: ServerNotification[]) {
         finishTurn(
           event.params.threadId,
           event.params.turn.id,
-          event.params.turn.status,
+          isCachedTurnExecutionUnverified(event)
+            ? "unverified"
+            : event.params.turn.status,
           event.params.turn.items,
         );
       return;

@@ -1,3 +1,4 @@
+import type { RenderTermination } from "../presentation/renderTermination";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   Download,
@@ -8,7 +9,6 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { ImageGenerationItem } from "@session/bindings/ImageGenerationItem";
-import type { TurnStatus } from "@session/bindings/v2/TurnStatus";
 import type { ImageAttachment } from "@session/components/common/useImageAttachments";
 import { useImageAttachments } from "@session/components/common/useImageAttachments";
 import { sessionDraftKey } from "@session/stores/useSessionDraftStore";
@@ -22,6 +22,49 @@ import { NativeToolDisclosure } from "./NativeToolDisclosure";
 import { nativeImageGalleryLayout } from "../presentation/nativeImageGalleryLayout";
 import { isTranscriptMetadataOnly } from "../presentation/transcriptMetadata";
 import { TranscriptDetailsNotice } from "./TranscriptDetailsNotice";
+import {
+  nativeImageLimit,
+  nativeImageResetDate,
+} from "../presentation/nativeImageFailure";
+import { NativeImageLimitIcon } from "../presentation/NativeImageLimitIcon";
+
+function GeneratedImageLimits({
+  items,
+}: {
+  items: readonly ImageGenerationItem[];
+}) {
+  const { i18n } = useTranslation("thread");
+  const language = i18n?.language ?? "zh",
+    chinese = language.startsWith("zh");
+  return (
+    <>
+      {items.map((item) => {
+        const failure = nativeImageLimit(item);
+        if (!failure) return null;
+        const resetDate = nativeImageResetDate(failure.resetsAt, language);
+        return (
+          <div
+            key={item.id}
+            role="status"
+            data-image-quota-failure={item.id}
+            className="codex-native-notice codex-native-divider"
+          >
+            <span className="codex-native-divider-message codex-image-limit-message">
+              <NativeImageLimitIcon className="shrink-0" />
+              {chinese
+                ? resetDate
+                  ? `你已达到图像创建上限。请在 ${resetDate} 重试`
+                  : "你已达到图像创建上限。请稍后重试"
+                : resetDate
+                  ? `You’ve reached your image creation limit. Try again at ${resetDate}`
+                  : "You’ve reached your image creation limit. Try again later"}
+            </span>
+          </div>
+        );
+      })}
+    </>
+  );
+}
 
 type CapturedEditor = { owner: string; item: ImageAttachment };
 function CapturedGeneratedImageEditor({
@@ -201,7 +244,7 @@ export function NativeGeneratedImages({
 }: {
   items: readonly ImageGenerationItem[];
   running?: boolean;
-  termination?: TurnStatus;
+  termination?: RenderTermination;
 }) {
   const { t } = useTranslation("thread"),
     usable = items.filter(
@@ -209,6 +252,8 @@ export function NativeGeneratedImages({
         !isTranscriptMetadataOnly(item) &&
         (nativeImageData(item.result) || item.savedPath),
     );
+  const quotaFailures = items.filter((item) => nativeImageLimit(item) !== null);
+  const limitNotices = <GeneratedImageLimits items={quotaFailures} />;
   const pending =
     running && !termination
       ? items.filter(
@@ -243,125 +288,143 @@ export function NativeGeneratedImages({
       pending.length ? 4 : 0,
     ),
     index = Math.min(start, layout.maxStartIndex);
-  if (items.length && items.every(isTranscriptMetadataOnly))
+  if (items.length && items.every(isTranscriptMetadataOnly)) {
+    if (quotaFailures.length === items.length) return limitNotices;
     return (
       <div className="codex-native-generated-metadata">
+        {limitNotices}
         <NativeToolDisclosure
           running={running && !termination}
-          summary={t(
-            items.some((item) => item.status === "failed") ||
-              termination === "failed"
-              ? "activity.imageFailed"
-              : termination === "interrupted"
-                ? "activity.interrupted"
-                : running && !termination
-                  ? "activity.generatingImage"
-                  : "activity.ended",
-          )}
+          summary={
+            termination === "unverified"
+              ? "正在核对轮次状态"
+              : t(
+                  items.some((item) => item.status === "failed") ||
+                    termination === "failed"
+                    ? "activity.imageFailed"
+                    : termination === "interrupted"
+                      ? "activity.interrupted"
+                      : running && !termination
+                        ? "activity.generatingImage"
+                        : "activity.ended",
+                )
+          }
         />
         <TranscriptDetailsNotice />
       </div>
     );
+  }
   if (usable.length)
     return (
-      <div
-        ref={frame}
-        className="codex-native-generated-gallery"
-        style={{
-          height: layout.height,
-          maxWidth:
-            singleRatio === null
-              ? undefined
-              : singleRatio >= 2
-                ? "var(--thread-content-max-width, 100%)"
-                : singleRatio >= 1
-                  ? 480
-                  : 400,
-        }}
-      >
+      <>
+        {limitNotices}
         <div
-          className="codex-native-generated-track"
+          ref={frame}
+          className="codex-native-generated-gallery"
           style={{
-            transform: layout.square
-              ? `translateX(-${index * (layout.height + 8)}px)`
-              : undefined,
+            height: layout.height,
+            maxWidth:
+              singleRatio === null
+                ? undefined
+                : singleRatio >= 2
+                  ? "var(--thread-content-max-width, 100%)"
+                  : singleRatio >= 1
+                    ? 480
+                    : 400,
           }}
         >
-          {usable.map((item) => (
-            <GeneratedImageTile
-              key={item.id}
-              item={item}
-              height={layout.height}
-              width={
-                layout.height * (layout.square ? 1 : (ratios[item.id] ?? 1))
-              }
-              onRatio={(ratio) =>
-                setRatios((previous) =>
-                  previous[item.id] === ratio
-                    ? previous
-                    : { ...previous, [item.id]: ratio },
-                )
-              }
-            />
-          ))}
-          {pending.map((item) => (
-            <div
-              key={item.id}
-              className="codex-generated-placeholder"
-              role="status"
-              style={{
-                height: layout.height,
-                width: layout.height,
-                flexShrink: 0,
-              }}
-            >
-              <Loader2 size={16} className="animate-spin" />
-              {t("activity.generatingImage")}
-            </div>
-          ))}
-        </div>
-        {layout.overflowCount > 0 && (
-          <div className="codex-native-generated-pagination">
-            <button
-              type="button"
-              aria-label="上一组图片"
-              disabled={index === 0}
-              onClick={() => setStart(index - 1)}
-            >
-              <ChevronLeft size={16} />
-            </button>
-            <span>
-              {index + 1}/{layout.maxStartIndex + 1}
-            </span>
-            <button
-              type="button"
-              aria-label="下一组图片"
-              disabled={index === layout.maxStartIndex}
-              onClick={() => setStart(index + 1)}
-            >
-              <ChevronRight size={16} />
-            </button>
+          <div
+            className="codex-native-generated-track"
+            style={{
+              transform: layout.square
+                ? `translateX(-${index * (layout.height + 8)}px)`
+                : undefined,
+            }}
+          >
+            {usable.map((item) => (
+              <GeneratedImageTile
+                key={item.id}
+                item={item}
+                height={layout.height}
+                width={
+                  layout.height * (layout.square ? 1 : (ratios[item.id] ?? 1))
+                }
+                onRatio={(ratio) =>
+                  setRatios((previous) =>
+                    previous[item.id] === ratio
+                      ? previous
+                      : { ...previous, [item.id]: ratio },
+                  )
+                }
+              />
+            ))}
+            {pending.map((item) => (
+              <div
+                key={item.id}
+                className="codex-generated-placeholder"
+                role="status"
+                style={{
+                  height: layout.height,
+                  width: layout.height,
+                  flexShrink: 0,
+                }}
+              >
+                <Loader2 size={16} className="animate-spin" />
+                {t("activity.generatingImage")}
+              </div>
+            ))}
           </div>
-        )}
-      </div>
+          {layout.overflowCount > 0 && (
+            <div className="codex-native-generated-pagination">
+              <button
+                type="button"
+                aria-label="上一组图片"
+                disabled={index === 0}
+                onClick={() => setStart(index - 1)}
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <span>
+                {index + 1}/{layout.maxStartIndex + 1}
+              </span>
+              <button
+                type="button"
+                aria-label="下一组图片"
+                disabled={index === layout.maxStartIndex}
+                onClick={() => setStart(index + 1)}
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
+          )}
+        </div>
+      </>
     );
-  if (running && !termination)
+  if (quotaFailures.length && !pending.length) return limitNotices;
+  if (pending.length)
     return (
-      <div className="codex-generated-placeholder" role="status">
-        <Loader2 size={16} className="animate-spin" />
-        {t("activity.generatingImage")}
-      </div>
+      <>
+        {limitNotices}
+        <div className="codex-generated-placeholder" role="status">
+          <Loader2 size={16} className="animate-spin" />
+          {t("activity.generatingImage")}
+        </div>
+      </>
     );
   return (
     <NativeToolDisclosure
-      summary={t(
-        items.some((item) => item.status === "failed") ||
-          termination === "failed"
-          ? "activity.imageFailed"
-          : termination === "interrupted"
-            ? "activity.interrupted"
-            : "activity.imageUnavailable",
-      )}
+      summary={
+        termination === "unverified"
+          ? "正在核对轮次状态"
+          : t(
+              items.some((item) => item.status === "failed") ||
+                termination === "failed"
+                ? "activity.imageFailed"
+                : termination === "interrupted"
+                  ? "activity.interrupted"
+                  : "activity.imageUnavailable",
+            )
+      }
     />
   );
 }

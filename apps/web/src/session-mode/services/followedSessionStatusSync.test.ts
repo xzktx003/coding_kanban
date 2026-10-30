@@ -2,6 +2,12 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { useCodexStore } from "../components/codex/stores";
 import { useAgentCenterStore } from "../stores/useAgentCenterStore";
 import { startFollowedSessionStatusSync } from "./followedSessionStatusSync";
+import { currentNativeExecutionTiming } from "./nativeTurnExecutionProof";
+import { invalidateCodexOperationScope } from "./codexOperationScope";
+import {
+  markCachedTurnExecutionUnverified,
+  isCachedTurnExecutionUnverified,
+} from "./cachedTurnExecutionView";
 import {
   useApprovalStore,
   useRequestUserInputStore,
@@ -635,6 +641,120 @@ it("recovers missing timing once while identical active status polls do not noti
     unsubscribe();
   }
 });
+it("verifies an unproved inProgress history timing once, then rechecks only after authority revocation", async () => {
+  const fetcher = recoveryFixture();
+  const fromHistory = {
+    turnId: "next",
+    status: "inProgress" as const,
+    startedAtMs: 20_000,
+    durationMs: null,
+  };
+  useCodexStore.setState({ turnTimingMap: { a: fromHistory } });
+  expect(currentNativeExecutionTiming("a", fromHistory)).toBeUndefined();
+  stop = startFollowedSessionStatusSync(fetcher);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(
+    currentNativeExecutionTiming("a", useCodexStore.getState().turnTimingMap.a),
+  ).toBe(useCodexStore.getState().turnTimingMap.a);
+  await vi.advanceTimersByTimeAsync(16_000);
+  expect(
+    fetcher.mock.calls.filter(([url]) =>
+      String(url).includes("/codex/activity"),
+    ),
+  ).toHaveLength(1);
+  invalidateCodexOperationScope();
+  expect(
+    currentNativeExecutionTiming("a", useCodexStore.getState().turnTimingMap.a),
+  ).toBeUndefined();
+  await vi.advanceTimersByTimeAsync(6000);
+  expect(
+    fetcher.mock.calls.filter(([url]) =>
+      String(url).includes("/codex/activity"),
+    ),
+  ).toHaveLength(2);
+  expect(
+    currentNativeExecutionTiming("a", useCodexStore.getState().turnTimingMap.a),
+  ).toBe(useCodexStore.getState().turnTimingMap.a);
+  expect(
+    fetcher.mock.calls.every(([url]) =>
+      /\/(thread\/list|codex\/activity)$/.test(String(url)),
+    ),
+  ).toBe(true);
+});
+it.each(["inProgress", "completed", "failed", "interrupted"] as const)(
+  "settles a visible cache-only ending from exact readonly %s proof before full history arrives",
+  async (nativeStatus) => {
+    const terminal = (turnId: string) =>
+      ({
+        method: "turn/completed",
+        params: {
+          threadId: "a",
+          turn: {
+            id: turnId,
+            status: "interrupted",
+            startedAt: 1,
+            completedAt: 2,
+            durationMs: 10,
+            items: [],
+            itemsView: "full",
+            error: null,
+          },
+        },
+      }) as any;
+    const older = terminal("older-real"),
+      latest = terminal("next");
+    markCachedTurnExecutionUnverified(latest);
+    useAgentCenterStore.setState({ cards: [{ kind: "codex", id: "a" }] });
+    useCodexStore.setState({
+      events: { a: [older, latest] },
+      turnTimingMap: {},
+    });
+    const status = nativeStatus === "inProgress" ? active : idle;
+    let release!: (value: Response) => void;
+    const fetcher = vi.fn((url: RequestInfo | URL) =>
+      String(url).includes("/codex/activity")
+        ? new Promise<Response>((resolve) => {
+            release = resolve;
+          })
+        : Promise.resolve(response([{ id: "a", status }])),
+    );
+    stop = startFollowedSessionStatusSync(fetcher);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(useCodexStore.getState().events.a).toEqual([older, latest]);
+    release(
+      new Response(
+        JSON.stringify({
+          threadId: "a",
+          status,
+          turn: {
+            id: "next",
+            status: nativeStatus,
+            startedAt: 20,
+            durationMs: nativeStatus === "inProgress" ? null : 50,
+          },
+        }),
+      ),
+    );
+    await vi.advanceTimersByTimeAsync(1);
+    const state = useCodexStore.getState();
+    expect(state.turnTimingMap.a.status).toBe(nativeStatus);
+    expect(state.events.a[0]).toBe(older);
+    expect(state.events.a.some(isCachedTurnExecutionUnverified)).toBe(false);
+    expect(state.currentTurnId).toBe(
+      nativeStatus === "inProgress" ? "next" : null,
+    );
+    if (nativeStatus === "inProgress") expect(state.events.a).toEqual([older]);
+    else
+      expect(state.events.a[1]).toMatchObject({
+        params: { turn: { id: "next", status: nativeStatus } },
+      });
+    expect(
+      fetcher.mock.calls.every(([url]) =>
+        /\/(thread\/list|codex\/activity)$/.test(String(url)),
+      ),
+    ).toBe(true);
+  },
+);
 it.each([
   { id: "next", status: "completed", startedAt: 20 },
   { id: "next", status: "inProgress" },

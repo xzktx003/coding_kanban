@@ -868,8 +868,25 @@ export class GitService {
       throw new Error("Worktree metadata belongs to another repository");
     return true;
   }
-  async createWorktree(cwd: string, key: string) {
+  /** Read-only reconciliation shares creation's lock and deterministic intent path. */
+  async inspectWorktree(cwd: string, key: string) {
     const { root, path } = await this.location(cwd, key);
+    return this.serial(root, async () => {
+      const exists = await stat(path);
+      const result = { repo_root: root, worktree_path: path, state: "missing" as "missing" | "registered" | "unmanaged", head: null as string | null, dirty: false };
+      if (await this.validWorktree(root, path)) return { ...result, state: "registered" as const, head: await this.head(path) ?? null, dirty: (await this.status(path)).entries.length > 0 };
+      return { ...result, state: exists || await this.registered(root, path) ? "unmanaged" as const : "missing" as const };
+    });
+  }
+  async createWorktree(cwd: string, key: string, options?: { baseBranch?: string }) {
+    const { root, path } = await this.location(cwd, key);
+    let revision: string | undefined;
+    if (options?.baseBranch) {
+      const branch = options.baseBranch;
+      if (!/^[a-zA-Z0-9][a-zA-Z0-9/_.-]{0,199}$/.test(branch) || branch.includes("..") || branch.endsWith("/") || branch.endsWith(".lock")) throw new HttpError(400, "Invalid worktree base branch");
+      try { revision = (await this.git(root, ["rev-parse", "--verify", `refs/heads/${branch}^{commit}`])).stdout.toString().trim(); } catch { throw new HttpError(400, "Unknown worktree base branch"); }
+      if (!/^[a-f0-9]{40,64}$/.test(revision)) throw new Error("Invalid base branch revision");
+    }
     return this.serial(root, async () => {
       const result = {
         repo_root: root,
@@ -877,14 +894,16 @@ export class GitService {
         existed: false,
         copied_env_files: [] as string[],
       };
-      if (await this.validWorktree(root, path))
+      if (await this.validWorktree(root, path)) {
+        if (revision && (await this.head(path)) !== revision) throw new Error("Existing worktree has another base; inspect it before creating a task");
         return { ...result, existed: true };
+      }
       if (await stat(path))
         throw new Error("Refusing to replace an unmanaged worktree directory");
       if (await this.registered(root, path))
         await this.git(root, ["worktree", "remove", "--force", "--", path]);
       await mkdir(dirname(path), { recursive: true });
-      await this.git(root, ["worktree", "add", "--detach", "--", path]);
+      await this.git(root, ["worktree", "add", "--detach", "--", path, ...(revision ? [revision] : [])]);
       if (!(await this.validWorktree(root, path)))
         throw new Error("Created worktree could not be verified");
       for (const name of [
@@ -1059,7 +1078,9 @@ export function registerGitRoutes(
     push: (b, cwd) =>
       service.push(cwd, optional(b, "remote"), optional(b, "branch")),
     "create-worktree": (b, cwd) =>
-      service.createWorktree(cwd, field(b, "worktreeKey", "worktree_key")),
+      service.createWorktree(cwd, field(b, "worktreeKey", "worktree_key"), { baseBranch: optional(b, "baseBranch") }),
+    "inspect-worktree": (b, cwd) =>
+      service.inspectWorktree(cwd, field(b, "worktreeKey", "worktree_key")),
     "remove-worktree": (b, cwd) =>
       service.removeWorktree(cwd, field(b, "worktreeKey", "worktree_key")),
     "apply-worktree-changes": (b, cwd) =>

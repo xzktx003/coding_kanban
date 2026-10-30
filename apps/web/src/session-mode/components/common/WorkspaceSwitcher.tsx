@@ -13,7 +13,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@session/components/ui/dropdown-menu";
-import { BrowserProjects } from "@session/features/ProjectSelector";
+import { BrowserProjects } from "@session/features/ProjectSelector/BrowserProjects";
 import { isDesktopTauri } from "@session/hooks/runtime";
 import { useCCStore } from "@session/stores";
 import { useAgentSettingsStore } from "@session/stores/useAgentSettingsStore";

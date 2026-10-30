@@ -127,3 +127,36 @@ it("a retry requested during an in-flight failure runs next without duplicate co
   await vi.advanceTimersByTimeAsync(1);
   expect(fetcher).toHaveBeenCalledTimes(2);
 });
+it("a stale server revision backs off instead of spinning immediate requests", async () => {
+  useWorkspaceStore
+    .getState()
+    .acceptSharedProjects({ initialized: true, revision: 3, projects: [a] });
+  const fetcher = vi.fn(async () => {
+    if (fetcher.mock.calls.length > 5)
+      throw new Error("stop a broken retry loop");
+    return new Response(
+      JSON.stringify({
+        initialized: true,
+        revision: 1,
+        projects: [a],
+        sequence: 0,
+      }),
+    );
+  });
+  stop = startSessionProjectsSync(fetcher as typeof fetch);
+  await vi.advanceTimersByTimeAsync(100);
+  expect(fetcher).toHaveBeenCalledOnce();
+  expect(useWorkspaceStore.getState().projectSyncError).toContain("版本");
+});
+
+it("honors Retry-After for a rate-limited sync without losing pending operations", async () => {
+  const fetcher = vi.fn(
+    async () =>
+      new Response("{}", { status: 429, headers: { "retry-after": "20" } }),
+  );
+  stop = startSessionProjectsSync(fetcher as typeof fetch);
+  await vi.advanceTimersByTimeAsync(6000);
+  expect(fetcher).toHaveBeenCalledOnce();
+  await vi.advanceTimersByTimeAsync(14_001);
+  expect(fetcher).toHaveBeenCalledTimes(2);
+});

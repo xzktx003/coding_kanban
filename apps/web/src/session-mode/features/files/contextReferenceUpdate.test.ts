@@ -1,0 +1,6 @@
+import { expect,it,vi } from "vitest";
+const api=vi.hoisted(()=>({read:vi.fn()}));
+vi.mock("./projectReferences",async original=>({...await original<typeof import("./projectReferences")>(),readProjectReference:api.read}));
+import { refreshedProjectContext } from "./contextReferenceUpdate";
+it("updates directory snapshot metadata with its text while retaining the original captured owner identity",async()=>{api.read.mockResolvedValue({root:"/project",path:"/project/assets",kind:"directory",content:"new.txt",version:"b".repeat(64),truncated:false});const value=await refreshedProjectContext({id:"context",kind:"file",sourceKind:"directory",workspaceRoot:"/project",path:"/project/assets",name:"assets",text:"old.txt",version:"a".repeat(64)},new AbortController().signal);expect(value).toMatchObject({id:"context",text:"new.txt",version:"b".repeat(64),sourceKind:"directory"});});
+it("rejects a valid-looking snapshot that belongs to a different captured project file",async()=>{api.read.mockResolvedValue({root:"/project",path:"/project/other",kind:"file",content:"other",version:"b".repeat(64),truncated:false});await expect(refreshedProjectContext({id:"context",kind:"file",workspaceRoot:"/project",path:"/project/original",name:"original",text:"old"},new AbortController().signal)).rejects.toThrow(/身份/);});

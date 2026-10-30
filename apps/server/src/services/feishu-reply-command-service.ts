@@ -170,6 +170,8 @@ export class FeishuReplyCommandService {
       (parentBinding.chatId !== event.chat_id ||
         parentBinding.sessionId !== rootBinding.sessionId ||
         parentBinding.sessionModeThreadId !== rootBinding.sessionModeThreadId ||
+        parentBinding.sessionModeScope !== rootBinding.sessionModeScope ||
+        parentBinding.sessionModeNamespace !== rootBinding.sessionModeNamespace ||
         (parentBinding.codexThreadId &&
           rootBinding.codexThreadId &&
           parentBinding.codexThreadId !== rootBinding.codexThreadId))
@@ -206,6 +208,7 @@ export class FeishuReplyCommandService {
 
     if (binding.sessionModeThreadId) {
       if (!this.#sessionMode) return "ignored_unavailable";
+      if (!binding.sessionModeScope || !binding.sessionModeNamespace) return "ignored_unavailable";
       this.#inFlightMessageIds.add(event.message_id);
       try {
         const image = imageKey
@@ -218,6 +221,7 @@ export class FeishuReplyCommandService {
           messageId: event.message_id,
           threadId: binding.sessionModeThreadId,
           text: image ? DEFAULT_FEISHU_IMAGE_PROMPT : prompt!,
+          nativeContext: { scope: binding.sessionModeScope, namespace: binding.sessionModeNamespace },
           ...(image ? { image } : {}),
         });
         this.#bindings.recordProcessedReply({

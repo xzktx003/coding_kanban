@@ -1,130 +1,80 @@
+import type { Thread } from "@session/bindings/v2";
 import { toast } from "sonner";
-import { unarchiveThread } from "@session/services/apiAdapt/codex";
-import { useAgentCenterStore } from "@session/stores/useAgentCenterStore";
+import { archiveThread, unarchiveThread } from "@session/services/apiAdapt/codex";
+import { useAgentCenterStore, agentCardKey, sharedCardMetadata, type AgentCenterCard } from "@session/stores/useAgentCenterStore";
+import { captureCodexOperationScope, isCodexOperationScopeCurrent } from "@session/services/codexOperationScope";
 import { useCodexStore } from "../stores/useCodexStore";
+import { recordAppAction, undoAppActionEntry, type AppAction } from "./appActionHistory";
 
-/**
- * Original local-thread archive is an undo transaction, not a terminal action:
- * `s2n` (app-initial-41ab338a184f.js @2425337) hands `bu`/`Tx` an entry whose
- * `undo` calls `unarchiveConversation(id, {restorePin: true})`, and `ZMt`
- * (@323732) only emits the `appUndo.threadArchived` success toast from inside
- * that undo transition. `wjt = 6e4` (@311017) is the window the entry stays
- * undoable for.
- *
- * Two deliberate deviations, both forced by what we do and do not have:
- *
- * - Official reaches the undo through the global `undoAppAction` keyboard
- *   command (`kj("undoAppAction", …)` @2752155) backed by an app-wide undo
- *   stack. We have no such stack (nothing in session-mode registers one), so
- *   the entry is carried on the archive notice itself. The 60s window and the
- *   post-undo copy are the parts that are observable to a user, and those match.
- * - Official `restorePin` restores a pinned position we do not model. We
- *   instead restore the exact thread record and focus card we removed, at their
- *   original index, so an undo is a true inverse rather than a re-add that
- *   reorders the rail.
- */
 const UNDO_WINDOW_MS = 60_000;
-
 type ThreadSnapshot = {
-  thread: { id: string } | undefined;
+  thread: Thread | undefined;
   threadIndex: number;
-  card: { kind: string; id: string } | undefined;
-  cardIndex: number;
+  card: AgentCenterCard | undefined;
+  beforeKey: string | null;
+  scope: ReturnType<typeof captureCodexOperationScope>;
 };
 
-/** Captured before removal so the undo restores, rather than re-creates, the row. */
+/** Keep bounded list metadata, never turn or message bodies, in undo history. */
 export function captureArchivedThread(threadId: string): ThreadSnapshot {
-  const threads = useCodexStore.getState().threads as { id: string }[];
-  const cards = useAgentCenterStore.getState().cards as {
-    kind: string;
-    id: string;
-  }[];
-  const threadIndex = threads.findIndex((t) => t.id === threadId);
-  const cardIndex = cards.findIndex(
-    (c) => c.kind === "codex" && c.id === threadId,
-  );
+  const threads = useCodexStore.getState().threads;
+  const cards = useAgentCenterStore.getState().cards;
+  const threadIndex = threads.findIndex(thread => thread.id === threadId);
+  const cardIndex = cards.findIndex(card => card.kind === "codex" && card.id === threadId);
+  const thread = threads[threadIndex];
   return {
-    thread: threadIndex < 0 ? undefined : threads[threadIndex],
+    thread: thread ? { ...thread, preview: (thread.preview ?? "").slice(0, 512), extra: null, gitInfo: null, turns: [] } : undefined,
     threadIndex,
-    card: cardIndex < 0 ? undefined : cards[cardIndex],
-    cardIndex,
+    card: cardIndex < 0 ? undefined : sharedCardMetadata(cards[cardIndex]),
+    beforeKey: cards[cardIndex + 1] ? agentCardKey(cards[cardIndex + 1]) : null,
+    scope: captureCodexOperationScope(),
   };
 }
-
 function restore(snapshot: ThreadSnapshot) {
   if (snapshot.thread) {
     const thread = snapshot.thread;
-    useCodexStore.setState((state) => {
-      const threads = state.threads as { id: string }[];
-      if (threads.some((t) => t.id === thread.id)) return {} as never;
-      const next = [...threads];
-      next.splice(
-        snapshot.threadIndex < 0 ? next.length : snapshot.threadIndex,
-        0,
-        thread,
-      );
-      return { threads: next } as never;
+    useCodexStore.setState(state => {
+      if (state.threads.some(row => row.id === thread.id)) return state;
+      const next = [...state.threads]; next.splice(Math.max(0, snapshot.threadIndex), 0, thread);
+      return { threads: next };
     });
   }
   if (snapshot.card) {
-    const card = snapshot.card;
-    useAgentCenterStore.setState((state) => {
-      const cards = state.cards as { kind: string; id: string }[];
-      if (cards.some((c) => c.kind === card.kind && c.id === card.id))
-        return {} as never;
-      const next = [...cards];
-      next.splice(
-        snapshot.cardIndex < 0 ? next.length : snapshot.cardIndex,
-        0,
-        card,
-      );
-      return { cards: next } as never;
-    });
+    const store = useAgentCenterStore.getState();
+    if (!store.cards.some(card => agentCardKey(card) === agentCardKey(snapshot.card!))) {
+      store.addAgentCard(snapshot.card, { activate: false });
+      const beforeKey = snapshot.beforeKey && useAgentCenterStore.getState().cards.some(card => agentCardKey(card) === snapshot.beforeKey) ? snapshot.beforeKey : null;
+      useAgentCenterStore.getState().reorderCard(agentCardKey(snapshot.card), beforeKey);
+    }
   }
 }
-
-/**
- * The sonner options for the archive notice. `threadId` is captured by the
- * caller at archive time, never read back from the store, so a later selection
- * cannot redirect the undo at a different thread.
- */
-export function archiveUndoNotice(
-  threadId: string,
-  snapshot: ThreadSnapshot,
-): {
-  id: string;
-  duration: number;
-  action: { label: string; onClick: () => void };
+function remove(threadId: string) {
+  useAgentCenterStore.getState().removeCard({ kind: "codex", id: threadId });
+  useCodexStore.setState(state => ({ threads: state.threads.filter(thread => thread.id !== threadId) }));
+}
+/** Archive and undo share the async global history; toast targets this exact entry. */
+export function archiveUndoNotice(threadId: string, snapshot: ThreadSnapshot): {
+  id: string; duration: number; action: { label: string; onClick: () => void };
 } {
   const id = `codex-archive-${threadId}`;
-  // One archive undoes once. Official discards the entry on the first undo
-  // transition; a double click here would otherwise issue two unarchives.
-  let spent = false;
-  return {
-    id,
-    duration: UNDO_WINDOW_MS,
-    action: {
-      label: "撤销",
-      onClick: () => {
-        if (spent) return;
-        spent = true;
-        void unarchiveThread(threadId)
-          .then(() => {
-            restore(snapshot);
-            // Official `appUndo.threadArchived`.
-            toast.success("聊天已恢复", { id: `${id}-undone` });
-          })
-          .catch((error: unknown) => {
-            // Official `localTaskRow.unarchiveError`. The thread stays archived:
-            // the write did not land, so the list must keep reflecting that.
-            spent = false;
-            toast.error("取消归档对话失败", {
-              id: `${id}-failed`,
-              description:
-                error instanceof Error ? error.message : String(error),
-            });
-          });
-      },
+  const action: AppAction = {
+    label: "归档聊天", expiresAt: Date.now() + UNDO_WINDOW_MS,
+    current: () => isCodexOperationScopeCurrent(snapshot.scope),
+    undo: async () => {
+      await unarchiveThread(threadId);
+      if (!isCodexOperationScopeCurrent(snapshot.scope)) throw new Error("账号或运行范围已变化，原会话恢复回执已保留");
+      restore(snapshot);
+      toast.success("聊天已恢复", { id: `${id}-undone` });
+    },
+    // Redo uses ordinary archive. It never silently stops a newly running turn.
+    redo: async () => {
+      await archiveThread(threadId);
+      if (!isCodexOperationScopeCurrent(snapshot.scope)) throw new Error("账号或运行范围已变化，原会话归档回执已保留");
+      remove(threadId);
     },
   };
+  recordAppAction(action);
+  return { id, duration: UNDO_WINDOW_MS, action: { label: "撤销", onClick: () => {
+    void undoAppActionEntry(action).catch(error => toast.error("取消归档对话失败", { id: `${id}-failed`, description: error instanceof Error ? error.message : String(error) }));
+  } } };
 }

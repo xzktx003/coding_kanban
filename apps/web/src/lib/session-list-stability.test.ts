@@ -3,7 +3,10 @@ import { describe, it } from "node:test";
 
 import type { AgentSessionRecord } from "@agent-orchestrator/shared";
 
-import { stabilizeSessionList } from "./session-list-stability.js";
+import {
+  sameJsonValue,
+  stabilizeSessionList,
+} from "./session-list-stability.js";
 
 function session(
   overrides: Partial<AgentSessionRecord> = {},
@@ -64,4 +67,18 @@ it("reuses unchanged sessions across insertion and reorder", () => {
   const stable = stabilizeSessionList(previous, next);
   assert.equal(stable[0], previous[1]);
   assert.equal(stable[2], previous[0]);
+});
+
+it("keeps native integer precision and distinguishes sparse array lengths", () => {
+  assert.equal(
+    sameJsonValue({ count: 9007199254740995n }, { count: 9007199254740995n }),
+    true,
+  );
+  assert.equal(
+    sameJsonValue({ count: 9007199254740995n }, { count: 9007199254740996n }),
+    false,
+  );
+  assert.equal(sameJsonValue([], Array(1)), false);
+  assert.equal(sameJsonValue(Array(1), Array(2)), false);
+  assert.equal(sameJsonValue(Array(2), Array(2)), true);
 });

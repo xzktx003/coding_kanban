@@ -7,8 +7,10 @@ import { defineConfig, loadEnv, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { sessionCssScope } from "../../scripts/session-css-scope.mjs";
-import { resolveWebDevCacheDir } from "../../scripts/vite-dev-cache.mjs";
+import { resolveWebDevCacheDir, webDevReactOptions } from "../../scripts/vite-dev-cache.mjs";
 import { viteDocumentContinuity } from "../../scripts/vite-document-continuity.mjs";
+import { lucideImportOptimizer } from "../../scripts/vite-icon-imports.mjs";
+import { viteExternalSourceMaps } from "../../scripts/vite-external-sourcemaps.mjs";
 
 import {
   resolveHttpsFallbackRedirectLocation,
@@ -191,9 +193,11 @@ export default defineConfig(({ command, mode }) => {
           })
         : undefined,
     plugins: [
-      react(),
+      command === "serve" && lucideImportOptimizer({ projectRoot: resolve(__dirname, "../..") }),
+      react(webDevReactOptions()),
       tailwindcss(),
       viteDocumentContinuity(),
+      viteExternalSourceMaps(),
       vscodeWebviewHttpsSupportPlugin(httpsCaCertificate),
       httpFallbackPlugin(),
     ],

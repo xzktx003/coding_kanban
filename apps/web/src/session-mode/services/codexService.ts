@@ -1,3 +1,8 @@
+import { selectCodexInputTarget } from "@session/components/codex/stores/codexInputTarget";
+import {
+  readExecutionContext,
+  verifyExecutionContext,
+} from "@session/features/workspace-execution/state";
 import {
   compactCodexTranscript,
   CODEX_TRANSCRIPT_MAX_BYTES,
@@ -9,8 +14,30 @@ import {
 } from "./sessionMemoryHistory";
 import { threadPermissionParameters } from "./threadPermissionProjection";
 import { HistoryReadScopeChangedError } from "./HistoryReadScopeChangedError";
-import { captureCodexOperationScope, isCodexOperationScopeCurrent, invalidateCodexOperationScope, type CodexOperationScope } from "./codexOperationScope";
+import { historyReadConsumer } from "./sharedHistoryRead";
+import {
+  captureCodexOperationScope,
+  isCodexOperationScopeCurrent,
+  invalidateCodexOperationScope,
+  type CodexOperationScope,
+} from "./codexOperationScope";
 import { MutationNotStartedError } from "./MutationNotStartedError";
+import {
+  beginExecution,
+  executionIntentId,
+  executionScope,
+  executionSelection,
+  updateExecution,
+} from "@session/features/workspace-execution/state";
+import { runLocalEnvironment } from "@session/features/workspace-execution/api";
+import { isExplicitRequestRejection } from "./apiAdapt/shared";
+import {
+  captureNativeExecutionScope,
+  currentNativeExecutionTiming,
+  recordNativeExecutionTiming,
+  isNativeExecutionScopeCurrent,
+} from "./nativeTurnExecutionProof";
+import { usePairingStore } from "../stores/usePairingStore";
 import { createThreadGoalState } from "./threadGoalState";
 import {
   createGoalCompletionAutoClear,
@@ -33,6 +60,7 @@ import {
   isCodexTranscriptDormant,
   needsCodexTranscriptRestore,
   acknowledgeCodexTranscriptRestore,
+  isCodexTranscriptVisible,
 } from "./codexTranscriptActivity";
 import {
   withoutToolTranscriptEvents,
@@ -66,7 +94,12 @@ import {
   deliveredClientIds,
 } from "@session/stores/useCodexDeliveryStore";
 import { revealNewQuestion } from "@session/features/async-questions/arrival";
-import { enqueueSessionRead, readWithDeadline } from "./sessionReadQueue";
+import {
+  enqueueSessionRead,
+  promoteSessionRead,
+  readWithDeadline,
+  type SessionReadPriority,
+} from "./sessionReadQueue";
 import { mergeHistoryPage } from "./sessionHistoryPages";
 import {
   setSessionChecking,
@@ -87,36 +120,42 @@ import {
 } from "@session/stores/useThreadModelStore";
 import {
   threadStart as apiThreadStart,
-  gitCreateWorktree,
   listThreads,
-  skillList,
-  threadCompactStart,
   threadFork,
   threadGoalClear,
   threadGoalGet,
   threadGoalSet,
   threadRead,
+  threadMetadata,
   threadRollback,
   turnInterrupt,
   turnStart,
   turnSteer,
-} from "./apiAdapt";
+} from "./apiAdapt/codex";
+import { gitCreateWorktree } from "./apiAdapt/git";
+import { skillList } from "./apiAdapt/skills";
+import { threadCompactStart } from "./apiAdapt/threadOps";
 
-const unknownGoalMutations: Set<string> = import.meta.hot?.data?.unknownGoalMutations ?? new Set();
-const goalState = createThreadGoalState({
-  read: (threadId, options) =>
-    threadGoalGet({ threadId }, { ...options, suppressToast: true }),
-  set: (params, options) => threadGoalSet(params, options),
-  clear: (params, options) => threadGoalClear(params, options),
-  clearCompleted: (params, options) => threadGoalClearCompleted(params, options),
-  current: (threadId) => useCodexStore.getState().goalMap[threadId],
-  apply: (threadId, goal) => {
-    if (goal) useCodexStore.getState().setGoal(threadId, goal);
-    else useCodexStore.getState().clearGoal(threadId);
-    if (goal?.status === "complete")
-      queueMicrotask(() => void notifyGoalCompletionAutoClear(threadId));
+const unknownGoalMutations: Set<string> =
+  import.meta.hot?.data?.unknownGoalMutations ?? new Set();
+const goalState = createThreadGoalState(
+  {
+    read: (threadId, options) =>
+      threadGoalGet({ threadId }, { ...options, suppressToast: true }),
+    set: (params, options) => threadGoalSet(params, options),
+    clear: (params, options) => threadGoalClear(params, options),
+    clearCompleted: (params, options) =>
+      threadGoalClearCompleted(params, options),
+    current: (threadId) => useCodexStore.getState().goalMap[threadId],
+    apply: (threadId, goal) => {
+      if (goal) useCodexStore.getState().setGoal(threadId, goal);
+      else useCodexStore.getState().clearGoal(threadId);
+      if (goal?.status === "complete")
+        queueMicrotask(() => void notifyGoalCompletionAutoClear(threadId));
+    },
   },
-}, unknownGoalMutations);
+  unknownGoalMutations,
+);
 
 const resolveThreadCwd = (threadId: string): string | null => {
   const { threads } = useCodexStore.getState();
@@ -126,16 +165,6 @@ const resolveThreadCwd = (threadId: string): string | null => {
   }
   const cwd = item.cwd?.trim();
   return cwd ? cwd : null;
-};
-
-const generateWorktreeKey = (): string => {
-  if (
-    typeof crypto !== "undefined" &&
-    typeof crypto.randomUUID === "function"
-  ) {
-    return `thread-${crypto.randomUUID()}`;
-  }
-  return `thread-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 };
 
 /** Build the agents config fragment to inject into thread config params. */
@@ -309,6 +338,7 @@ const pendingThreadRollbacks = new Map<
   { boundary: string; promise: Promise<Thread> }
 >();
 let runtimeEpoch = 0;
+let historyReadSerial = 0;
 function invalidateThreadSettingsScope() {
   invalidateCodexOperationScope();
   setThreadModelRuntimeScope(String(captureCodexOperationScope().revision));
@@ -316,53 +346,101 @@ function invalidateThreadSettingsScope() {
 /** Capture a new chat's destination and configuration before local async preparation. */
 function captureThreadStart() {
   const {
-    model, modelProvider, approvalPolicy, approvalsReviewer, sandbox,
-    reasoningEffort, serviceTier, collaborationMode, webSearchRequest,
+    model,
+    modelProvider,
+    approvalPolicy,
+    approvalsReviewer,
+    sandbox,
+    permissions,
+    reasoningEffort,
+    serviceTier,
+    collaborationMode,
+    webSearchRequest,
     threadCwdMode,
   } = useConfigStore.getState();
   return {
+    executionIntent: executionIntentId(),
+    executionScope: executionScope(),
+    executionSelection: structuredClone(
+      executionSelection(useWorkspaceStore.getState().cwd),
+    ),
     epoch: runtimeEpoch,
     scope: captureCodexOperationScope(),
     cwd: useWorkspaceStore.getState().cwd,
     config: structuredClone({
-      model, modelProvider, approvalPolicy, approvalsReviewer, sandbox,
-      reasoningEffort, serviceTier, collaborationMode, webSearchRequest,
+      model,
+      modelProvider,
+      approvalPolicy,
+      approvalsReviewer,
+      sandbox,
+      permissions,
+      reasoningEffort,
+      serviceTier,
+      collaborationMode,
+      webSearchRequest,
       threadCwdMode,
     }),
     agentsConfig: structuredClone(buildAgentsConfigFragment()),
   };
 }
-let goalCompletionRuntimeEpoch: number = import.meta.hot?.data?.goalCompletionRuntimeEpoch ?? 0;
-const goalCompletionAttempts: Map<string, number> = import.meta.hot?.data?.goalCompletionAttempts ?? new Map();
-let goalCompletionAuthorityKnown: boolean = import.meta.hot?.data?.goalCompletionAuthorityKnown ?? useCodexStore.getState().hasAccount !== null;
-const goalCompletionAutoClear = createGoalCompletionAutoClear({
-  current: threadId => useCodexStore.getState().goalMap[threadId],
-  scope: () => {
-    const state = useCodexStore.getState();
-    return JSON.stringify([goalCompletionRuntimeEpoch, state.accountNamespace, state.hasAccount, state.account?.type]);
+let goalCompletionRuntimeEpoch: number =
+  import.meta.hot?.data?.goalCompletionRuntimeEpoch ?? 0;
+const goalCompletionAttempts: Map<string, number> =
+  import.meta.hot?.data?.goalCompletionAttempts ?? new Map();
+let goalCompletionAuthorityKnown: boolean =
+  import.meta.hot?.data?.goalCompletionAuthorityKnown ??
+  useCodexStore.getState().hasAccount !== null;
+const goalCompletionAutoClear = createGoalCompletionAutoClear(
+  {
+    current: (threadId) => useCodexStore.getState().goalMap[threadId],
+    scope: () => {
+      const state = useCodexStore.getState();
+      return JSON.stringify([
+        goalCompletionRuntimeEpoch,
+        state.accountNamespace,
+        state.hasAccount,
+        state.account?.type,
+      ]);
+    },
+    canAttempt: (threadId) => {
+      const state = useCodexStore.getState();
+      const status =
+        state.threadStatusMap[threadId] ??
+        state.threads.find((thread) => thread.id === threadId)?.status;
+      return (
+        goalCompletionAuthorityKnown &&
+        status?.type === "idle" &&
+        !codexRuntimeState(state, threadId).running &&
+        !goalState.isMutating(threadId) &&
+        !goalState.isOutcomeUnknown(threadId)
+      );
+    },
+    // Read the raw ownership response so a missing/invalid generation cannot be
+    // normalized to an apparently authoritative zero by a UI status adapter.
+    access: (threadId, signal) =>
+      readWithDeadline(
+        (accessSignal) => threadAccess(threadId, false, accessSignal),
+        4000,
+        signal,
+      ),
+    clear: (params) => goalState.clearCompleted(params),
   },
-  canAttempt: threadId => {
-    const state = useCodexStore.getState();
-    const status = state.threadStatusMap[threadId] ?? state.threads.find(thread => thread.id === threadId)?.status;
-    return goalCompletionAuthorityKnown && status?.type === "idle" && !codexRuntimeState(state, threadId).running && !goalState.isMutating(threadId) && !goalState.isOutcomeUnknown(threadId);
-  },
-  // Read the raw ownership response so a missing/invalid generation cannot be
-  // normalized to an apparently authoritative zero by a UI status adapter.
-  access: (threadId, signal) => readWithDeadline(
-    accessSignal => threadAccess(threadId, false, accessSignal), 4000, signal,
-  ),
-  clear: params => goalState.clearCompleted(params),
-}, goalCompletionAttempts);
+  goalCompletionAttempts,
+);
 
 function resetThreadGoalScope(clearViews = true) {
   goalState.reset();
   goalCompletionAutoClear.reset();
   clearGoalAnnouncements();
   if (clearViews)
-    useCodexStore.setState(state => ({ goalMap: {}, completedGoalMap: {}, goalScopeVersion: state.goalScopeVersion + 1 }));
+    useCodexStore.setState((state) => ({
+      goalMap: {},
+      completedGoalMap: {},
+      goalScopeVersion: state.goalScopeVersion + 1,
+    }));
 }
 const stopGoalCompletionAutoClear = installGoalCompletionAutoClear({
-  observe: threadId => goalCompletionAutoClear.observe(threadId),
+  observe: (threadId) => goalCompletionAutoClear.observe(threadId),
   reset: () => {
     // A same-valued notification revokes pending authority, but says nothing
     // about whether the last read-only goal belongs to a different account.
@@ -375,43 +453,93 @@ const stopGoalCompletionAutoClear = installGoalCompletionAutoClear({
   confirm: () => {
     goalCompletionAuthorityKnown = useCodexStore.getState().hasAccount !== null;
     if (goalCompletionAuthorityKnown)
-      useCodexStore.setState(state => ({ goalScopeVersion: state.goalScopeVersion + 1 }));
+      useCodexStore.setState((state) => ({
+        goalScopeVersion: state.goalScopeVersion + 1,
+      }));
   },
 });
 const stopGoalAccountScope = useCodexStore.subscribe((state, previous) => {
-  if (state.accountNamespace !== previous.accountNamespace ||
-      state.hasAccount !== previous.hasAccount || state.account?.type !== previous.account?.type) {
+  if (
+    state.accountNamespace !== previous.accountNamespace ||
+    state.hasAccount !== previous.hasAccount ||
+    state.account?.type !== previous.account?.type
+  ) {
     goalCompletionAuthorityKnown = state.hasAccount !== null;
     invalidateThreadSettingsScope();
     resetThreadGoalScope();
   }
 });
-if (import.meta.hot) import.meta.hot.dispose(data => {
-  invalidateCodexOperationScope();
-  data.goalCompletionRuntimeEpoch = goalCompletionRuntimeEpoch;
-  data.goalCompletionAttempts = goalCompletionAttempts;
-  data.goalCompletionAuthorityKnown = goalCompletionAuthorityKnown;
-  data.unknownGoalMutations = unknownGoalMutations;
-  stopGoalCompletionAutoClear();
-  stopGoalAccountScope();
-  goalCompletionAutoClear.cancel();
-  goalState.cancel();
-});
-const pendingThreadResumes = new Map<string, { promise: Promise<void>; scope: CodexOperationScope }>();
+if (import.meta.hot)
+  import.meta.hot.dispose((data) => {
+    invalidateCodexOperationScope();
+    data.goalCompletionRuntimeEpoch = goalCompletionRuntimeEpoch;
+    data.goalCompletionAttempts = goalCompletionAttempts;
+    data.goalCompletionAuthorityKnown = goalCompletionAuthorityKnown;
+    data.unknownGoalMutations = unknownGoalMutations;
+    stopGoalCompletionAutoClear();
+    stopGoalAccountScope();
+    goalCompletionAutoClear.cancel();
+    goalState.cancel();
+  });
+const pendingThreadResumes = new Map<
+  string,
+  {
+    promise: Promise<void>;
+    scope: CodexOperationScope;
+    isSourceCurrent: () => boolean;
+    identity: string;
+    promote: () => void;
+    consume: (signal?: AbortSignal) => Promise<void>;
+  }
+>();
+
 // The shared promise always reports a discarded snapshot. Each consumer wraps
 // it separately: UI navigation keeps its silent-cancellation contract, while
 // the followed-history scheduler must not count cancellation as a completed read.
-async function consumeHistoryRead(promise: Promise<void>, reportScopeChanges = false) {
+async function consumeHistoryRead(
+  promise: Promise<void>,
+  reportScopeChanges = false,
+) {
   try {
     await promise;
   } catch (error) {
-    if (!reportScopeChanges && error instanceof HistoryReadScopeChangedError) return;
+    if (!reportScopeChanges && error instanceof HistoryReadScopeChangedError)
+      return;
     throw error;
   }
 }
 const resumeVersions = new Map<string, symbol>();
+const earlierReadVersions = new Map<string, symbol>();
 const historyControllers = new Map<string, AbortController>();
-const metadataReads = new Map<string, CodexOperationScope>();
+
+/** A bounded read's source is fixed even before the new account probe returns. */
+function captureCodexReadSource() {
+  const scope = captureNativeExecutionScope();
+  const controller = new AbortController();
+  let revoked = false;
+  let unsubscribe: (() => void) | undefined;
+  const isCurrent = () => !revoked && isNativeExecutionScopeCurrent(scope);
+  const release = () => {
+    unsubscribe?.();
+    unsubscribe = undefined;
+  };
+  const cancel = () => {
+    revoked = true;
+    release();
+    controller.abort(new HistoryReadScopeChangedError());
+  };
+  unsubscribe = usePairingStore.subscribe(() => {
+    // Latch A -> B -> A, rather than accepting the old response at A again.
+    if (!isCurrent()) cancel();
+  });
+  return { scope, controller, isCurrent, cancel, release };
+}
+const metadataReads = new Map<
+  string,
+  ReturnType<typeof captureCodexReadSource>
+>();
+let metadataReadSerial = 0;
+let latestThreadListRead: ReturnType<typeof captureCodexReadSource> | undefined;
 
 export function cancelCodexHistoryRead(threadId: string) {
   resumeVersions.delete(threadId);
@@ -436,23 +564,35 @@ export function cancelCodexHistoryRead(threadId: string) {
 }
 
 function readInitialThreadMetadata(threadId: string) {
-  const existingScope = metadataReads.get(threadId);
-  if (getThreadModelSettings(threadId).model || (existingScope && isCodexOperationScopeCurrent(existingScope)))
-    return;
-  const scope = captureCodexOperationScope();
-  metadataReads.set(threadId, scope);
+  const existing = metadataReads.get(threadId);
+  if (getThreadModelSettings(threadId).model || existing?.isCurrent()) return;
+  existing?.cancel();
+  const read = captureCodexReadSource();
+  metadataReads.set(threadId, read);
   const epoch = runtimeEpoch,
     readToken = captureThreadModelRead(threadId);
-  // The runtime's metadata read currently includes full turns. Read it once in
-  // the separate history lane; it must never delay recent messages or show a loader.
-  void enqueueSessionRead("history", `metadata:${epoch}:${scope.revision}:${threadId}`, () =>
-    readWithDeadline(
-      (signal) => threadRead({ threadId }, { signal, suppressToast: true }),
-      15000,
-    ),
+  const isCurrent = () =>
+    runtimeEpoch === epoch &&
+    metadataReads.get(threadId) === read &&
+    read.isCurrent();
+  // The bounded metadata endpoint never includes history or attaches a writer.
+  // Do not append a second full transcript to every recent-page warm read.
+  void enqueueSessionRead(
+    "history",
+    `metadata:${epoch}:${read.scope.operation.revision}:${++metadataReadSerial}:${threadId}`,
+    () => {
+      // A queued A demand must not issue its transport after switching to B.
+      if (!isCurrent()) throw new HistoryReadScopeChangedError();
+      return readWithDeadline(
+        (signal) => threadMetadata(threadId, { signal, suppressToast: true }),
+        15000,
+        read.controller.signal,
+      );
+    },
+    read.controller.signal,
   )
     .then((response) => {
-      if (runtimeEpoch !== epoch || !isCodexOperationScopeCurrent(scope)) return;
+      if (!isCurrent()) return;
       const settings = response.thread as Thread & {
         model?: string;
         reasoningEffort?: ReturnType<
@@ -463,6 +603,7 @@ function readInitialThreadMetadata(threadId: string) {
         readToken,
       });
       useCodexStore.setState((s) => {
+        if (!isCurrent()) return s;
         const existing = s.threads.find((t) => t.id === threadId);
         if (!existing) return s;
         const merged = {
@@ -483,8 +624,9 @@ function readInitialThreadMetadata(threadId: string) {
       });
     })
     .catch(() => {
-      if (metadataReads.get(threadId) === scope) metadataReads.delete(threadId);
-    });
+      if (metadataReads.get(threadId) === read) metadataReads.delete(threadId);
+    })
+    .finally(read.release);
 }
 /** Invalidate responses from the previous runtime without touching drafts or history. */
 export function resetCodexRuntimeState() {
@@ -495,9 +637,13 @@ export function resetCodexRuntimeState() {
   resetThreadGoalScope(false);
   pendingThreadResumes.clear();
   resumeVersions.clear();
+  earlierReadVersions.clear();
   for (const controller of historyControllers.values()) controller.abort();
   historyControllers.clear();
+  for (const read of metadataReads.values()) read.cancel();
   metadataReads.clear();
+  latestThreadListRead?.cancel();
+  latestThreadListRead = undefined;
   useSessionSyncStore.setState({
     checking: {},
     recovering: {},
@@ -524,12 +670,24 @@ export function resetCodexRuntimeState() {
 }
 
 export const codexService = {
+  /** A newly visible pane promotes its existing read without adding a consumer. */
+  promoteThreadHistoryRead(threadId: string) {
+    const pending = pendingThreadResumes.get(threadId);
+    if (pending && pending.isSourceCurrent()) pending.promote();
+  },
   async loadThreads(
     cwd: string | null,
     archived: boolean = false,
     sortKey: "created_at" | "updated_at" = "updated_at",
   ) {
     const epoch = runtimeEpoch;
+    latestThreadListRead?.cancel();
+    const read = captureCodexReadSource();
+    latestThreadListRead = read;
+    const isCurrent = () =>
+      epoch === runtimeEpoch &&
+      latestThreadListRead === read &&
+      read.isCurrent();
     try {
       const params: ThreadListParams = {
         cursor: null,
@@ -540,78 +698,60 @@ export const codexService = {
         cwd,
         useStateDbOnly: true,
       };
-      const response = await listThreads(params);
-      if (epoch !== runtimeEpoch) return;
+      const response = await readWithDeadline(
+        (signal) => {
+          if (!isCurrent()) throw new HistoryReadScopeChangedError();
+          return listThreads(params, { signal });
+        },
+        15000,
+        read.controller.signal,
+      );
+      if (!isCurrent()) return;
       const workingDirThreads = response.data;
       const nextCursor = response.nextCursor ?? null;
       const { setThreads, setThreadListNextCursor } = useCodexStore.getState();
       setThreads(workingDirThreads);
-      setThreadListNextCursor(nextCursor);
+      if (isCurrent()) setThreadListNextCursor(nextCursor);
     } catch (error: unknown) {
-      if (epoch !== runtimeEpoch) return;
+      if (!isCurrent()) return;
       console.error("[CodexService] Failed to load threads:", error);
       useCodexStore.getState().setThreadListNextCursor(null);
-      useCodexStore.getState().setThreads([]);
+      if (isCurrent()) useCodexStore.getState().setThreads([]);
+    } finally {
+      read.release();
+      if (latestThreadListRead === read) latestThreadListRead = undefined;
     }
   },
   async setCurrentThread(threadId: string | null) {
     // Cached histories switch immediately. Missing histories load read-only;
     // only execution operations acquire a native thread instance.
-    const set = useCodexStore.setState;
     try {
-      if (!threadId) {
-        set((state) => ({
-          currentThreadId: null,
-          currentTurnId: null,
-          inputFocusTrigger: state.inputFocusTrigger + 1,
-        }));
-        return;
-      }
-
-      const state = useCodexStore.getState();
-
-      if (state.historyLoadedMap[threadId]) {
-        // Live thread — derive the active turn id from streaming events so the
-        // Stop button works correctly when a turn is in progress.
-        const threadEvents = state.events[threadId] ?? [];
-        let activeTurnId: string | null = null;
-        for (let i = threadEvents.length - 1; i >= 0; i--) {
-          const e = threadEvents[i];
-          if (e.method === "turn/started") {
-            activeTurnId = (e.params as { turn: { id: string } }).turn.id;
-            break;
-          }
-          if (e.method === "turn/completed" || e.method === "error") {
-            break;
-          }
-        }
-        set((state) => ({
-          currentThreadId: threadId,
-          currentTurnId: activeTurnId,
-          inputFocusTrigger: state.inputFocusTrigger + 1,
-        }));
-        if (!state.activeThreadIds.includes(threadId)) {
-          // A passive cached transcript is already usable. Verification must
-          // stay read-only and must not delay navigation or acquire a writer.
+      const { cached, active } = selectCodexInputTarget(threadId);
+      if (!threadId) return;
+      if (cached) {
+        if (!active) {
+          // A passive cached transcript stays immediately usable while its
+          // exact owner is verified through the existing read-only channel.
           void codexService
             .loadThreadHistory(threadId, undefined, {
               recent: true,
               background: true,
             })
-            .catch(() => {}); // The owning history store retains the retryable error.
+            .catch(() => {});
         }
-      } else {
-        // Uncached — select the view and read history without acquiring execution.
-        set((state) => ({
-          currentThreadId: threadId,
-          currentTurnId: null,
-          inputFocusTrigger: state.inputFocusTrigger + 1,
-        }));
+      } else
         await codexService.loadThreadHistory(threadId, undefined, {
           recent: true,
         });
-      }
     } catch (error: unknown) {
+      if (
+        error instanceof HistoryReadScopeChangedError ||
+        (error !== null &&
+          typeof error === "object" &&
+          "name" in error &&
+          error.name === "AbortError")
+      )
+        return;
       console.error("[CodexService] setCurrentThread error:", error);
       throw error;
     }
@@ -624,15 +764,24 @@ export const codexService = {
     const set = useCodexStore.setState;
     const captured = options?.captured ?? captureThreadStart();
     const epoch = captured.epoch;
+    let executionStarted = false;
+    let executionPhase: "preparing" | "worktree" | "setup" | "native" =
+      "preparing";
     try {
-      if (epoch !== runtimeEpoch || !isCodexOperationScopeCurrent(captured.scope))
-        throw new Error("连接目标已切换，尚未创建会话；草稿已保留，请核对原连接后重试。");
+      if (
+        epoch !== runtimeEpoch ||
+        !isCodexOperationScopeCurrent(captured.scope)
+      )
+        throw new Error(
+          "连接目标已切换，尚未创建会话；草稿已保留，请核对原连接后重试。",
+        );
       const {
         model,
         modelProvider,
         approvalPolicy,
         approvalsReviewer,
         sandbox,
+        permissions,
         reasoningEffort,
         serviceTier,
         collaborationMode,
@@ -640,30 +789,97 @@ export const codexService = {
         threadCwdMode,
       } = captured.config;
       const { cwd } = captured;
+      if (!cwd) throw new MutationNotStartedError("请先选择项目目录。");
+      const executionContext = await readExecutionContext();
+      if (
+        epoch !== runtimeEpoch ||
+        !isCodexOperationScopeCurrent(captured.scope)
+      )
+        throw new MutationNotStartedError("连接或账号已变化，尚未创建会话。");
+      beginExecution({
+        id: captured.executionIntent,
+        scope: executionContext.domain,
+        root: cwd,
+        kind: "start",
+        preparation: {
+          mode: threadCwdMode,
+          environmentId: captured.executionSelection.environmentId,
+          environmentVersion: captured.executionSelection.environmentVersion,
+        },
+      });
+      executionStarted = true;
       let threadCwd = cwd;
       if (threadCwdMode === "worktree" && cwd) {
+        executionPhase = "worktree";
+        updateExecution(captured.executionIntent, { phase: "worktree" });
         const prepared = await readWithDeadline(async (signal) => {
-          const result = await gitCreateWorktree(cwd, generateWorktreeKey(), {
-            signal,
-          });
+          const result = await gitCreateWorktree(
+            cwd,
+            captured.executionIntent,
+            {
+              signal,
+              ...(captured.executionSelection.baseBranch
+                ? { baseBranch: captured.executionSelection.baseBranch }
+                : {}),
+            },
+          );
           if (signal.aborted) throw signal.reason;
           return result;
         }, 60_000);
-        if (epoch !== runtimeEpoch || !isCodexOperationScopeCurrent(captured.scope)) {
+        if (
+          epoch !== runtimeEpoch ||
+          !isCodexOperationScopeCurrent(captured.scope)
+        ) {
           throw new Error(
             "连接目标已切换，创建结果未确认，请先核对原连接的会话列表及工作区状态。",
           );
         }
         threadCwd = prepared.worktree_path;
+        updateExecution(captured.executionIntent, { cwd: threadCwd });
       }
+      if (captured.executionSelection.environmentId) {
+        if (!captured.executionSelection.runSetup)
+          throw new MutationNotStartedError("请先在工作环境中确认设置命令。");
+        executionPhase = "setup";
+        updateExecution(captured.executionIntent, {
+          phase: "setup",
+          cwd: threadCwd,
+        });
+        const setup = await readWithDeadline(
+          (signal) =>
+            runLocalEnvironment(
+              cwd,
+              {
+                cwd: threadCwd,
+                id: captured.executionSelection.environmentId,
+                version: captured.executionSelection.environmentVersion,
+                intentId: captured.executionIntent,
+                confirmed: true,
+              },
+              signal,
+            ),
+          65_000,
+        );
+        if (setup.status !== "completed")
+          throw new Error(
+            `环境设置${setup.status === "unknown" ? "结果未知" : "失败"}，请核对工作目录；不会自动重复执行。`,
+          );
+      }
+      if (
+        epoch !== runtimeEpoch ||
+        !isCodexOperationScopeCurrent(captured.scope)
+      )
+        throw new MutationNotStartedError(
+          "连接或账号已变化，已准备的目录保留，请先核对原连接。",
+        );
       const params: ThreadStartParams = {
         model: model || null,
         modelProvider,
         serviceTier,
         cwd: threadCwd,
-        approvalPolicy,
-        approvalsReviewer,
-        sandbox,
+        ...(permissions
+          ? { permissions }
+          : { approvalPolicy, approvalsReviewer, sandbox }),
         baseInstructions: null,
         developerInstructions: null,
         config: {
@@ -679,18 +895,45 @@ export const codexService = {
           ...captured.agentsConfig,
         },
       };
+      await verifyExecutionContext(executionContext);
+      executionPhase = "native";
+      updateExecution(captured.executionIntent, {
+        phase: "native",
+        cwd: threadCwd,
+      });
       const response = await readWithDeadline(async (signal) => {
-        const result = await apiThreadStart(params, { signal });
+        const result = await apiThreadStart(params, {
+          signal,
+          expectedScope: executionContext.scopeToken,
+        });
         // A late response cannot activate a thread or hydrate its model settings.
         if (signal.aborted) throw signal.reason;
         return result;
       }, 30_000);
-      if (epoch !== runtimeEpoch || !isCodexOperationScopeCurrent(captured.scope)) {
+      if (
+        epoch !== runtimeEpoch ||
+        !isCodexOperationScopeCurrent(captured.scope)
+      ) {
         throw new Error(
           "连接目标已切换，创建结果未确认，请先核对原连接的会话列表及工作区状态。",
         );
       }
       const thread = response.thread;
+      if (thread.cwd.replace(/\/$/, "") !== threadCwd.replace(/\/$/, "")) {
+        updateExecution(captured.executionIntent, {
+          phase: "unknown",
+          threadId: thread.id,
+          error: "原生工作目录不匹配",
+        });
+        throw new Error(
+          `已创建会话 ${thread.id} 的工作目录不匹配，请核对；不会登记或重复创建。`,
+        );
+      }
+      updateExecution(captured.executionIntent, {
+        phase: "completed",
+        cwd: thread.cwd,
+        threadId: thread.id,
+      });
       hydrateThreadModel(
         thread.id,
         nativeThreadSettings(response, {
@@ -701,6 +944,7 @@ export const codexService = {
           approvalPolicy,
           approvalsReviewer,
           sandbox,
+          permissions,
           webSearchRequest,
           collaborationMode,
         }),
@@ -715,6 +959,20 @@ export const codexService = {
       console.log("[CodexService] threadStart completed successfully");
       return thread;
     } catch (error: unknown) {
+      if (executionStarted)
+        updateExecution(captured.executionIntent, {
+          phase:
+            error instanceof MutationNotStartedError ||
+            isExplicitRequestRejection(error)
+              ? "failed"
+              : executionPhase === "preparing"
+                ? "failed"
+                : "unknown",
+          error:
+            error instanceof Error
+              ? error.message.slice(0, 1000)
+              : String(error).slice(0, 1000),
+        });
       console.error("[CodexService] threadStart error:", error);
       if (error instanceof DOMException && error.name === "TimeoutError") {
         throw new Error(
@@ -738,6 +996,7 @@ export const codexService = {
     options?: {
       background?: boolean;
       recent?: boolean;
+      priority?: SessionReadPriority;
       signal?: AbortSignal;
       cursor?: string;
       /** Seeking a search hit must not move the contiguous older-history boundary. */
@@ -747,22 +1006,60 @@ export const codexService = {
       reportScopeChanges?: boolean;
     },
   ) {
+    if (options?.signal?.aborted) throw options.signal.reason;
     const scope = captureCodexOperationScope();
+    const nativeScope = captureNativeExecutionScope();
+    let sourceRevoked = false;
+    const isReadSourceCurrent = () =>
+      !sourceRevoked && isNativeExecutionScopeCurrent(nativeScope);
     // Recovery follows existing event-driven history reads; it never adds a
     // transcript poll or acquires a native execution instance.
     if (!options?.cursor) void goalState.read(threadId).catch(() => undefined);
-    const precedingRead = !overrides
-      ? pendingThreadResumes.get(threadId)
-      : undefined;
-    if (precedingRead && isCodexOperationScopeCurrent(precedingRead.scope)) {
-      if (!options?.cursor && !options?.afterTurnId)
-        return consumeHistoryRead(precedingRead.promise, options?.reportScopeChanges);
-      // An opaque cursor or a recovery anchor is a different page. Let the
+    const restoringEvicted = needsCodexTranscriptRestore(threadId);
+    const latestTurnId =
+      useCodexStore.getState().turnTimingMap[threadId]?.turnId;
+    const readParams = {
+      threadId,
+      ...(options?.recent
+        ? {
+            recent: true,
+            ...(options.cursor
+              ? { cursor: options.cursor }
+              : options.afterTurnId
+                ? { afterTurnId: options.afterTurnId }
+                : !restoringEvicted && latestTurnId
+                  ? { afterTurnId: latestTurnId }
+                  : {}),
+          }
+        : {}),
+    };
+    const readIdentity = JSON.stringify({
+      params: readParams,
+      preserveEarlierCursor: !!options?.preserveEarlierCursor,
+    });
+    while (!overrides) {
+      const precedingRead = pendingThreadResumes.get(threadId);
+      if (!precedingRead || !precedingRead.isSourceCurrent()) break;
+      if (
+        options?.priority === "interactive" ||
+        !options?.background ||
+        useCodexStore.getState().currentThreadId === threadId
+      )
+        precedingRead.promote();
+      if (precedingRead.identity === readIdentity)
+        return consumeHistoryRead(
+          precedingRead.consume(options?.signal),
+          options?.reportScopeChanges,
+        );
+      // Projection, cursor and recovery anchor define a different page. Let the
       // bounded current read settle, then request that page rather than
       // reusing its response, which would silently drop the paging request.
-      await precedingRead.promise.catch(() => undefined);
-      if (!isCodexOperationScopeCurrent(scope)) {
-        if (options?.reportScopeChanges) throw new HistoryReadScopeChangedError();
+      // Recheck after waiting: another consumer may have admitted that same
+      // page in the meantime, and must be shared rather than duplicated.
+      await precedingRead.consume(options?.signal).catch(() => undefined);
+      if (!isReadSourceCurrent()) {
+        if (options?.reportScopeChanges)
+          throw new HistoryReadScopeChangedError();
         return;
       }
       if (options?.signal?.aborted)
@@ -773,11 +1070,27 @@ export const codexService = {
     const version = Symbol(threadId);
     resumeVersions.set(threadId, version);
     const controller = new AbortController();
+    const stopSourceWatch = usePairingStore.subscribe(() => {
+      if (isReadSourceCurrent()) return;
+      sourceRevoked = true;
+      controller.abort(new HistoryReadScopeChangedError());
+    });
     historyControllers.set(threadId, controller);
-    const cancel = () => controller.abort(options?.signal?.reason);
-    if (options?.signal?.aborted) cancel();
-    else options?.signal?.addEventListener("abort", cancel, { once: true });
-    const restoringEvicted = needsCodexTranscriptRestore(threadId);
+    const lane = options?.recent ? "recent" : "history";
+    // Logical consumers share via pendingThreadResumes only while their full
+    // source lifetime matches. A new transport identity never joins an old
+    // queue entry, and credentials never enter the queue key or disk journals.
+    const readKey = `${runtimeEpoch}:${scope.revision}:${++historyReadSerial}:${readIdentity}`;
+    let priority: SessionReadPriority =
+      options?.priority ??
+      (options?.background &&
+      useCodexStore.getState().currentThreadId !== threadId
+        ? "background"
+        : "interactive");
+    const promote = () => {
+      priority = "interactive";
+      promoteSessionRead(lane, readKey);
+    };
     const cached =
       !restoringEvicted &&
       Boolean(useCodexStore.getState().historyLoadedMap[threadId]);
@@ -798,51 +1111,38 @@ export const codexService = {
     );
     setSessionChecking(threadId, true);
     const pending = (async () => {
+      if (!isReadSourceCurrent()) throw new HistoryReadScopeChangedError();
       const baseline = useCodexStore.getState();
       const modelReadToken = captureThreadModelRead(threadId);
       const response = await enqueueSessionRead(
-        options?.recent ? "recent" : "history",
-        `${runtimeEpoch}:${scope.revision}:${threadId}`,
-        () =>
-          readWithDeadline(
+        lane,
+        readKey,
+        () => {
+          if (!isReadSourceCurrent()) throw new HistoryReadScopeChangedError();
+          return readWithDeadline(
             (signal) =>
-              threadRead(
-                {
-                  threadId,
-                  ...(options?.recent
-                    ? {
-                        recent: true,
-                        ...(options.cursor
-                          ? { cursor: options.cursor }
-                          : options.afterTurnId
-                            ? { afterTurnId: options.afterTurnId }
-                            : !restoringEvicted &&
-                                baseline.turnTimingMap[threadId]?.turnId
-                              ? {
-                                  afterTurnId:
-                                    baseline.turnTimingMap[threadId].turnId,
-                                }
-                              : {}),
-                      }
-                    : {}),
-                },
-                { suppressToast: options?.background, signal },
-              ),
+              threadRead(readParams, {
+                suppressToast: options?.background,
+                signal,
+                readPriority: priority,
+              }),
             // Recent pages use the serialized independent reader: its existing
             // 120s queue/read deadline plus up to 4s owned-process cleanup.
             // A 5s client cutoff abandoned valid pages and fed retry congestion.
             options?.recent ? 125_000 : 15_000,
             controller.signal,
-          ),
+          );
+        },
         controller.signal,
+        priority,
       );
-      if (!isCodexOperationScopeCurrent(scope)) throw new HistoryReadScopeChangedError();
+      if (!isReadSourceCurrent()) throw new HistoryReadScopeChangedError();
       if (resumeVersions.get(threadId) !== version) return;
       const page = "historyPage" in response ? response.historyPage : undefined;
       const existingThread = useCodexStore
         .getState()
         .threads.find((t) => t.id === threadId);
-      const thread = {
+      let thread = {
         ...(existingThread ?? {
           preview: "",
           cwd: "",
@@ -854,6 +1154,49 @@ export const codexService = {
         }),
         ...response.thread,
       } as Thread;
+      // An independent history reader can infer interruption when it cannot
+      // observe the execution connection. Preserve exact current native turn
+      // facts in the projection as well as controls; otherwise refresh briefly
+      // renders a false red interruption before metadata repairs it. A genuine
+      // idle execution snapshot still admits a real interruption. An already
+      // completed/failed exact turn cannot later become interrupted merely by
+      // attaching a reader to its persisted history.
+      const execution = useCodexStore.getState();
+      const knownTiming = currentNativeExecutionTiming(
+        threadId,
+        execution.turnTimingMap[threadId],
+      );
+      const preserveOutcome =
+        knownTiming &&
+        (knownTiming.status === "completed" ||
+          knownTiming.status === "failed" ||
+          (knownTiming.status === "inProgress" &&
+            execution.threadStatusMap[threadId]?.type === "active"));
+      if (
+        page &&
+        !("itemPage" in page && page.itemPage) &&
+        preserveOutcome &&
+        thread.turns.some(
+          (turn) =>
+            turn.id === knownTiming.turnId && turn.status === "interrupted",
+        )
+      )
+        thread = {
+          ...thread,
+          turns: thread.turns.map((turn) =>
+            turn.id === knownTiming.turnId && turn.status === "interrupted"
+              ? {
+                  ...turn,
+                  status: knownTiming.status,
+                  durationMs:
+                    knownTiming.status === "inProgress"
+                      ? null
+                      : knownTiming.durationMs,
+                  completedAt: null,
+                }
+              : turn,
+          ),
+        };
       // Recent native versions expose settings on the read-only Thread object.
       // Missing fields keep the existing per-thread choice; CLI changes hydrate
       // only if the user has not changed their selection during this request.
@@ -991,47 +1334,78 @@ export const codexService = {
           revealNewQuestion(event, beforeEvents);
       cachedTranscriptBaselines.delete(threadId);
       acknowledgeCodexTranscriptRestore(threadId);
-      if (page) readInitialThreadMetadata(threadId);
+      if (
+        page &&
+        (current.currentThreadId === threadId ||
+          isCodexTranscriptVisible(threadId))
+      )
+        readInitialThreadMetadata(threadId);
     })();
-    if (!overrides) pendingThreadResumes.set(threadId, { promise: pending, scope });
-    try {
-      await pending;
-    } catch (error: unknown) {
-      if (!isCodexOperationScopeCurrent(scope)) {
-        if (options?.reportScopeChanges) throw new HistoryReadScopeChangedError();
-        return;
-      }
-      if (resumeVersions.get(threadId) !== version) return;
-      if (resumeVersions.get(threadId) === version)
-        useCodexStore.setState((state) => ({
-          historyErrorMap: {
-            ...state.historyErrorMap,
-            [threadId]: error instanceof Error ? error.message : String(error),
-          },
-        }));
-      console.error("[CodexService] threadResume error:", error);
-      throw error;
-    } finally {
-      options?.signal?.removeEventListener("abort", cancel);
-      if (historyControllers.get(threadId) === controller)
-        historyControllers.delete(threadId);
-      if (resumeVersions.get(threadId) === version) {
-        resumeVersions.delete(threadId);
-        useCodexStore.setState((state) =>
-          state.historyLoadingMap[threadId] === false
-            ? state
-            : {
-                historyLoadingMap: {
-                  ...state.historyLoadingMap,
-                  [threadId]: false,
+    const settled = pending
+      .catch((error: unknown) => {
+        if (!isReadSourceCurrent()) throw new HistoryReadScopeChangedError();
+        if (
+          controller.signal.aborted ||
+          error instanceof HistoryReadScopeChangedError ||
+          (error !== null &&
+            typeof error === "object" &&
+            "name" in error &&
+            error.name === "AbortError")
+        )
+          throw error;
+        if (!isCodexOperationScopeCurrent(scope)) {
+          throw new HistoryReadScopeChangedError();
+        }
+        if (resumeVersions.get(threadId) !== version) return;
+        if (resumeVersions.get(threadId) === version)
+          useCodexStore.setState((state) => ({
+            historyErrorMap: {
+              ...state.historyErrorMap,
+              [threadId]:
+                error instanceof Error ? error.message : String(error),
+            },
+          }));
+        console.error("[CodexService] threadResume error:", error);
+        throw error;
+      })
+      .finally(() => {
+        stopSourceWatch();
+        if (historyControllers.get(threadId) === controller)
+          historyControllers.delete(threadId);
+        if (resumeVersions.get(threadId) === version) {
+          resumeVersions.delete(threadId);
+          useCodexStore.setState((state) =>
+            state.historyLoadingMap[threadId] === false
+              ? state
+              : {
+                  historyLoadingMap: {
+                    ...state.historyLoadingMap,
+                    [threadId]: false,
+                  },
                 },
-              },
-        );
-        setSessionChecking(threadId, false);
-      }
-      if (pendingThreadResumes.get(threadId)?.promise === pending)
+          );
+          setSessionChecking(threadId, false);
+        }
+        if (pendingThreadResumes.get(threadId)?.promise === settled)
+          pendingThreadResumes.delete(threadId);
+      });
+    const consume = historyReadConsumer(settled, controller, () => {
+      if (pendingThreadResumes.get(threadId)?.promise === settled)
         pendingThreadResumes.delete(threadId);
-    }
+    });
+    if (!overrides)
+      pendingThreadResumes.set(threadId, {
+        promise: settled,
+        scope,
+        isSourceCurrent: isReadSourceCurrent,
+        identity: readIdentity,
+        promote,
+        consume,
+      });
+    return consumeHistoryRead(
+      consume(options?.signal),
+      options?.reportScopeChanges,
+    );
   },
   async loadEarlierHistory(threadId: string) {
     const state = useSessionSyncStore.getState();
@@ -1040,16 +1414,20 @@ export const codexService = {
       state.earlierLoading[threadId]
     )
       return;
-    const scope = captureCodexOperationScope();
+    const scope = captureNativeExecutionScope();
+    const version = Symbol(threadId);
+    earlierReadVersions.set(threadId, version);
     useSessionSyncStore.setState((s) => ({
       earlierLoading: { ...s.earlierLoading, [threadId]: true },
       earlierErrors: { ...s.earlierErrors, [threadId]: "" },
     }));
     try {
       const precedingRead = pendingThreadResumes.get(threadId);
-      if (precedingRead && isCodexOperationScopeCurrent(precedingRead.scope))
-        await precedingRead.promise.catch(() => undefined);
-      if (!isCodexOperationScopeCurrent(scope)) return;
+      if (precedingRead && precedingRead.isSourceCurrent()) {
+        precedingRead.promote();
+        await precedingRead.consume().catch(() => undefined);
+      }
+      if (!isNativeExecutionScopeCurrent(scope)) return;
       // A concurrent read can change the recovery anchor or page boundary.
       const latest = useSessionSyncStore.getState();
       const cursor = latest.cursors[threadId];
@@ -1058,6 +1436,7 @@ export const codexService = {
       await codexService.loadThreadHistory(threadId, undefined, {
         background: true,
         recent: true,
+        priority: "interactive",
         ...(trimmedAnchor
           ? { afterTurnId: trimmedAnchor }
           : cursor
@@ -1065,11 +1444,15 @@ export const codexService = {
             : {}),
       });
     } catch (error) {
+      if (earlierReadVersions.get(threadId) !== version) return;
       // A revoked snapshot or a cancelled read is not a paging failure: the
       // latched banner would also disable the upward scroll trigger for good.
       if (
         error instanceof HistoryReadScopeChangedError ||
-        (error instanceof DOMException && error.name === "AbortError")
+        (error !== null &&
+          typeof error === "object" &&
+          "name" in error &&
+          error.name === "AbortError")
       )
         return;
       useSessionSyncStore.setState((s) => ({
@@ -1079,16 +1462,33 @@ export const codexService = {
         },
       }));
     } finally {
-      useSessionSyncStore.setState((s) => ({
-        earlierLoading: { ...s.earlierLoading, [threadId]: false },
-      }));
+      // Runtime reset may already have opened a new page for this thread.
+      if (earlierReadVersions.get(threadId) === version) {
+        earlierReadVersions.delete(threadId);
+        useSessionSyncStore.setState((s) => ({
+          earlierLoading: { ...s.earlierLoading, [threadId]: false },
+        }));
+      }
     }
   },
   async threadFork(
     threadId: string,
-    boundary: { lastTurnId?: string; beforeTurnId?: string } = {},
+    boundary: {
+      lastTurnId?: string;
+      beforeTurnId?: string;
+      cwd?: string;
+      activate?: boolean;
+      expectedScope?: string;
+    } = {},
   ) {
-    const { lastTurnId, beforeTurnId } = boundary;
+    const { lastTurnId, beforeTurnId, cwd } = boundary;
+    if (
+      cwd !== undefined &&
+      (!cwd.startsWith("/") ||
+        /[\\\x00-\x1f]/.test(cwd) ||
+        cwd.split("/").includes(".."))
+    )
+      throw new MutationNotStartedError("无效的分支工作目录。");
     if (
       (lastTurnId !== undefined && beforeTurnId !== undefined) ||
       [lastTurnId, beforeTurnId].some(
@@ -1108,16 +1508,35 @@ export const codexService = {
       );
     const set = useCodexStore.setState;
     const scope = captureCodexOperationScope();
+    const selectedBeforeFork = useCodexStore.getState().currentThreadId;
     try {
       const params: ThreadForkParams = {
         threadId,
+        ...(cwd !== undefined ? { cwd } : {}),
         ...(lastTurnId !== undefined ? { lastTurnId } : {}),
         ...(beforeTurnId !== undefined ? { beforeTurnId } : {}),
         deferGoalContinuation: true,
       };
-      const response = await threadFork(params);
+      const native = await readExecutionContext();
+      if (
+        !isCodexOperationScopeCurrent(scope) ||
+        (boundary.expectedScope && boundary.expectedScope !== native.scopeToken)
+      )
+        throw new MutationNotStartedError("连接或账号已变化，分支尚未创建。");
+      const response = await threadFork(params, {
+        expectedScope: native.scopeToken,
+      });
       if (!isCodexOperationScopeCurrent(scope))
-        throw new Error("连接或账号已变化，分支结果未确认，请核对原连接，勿重复创建分支。");
+        throw new Error(
+          "连接或账号已变化，分支结果未确认，请核对原连接，勿重复创建分支。",
+        );
+      if (
+        cwd !== undefined &&
+        response.thread.cwd.replace(/\/+$/, "") !== cwd.replace(/\/+$/, "")
+      )
+        throw new Error(
+          `分支工作目录与请求不一致，请核对已创建的会话 ${response.thread.id}，勿重复创建。`,
+        );
       hydrateThreadModel(
         response.thread.id,
         nativeThreadSettings(response, response.thread),
@@ -1126,7 +1545,10 @@ export const codexService = {
         set,
         response.thread.id,
         response.thread,
-        lastTurnId === undefined && beforeTurnId === undefined,
+        boundary.activate !== false &&
+          lastTurnId === undefined &&
+          beforeTurnId === undefined &&
+          useCodexStore.getState().currentThreadId === selectedBeforeFork,
       );
     } catch (error: unknown) {
       console.error("[CodexService] threadFork error:", error);
@@ -1266,7 +1688,9 @@ export const codexService = {
           )
         : {};
 
-      const settingsCapture = configOverride ? undefined : captureThreadModelSelection(threadId);
+      const settingsCapture = configOverride
+        ? undefined
+        : captureThreadModelSelection(threadId);
       if (settingsCapture) {
         try {
           await flushThreadModelSettings(threadId, settingsCapture);
@@ -1274,7 +1698,9 @@ export const codexService = {
           throw new MutationNotStartedError(String(error));
         }
         if (epoch !== runtimeEpoch || !isCodexOperationScopeCurrent(scope))
-          throw new MutationNotStartedError("连接目标已切换，请核对会话设置后再发送");
+          throw new MutationNotStartedError(
+            "连接目标已切换，请核对会话设置后再发送",
+          );
       }
       // An explicit override is a complete, previously captured snapshot (Goal
       // first turn / rollback retry), not a partial merge with today's UI defaults.
@@ -1282,33 +1708,40 @@ export const codexService = {
       let parameters = capturedConfig;
       if (settingsCapture) {
         const {
-          model, reasoningEffort, serviceTier, collaborationMode, personality,
+          model,
+          reasoningEffort,
+          serviceTier,
+          collaborationMode,
+          personality,
         } = settingsCapture.settings;
         parameters = {
-        cwd: resolveThreadCwd(threadId),
-        ...threadPermissionParameters(settingsCapture.settings),
-        ...(model ? { serviceTier } : {}),
-        model: model || null,
-        effort: reasoningEffort ?? null,
-        ...(personality ? { personality } : {}),
-        // Mode is a turn/start field, not a thread/start config key. Explicit
-        // default also lets an existing planned thread leave planning mode.
-        ...(model
-          ? {
-              collaborationMode: {
-                mode: collaborationMode,
-                settings: {
-                  model,
-                  reasoning_effort: reasoningEffort,
-                  developer_instructions: null,
+          cwd: resolveThreadCwd(threadId),
+          ...threadPermissionParameters(settingsCapture.settings),
+          ...(model ? { serviceTier } : {}),
+          model: model || null,
+          effort: reasoningEffort ?? null,
+          ...(personality ? { personality } : {}),
+          // Mode is a turn/start field, not a thread/start config key. Explicit
+          // default also lets an existing planned thread leave planning mode.
+          ...(model
+            ? {
+                collaborationMode: {
+                  mode: collaborationMode,
+                  settings: {
+                    model,
+                    reasoning_effort: reasoningEffort,
+                    developer_instructions: null,
+                  },
                 },
-              },
-            }
-          : {}),
+              }
+            : {}),
         };
       }
       if (epoch !== runtimeEpoch || !isCodexOperationScopeCurrent(scope))
-        throw new MutationNotStartedError("连接或账号已变化，请核对会话后再发送");
+        throw new MutationNotStartedError(
+          "连接或账号已变化，请核对会话后再发送",
+        );
+      const nativeExecutionScope = captureNativeExecutionScope();
       const response = await turnStart({
         threadId,
         ...(clientUserMessageId ? { clientUserMessageId } : {}),
@@ -1326,6 +1759,23 @@ export const codexService = {
           latest === timingAtRequest ||
           (latest?.turnId === response.turn.id &&
             latest.status === "inProgress");
+        const nativeTiming = {
+          turnId: response.turn.id,
+          startedAtMs: (response.turn.startedAt ?? Date.now() / 1000) * 1000,
+          durationMs: verifiedTurnDuration(
+            response.turn.durationMs,
+            state.turnTimingMap[threadId]?.turnId === response.turn.id
+              ? state.turnTimingMap[threadId].durationMs
+              : undefined,
+          ),
+          status: response.turn.status,
+        };
+        if (accept)
+          recordNativeExecutionTiming(
+            threadId,
+            nativeTiming,
+            nativeExecutionScope,
+          );
         return {
           ...(accept && state.currentThreadId === threadId
             ? {
@@ -1348,18 +1798,7 @@ export const codexService = {
                 },
                 turnTimingMap: {
                   ...state.turnTimingMap,
-                  [threadId]: {
-                    turnId: response.turn.id,
-                    startedAtMs:
-                      (response.turn.startedAt ?? Date.now() / 1000) * 1000,
-                    durationMs: verifiedTurnDuration(
-                      response.turn.durationMs,
-                      state.turnTimingMap[threadId]?.turnId === response.turn.id
-                        ? state.turnTimingMap[threadId].durationMs
-                        : undefined,
-                    ),
-                    status: response.turn.status,
-                  },
+                  [threadId]: nativeTiming,
                 },
               }
             : {}),
@@ -1441,7 +1880,9 @@ export const codexService = {
     }
   },
   /** Before objective materialization; a canonical read never resumes this submit. */
-  assertThreadGoalReady(threadId: string) { goalState.assertReady(threadId); },
+  assertThreadGoalReady(threadId: string) {
+    goalState.assertReady(threadId);
+  },
   async threadGoalGet(params: ThreadGoalGetParams) {
     return goalState.read(params.threadId);
   },

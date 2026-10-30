@@ -95,3 +95,13 @@ PLAYWRIGHT_SKIP_WEBSERVER=1 PLAYWRIGHT_BASE_URL=<已运行的LAN地址> pnpm exe
 修复后的正式证据为上述目录的 `accepted/browser-result.json`、`desktop.png`、`mobile.png`、`mobile-refreshed.png`：桌面、手机与手机刷新均显示目标回复和问题，6条已完成历史请求全部200，加载提示／pageerror／任务写入／横向溢出均为零。原始日志保留刷新卸载时取消的请求，不声称全部网络无异常。独立夹具的永久浏览器测试 `tests/e2e/session-launcher-link-refresh.spec.ts` 在1600px及393px均通过，API与WebSocket全部隔离；不向正式任务提交测试输入。
 
 最小回归包括历史服务34项、代理配置9项、取消队列1项、真实HTTP/1与HTTP/2代理3项，以及URL导航／标签恢复／会话链接相关单测；前端类型检查通过。Session运行层PID2712539保持，未重启Agent。本次没有重跑30分钟RSS关卡，也不改变其既有红灯结论。
+
+## 2026-10-29 只读最近页调度
+
+浏览器recent/history/status总准入仍为3/2/1。原生聊天reader串行，因此recent只准入一个后台传输，保留另外两个既有槽给重叠的旧/新前台读取；前端排队支持同键提升。网关读取自有HTTP头`x-session-read-priority`，只接受`interactive`／`background`，缺省interactive兼容旧调用，非法值400；该字段不加入native RPC。每连续三次前台准入后，等待中的后台获得一次准入，17项总排队上限、120秒期限和原进程退出清理保持。已开始的读取不会因另一个消费者切换而停止Agent。
+
+每个共享历史消费者单独取消，最后一个取消才撤销自有传输并立即移除去重身份；账号/运行scope的原始失败由每个消费者按自己的UI/调度需求结算，不能由首个消费者吞掉。`sessionPreloadState`仅记关注目标phase和revision，不持有正文；回收后标记reclaimed且不重新填入。所有正文、最终回复、审批及未读仍走原来的独立生命周期。真实HTTP网关、原生EventSource和私有假native验收见[实施记录](designs/session-mode-user-experience-acceptance-20261029.md)。
+
+Claude的history通道也只允许一个后台传输，保留另一个原有槽给显式读取；共享取消和排队提升复用同一消费者机制。SDK必要的5秒活动/30秒空闲只读完整恢复仍保留，不假称已有原生增量分页。
+
+连接提示分开记录health、关注列表、项目列表和实时消息。无待提交修改的读取失败保持紧凑，权限/本机保存/接收暂停仍明确可处理；重试保持原操作身份，不改变未知发送回执。同步详情可显式下载固定连接元数据以排查现场，省略正文、草稿、账号、URL和凭证。浏览器断线或接收暂停只说明连接状态，任务状态须恢复后只读核对。

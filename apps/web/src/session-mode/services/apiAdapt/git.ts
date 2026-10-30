@@ -42,6 +42,11 @@ export type GitCreateWorktreeResponse = {
   copied_env_files: string[];
 };
 
+export type GitInspectWorktreeResponse = { repo_root: string; worktree_path: string; state: "missing" | "registered" | "unmanaged"; head: string | null; dirty: boolean };
+export function gitInspectWorktree(cwd: string, worktreeKey: string, signal?: AbortSignal) {
+  return postJsonWithOptions<GitInspectWorktreeResponse>("/api/git/inspect-worktree", {cwd,worktreeKey}, {signal,suppressToast:true});
+}
+
 export type GitApplyWorktreeResponse = {
   changed_files: number;
 };
@@ -182,11 +187,11 @@ export async function gitReverseFiles(cwd: string, filePaths: string[], staged: 
 export async function gitCreateWorktree(
   cwd: string,
   worktreeKey: string,
-  options?: { signal?: AbortSignal },
+  options?: { signal?: AbortSignal; baseBranch?: string },
 ) {
   return await postJsonWithOptions<GitCreateWorktreeResponse>(
     '/api/git/create-worktree',
-    { cwd, worktreeKey },
+    { cwd, worktreeKey, ...(options?.baseBranch ? { baseBranch: options.baseBranch } : {}) },
     options,
   );
 }

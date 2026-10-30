@@ -32,8 +32,8 @@ const api = vi.hoisted(() => ({
 
 // Actual hook/cache, thread/config stores, nested Trigger, Tooltip and Radix.
 // Only the four catalog reads are fixtures; readiness is never stubbed.
-vi.mock("@session/services/apiAdapt", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@session/services/apiAdapt")>()),
+vi.mock("@session/services/apiAdapt/codex", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@session/services/apiAdapt/codex")>()),
   ...api,
 }));
 

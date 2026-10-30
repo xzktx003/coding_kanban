@@ -8,6 +8,7 @@ import {
 import { beforeEach, expect, it, vi } from "vitest";
 import { ComposerMenu } from "./ComposerMenu";
 import { ConversationMenu } from "./ConversationMenu";
+import { resetAppActionHistory } from "./appActionHistory";
 import { useLayoutStore } from "@session/stores/useLayoutStore";
 import { useCodexStore } from "../stores/useCodexStore";
 import { useSessionDraftStore } from "@session/stores/useSessionDraftStore";
@@ -25,6 +26,7 @@ vi.mock("@session/hooks/useThreadModelSettings", () => ({
   }),
 }));
 beforeEach(() => {
+  resetAppActionHistory();
   useLayoutStore.setState({ view: "agent" });
   useCodexStore.setState({ currentThreadId: "owner" });
   useSessionDraftStore.setState({
@@ -107,7 +109,10 @@ it("does not complete an action for a disabled item or for Escape", async () => 
     name: "当前会话的更多操作",
   });
   fireEvent.keyDown(trigger, { key: "ArrowDown" });
-  const item = await screen.findByRole("menuitem", { name: "重命名聊天" });
+  // Rename now has a normal owner form. An empty undo history is the real
+  // disabled action whose parent lifetime this regression verifies.
+  const item = await screen.findByRole("menuitem", { name: "撤销上一步操作" });
+  expect(item.getAttribute("aria-disabled")).toBe("true");
   fireEvent.click(item);
   expect(view.selected).not.toHaveBeenCalled();
   fireEvent.keyDown(item, { key: "Escape" });

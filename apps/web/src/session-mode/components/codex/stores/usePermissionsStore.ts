@@ -2,7 +2,7 @@ import { deliverRpc, sameRpc, rpcRequestContext } from './rpcLifecycle';
 import { create } from 'zustand';
 import type { RequestId } from '@session/bindings';
 import type { PermissionGrantScope, PermissionsRequestApprovalParams } from '@session/bindings/v2';
-import { respondToPermissionsApproval } from '@session/services';
+import { respondToPermissionsApproval } from '@session/services/apiAdapt/codex';
 
 export type PermissionsRequest = PermissionsRequestApprovalParams & {
   requestId: RequestId;

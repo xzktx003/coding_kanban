@@ -7,6 +7,9 @@ import { absolutePath, ClaudeConfig } from "./config.js";
 import { KeyedSerial } from "../core/serial.js";
 import { HISTORY_WORKER_SOURCE } from "./history-worker-source.js";
 import { HttpError, type JsonObject } from "../core/json.js";
+import { historyBefore, historyDetailText, type RecentHistoryOptions } from "../core/recent-history.js";
+import { ccRecentPage, ccMessageIdentity,ccMessageImageSources } from "./recent-history.js";
+import { historyImage } from "../core/history-image.js";
 
 /** SDK history APIs are filesystem-only. A short-lived worker isolates SDK environment caches per runtime. */
 export async function historyCall(
@@ -213,6 +216,38 @@ export class ClaudeHistory {
   messages(id: string) {
     validateSessionId(id);
     return this.call("getSessionMessages", [id], this.env);
+  }
+  async messageRevision(id: string) {
+    validateSessionId(id);
+    await this.refresh();
+    const db=await this.cache();
+    try {
+      const row=db.prepare("SELECT session_id,last_modified,file_size,created_at FROM cc_sessions WHERE session_id=?").get(id);
+      return createHash("sha256").update(JSON.stringify(row ?? [id,"missing"])).digest("hex");
+    } finally {db.close();}
+  }
+  async recentMessages(id: string, options: RecentHistoryOptions = {}) {
+    validateSessionId(id);
+    historyBefore("cc",id,options.cursor);
+    const revision=await this.messageRevision(id);
+    if (options.metadataOnly) return {data:[],nextCursor:null,revision,truncated:false,projection:"cc-messages" as const};
+    return ccRecentPage(id,await this.messages(id),revision,options);
+  }
+  async messageDetail(id: string, itemId: string, options: {offset:number;limit:number}) {
+    const rows=await this.messages(id);
+    if (!Array.isArray(rows)) throw new HttpError(502,"Claude history did not return a message array");
+    const row=rows.find((row,index)=>row&&typeof row==="object"&&ccMessageIdentity(row,index)===itemId);
+    if (!row) throw new HttpError(404,"History item is unavailable");
+    return {...historyDetailText(row,options),revision:await this.messageRevision(id)};
+  }
+  async messageImage(id:string,itemId:string,index:number,download=false) {
+    const rows=await this.messages(id);
+    if(!Array.isArray(rows))throw new HttpError(502,"Claude history did not return a message array");
+    const row=rows.find((row,sourceIndex)=>row&&typeof row==="object"&&ccMessageIdentity(row,sourceIndex)===itemId);
+    if(!row)throw new HttpError(404,"History image source is unavailable");
+    const image=ccMessageImageSources(row)[index];
+    if(!image||typeof image.data!=="string")throw new HttpError(404,"History image source is not a stored base64 image");
+    return historyImage(image,download);
   }
   async delete(id: string) {
     validateSessionId(id);

@@ -25,3 +25,9 @@
 .session-mode .codex-turn-work-header .is-expanded {
   transform: rotate(90deg);
 }
+
+.session-mode .codex-turn-work-disclosure {
+  margin-inline-start: auto;
+  font-size: 0.85em;
+  white-space: nowrap;
+}

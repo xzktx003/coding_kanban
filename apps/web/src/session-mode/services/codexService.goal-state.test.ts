@@ -15,10 +15,13 @@ const api = vi.hoisted(() => ({
   threadAccess: vi.fn(),
 }));
 vi.mock("./apiAdapt", () => api);
+vi.mock("./apiAdapt/codex", () => api);
+vi.mock("./apiAdapt/git", () => api);
+vi.mock("./apiAdapt/skills", () => api);
 vi.mock("./apiAdapt/goalCompletion", () => ({
   threadGoalClearCompleted: api.threadGoalClearCompleted,
 }));
-vi.mock("./apiAdapt/codex", () => ({ threadAccess: api.threadAccess }));
+
 
 import { codexService, resetCodexRuntimeState } from "./codexService";
 import { useCodexStore } from "../components/codex/stores";

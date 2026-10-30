@@ -633,6 +633,7 @@ export * from "./codex-tabs.js";
 export * from "./session-projects.js";
 
 export * from "./session-followups.js";
+export * from "./session-management.js";
 export * from "./composer-context.js";
 export * from "./session-subagents.js";
 export * from "./session-saved-patch.js";
@@ -640,6 +641,7 @@ export * from "./session-codex-host.js";
 export * from "./session-codex-cloud.js";
 export * from "./session-codex-guardian.js";
 export * from "./codex-chat-projection.js";
+export * from "./auxiliary-chat-projection.js";
 export * from "./codex-slack-preview.js";
 
 export * from "./codex-github-preview.js";
@@ -649,3 +651,6 @@ export * from "./codex-website-preview.js";
 export { mcpAuthChallenge, type NativeMcpAuthChallenge } from "./codex-mcp-auth.js";
 
 export { mcpOAuthThreadIdSupported } from "./codex-mcp-version.js";
+
+export * from "./raster-image-header.js";
+export * from "./auxiliary-inline-images.js";

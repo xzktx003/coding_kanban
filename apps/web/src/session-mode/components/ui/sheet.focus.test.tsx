@@ -2,7 +2,7 @@ import { useState } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 vi.mock("@session/session-dom", () => ({
-  sessionPortalContainer: () => document.body,
+  useSessionPortalContainer: () => document.body,
   useSessionInteractionVisible: () => true,
   isSessionInteractionVisible: () => true,
 }));

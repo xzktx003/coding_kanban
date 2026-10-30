@@ -4,7 +4,7 @@ import {
   classifySubagentThread,
   type SubagentThread,
   type SubagentStopTarget,
-} from "@agent-orchestrator/shared";
+} from "@agent-orchestrator/shared/session-subagents";
 import type { TurnTiming } from "@session/components/codex/stores/types";
 import type { Thread, ThreadStatus } from "@session/bindings/v2";
 import { codexRuntimeState } from "@session/utils/codexRuntimeState";

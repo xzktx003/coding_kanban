@@ -11,6 +11,8 @@ import {
 import { writeDurableJson } from "./durable-json.js";
 
 export interface FollowupRuntime {
+  context?(): Promise<{ scope: string; namespace: string }>;
+  guardedCall?(method: string, params: Record<string, unknown>, expectedScope: string): Promise<any>;
   statuses(ids: string[]): Promise<Record<string, string>>;
   /** Full, read-only history; never resume just to check a completion receipt. */
   readThread?(id: string): Promise<any>;

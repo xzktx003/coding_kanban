@@ -163,6 +163,7 @@ for (const caller of ["native", "legacy"] as const) {
   }, info) => {
     const errors: string[] = [],
       requests: any[] = [];
+    const largeOutput = `OUTPUT_detail-0\n${"large tool body line\n".repeat(1800)}`;
     page.on("pageerror", (error) => errors.push(error.message));
     await mountCommands(page, caller);
     await page.route("**/api/**/thread/item-detail", async (route) => {
@@ -177,7 +178,10 @@ for (const caller of ["native", "legacy"] as const) {
             command: "full native command",
             cwd: "/fixture",
             status: "completed",
-            aggregatedOutput: `\u001b[31mOUTPUT_${body.itemId}\u001b[0m`,
+            aggregatedOutput:
+              body.itemId === "detail-0"
+                ? `\u001b[31m${largeOutput}\u001b[0m`
+                : `\u001b[31mOUTPUT_${body.itemId}\u001b[0m`,
             exitCode: 0,
             durationMs: 2,
           },
@@ -206,6 +210,14 @@ for (const caller of ["native", "legacy"] as const) {
       await expect(row.locator(".codex-command-output-content")).toContainText(
         `OUTPUT_detail-${i}`,
       );
+      if (i === 0)
+        await expect
+          .poll(() =>
+            row.locator(".codex-command-output-content").evaluate(
+              (el) => el.textContent?.length ?? 0,
+            ),
+          )
+          .toBeGreaterThan(30_000);
       expect(requests.at(-1)).toEqual({
         threadId: "detail-thread",
         turnId: "detail-turn",

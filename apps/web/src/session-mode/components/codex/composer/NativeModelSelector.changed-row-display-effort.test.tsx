@@ -20,8 +20,8 @@ const api = vi.hoisted(() => ({
 
 // R25 real hook/cache/store/Trigger/Radix structure: only the four read IO
 // boundaries are fixtures. No choose/helper/readiness or permission mock.
-vi.mock("@session/services/apiAdapt", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@session/services/apiAdapt")>()), ...api,
+vi.mock("@session/services/apiAdapt/codex", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@session/services/apiAdapt/codex")>()), ...api,
 }));
 
 const A = "r27-current-row-owner-a";

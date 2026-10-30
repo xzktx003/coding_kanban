@@ -40,6 +40,8 @@ export interface ThreadModelSettings {
   serviceTier?: string | null;
   sandbox?: SandboxMode;
   sandboxPolicy?: SandboxPolicy | null;
+  /** Explicit official named profile intent; never the volatile metadata lease. */
+  permissions?: string | null;
   approvalPolicy?: AskForApproval;
   approvalsReviewer?: ApprovalsReviewer;
   autoReviewCapability?: ApprovalsReviewer | null;
@@ -80,6 +82,7 @@ const UNKNOWN: ThreadModelSettings = {
   providerModels: {},
   serviceTier: null,
   sandboxPolicy: undefined,
+  permissions: null,
   sandbox: "danger-full-access",
   approvalPolicy: "never",
   approvalsReviewer: "user",
@@ -90,6 +93,7 @@ const UNKNOWN: ThreadModelSettings = {
 };
 type NativeSettings = Partial<Omit<ThreadModelSettings, "providerModels">>;
 const SANDBOX_FIELDS = [
+  "permissions",
   "sandbox",
   "sandboxPolicy",
   "webSearchRequest",
@@ -143,6 +147,7 @@ const EDITABLE_FIELDS = [
   "serviceTier",
   "sandbox",
   "sandboxPolicy",
+  "permissions",
   "approvalPolicy",
   "approvalsReviewer",
   "webSearchRequest",
@@ -308,6 +313,7 @@ function reduceHydrateThreadModel(
     approvalsReviewer?: ApprovalsReviewer;
     sandbox?: SandboxMode | SandboxPolicy;
     sandboxPolicy?: SandboxPolicy;
+    permissions?: string | null;
     webSearchRequest?: boolean;
     collaborationMode?: CollaborationMode | "default" | "plan";
     personality?: Personality | null;
@@ -377,6 +383,7 @@ function reduceHydrateThreadModel(
       value.sandboxPolicy ??
       (typeof value.sandbox === "object" ? value.sandbox : undefined);
     const normalized = {
+      ...(value.permissions !== undefined ? { permissions: value.permissions } : {}),
       ...(value.approvalsReviewer !== undefined
         ? {
             approvalsReviewer: value.approvalsReviewer,
@@ -659,7 +666,8 @@ function cleanEntry(entry: ThreadModelEntry): ThreadModelEntry {
     Array.isArray(entry) ||
     (entry.model !== undefined && typeof entry.model !== "string") ||
     (entry.modelProvider !== undefined &&
-      typeof entry.modelProvider !== "string")
+      typeof entry.modelProvider !== "string") ||
+    (entry.permissions !== undefined && entry.permissions !== null && (typeof entry.permissions !== "string" || !entry.permissions || entry.permissions.length > 4096))
   )
     throw new ThreadModelPersistenceError(
       "会话设置缓存格式无效，已保留原始备份。",

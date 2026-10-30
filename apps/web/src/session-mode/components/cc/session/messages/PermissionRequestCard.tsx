@@ -1,4 +1,6 @@
 import { ShieldAlert, ShieldCheck, X } from 'lucide-react';
+import { useEffect,useRef,useState } from 'react';
+import { readClaudePermissionInput } from '@session/services/claudePermissionDetail';
 import { Button } from '@session/components/ui/button';
 import { Card } from '@session/components/ui/card';
 import { cn } from '@session/lib/utils';
@@ -26,11 +28,33 @@ const RESOLVED_LABEL: Record<PermissionDecision, string> = {
 
 interface Props {
   msg: PermissionRequestMessage;
-  onResolve: (id: string, decision: PermissionDecision) => void;
+  onResolve: (id: string, decision: PermissionDecision) => void | Promise<void>;
+  active?: boolean;
 }
 
-export function PermissionRequestCard({ msg, onResolve }: Props) {
+export function PermissionRequestCard({ msg, onResolve,active=true }: Props) {
   const resolved = msg.resolved;
+  const [fullInput,setFullInput]=useState<Record<string,unknown>|null>(null),[loading,setLoading]=useState(false),[detailError,setDetailError]=useState<string|null>(null);
+  const controller=useRef<AbortController|null>(null);
+  const [decisionPending,setDecisionPending]=useState(false);
+  useEffect(()=>{setFullInput(null);setDetailError(null);setLoading(false);return()=>controller.current?.abort();},[msg.requestId,msg.recoveryRuntimeInstance,msg.inputRevision]);
+  useEffect(()=>{if(resolved){controller.current?.abort();setFullInput(null);setLoading(false);}},[resolved]);
+  useEffect(()=>{
+    const release=()=>{if(!active||document.hidden){controller.current?.abort();setFullInput(null);setLoading(false);}};
+    release();document.addEventListener('visibilitychange',release);return()=>document.removeEventListener('visibilitychange',release);
+  },[active]);
+  const incomplete=!!msg.toolInputTruncated&&!fullInput;
+  const canApprove=active&&!decisionPending&&!incomplete&&msg.inputAvailable!==false;
+  const performResolve=async(decision:PermissionDecision)=>{
+    if(decisionPending||!active)return;setDecisionPending(true);setDetailError(null);
+    try{await onResolve(msg.requestId,decision);}catch(error){setDetailError(error instanceof Error?error.message:String(error));}finally{setDecisionPending(false);}
+  };
+  const toolInput=fullInput??msg.toolInput;
+  const load=async()=>{
+    if(!active||document.hidden)return;
+    const request=new AbortController();controller.current?.abort();controller.current=request;setLoading(true);setDetailError(null);
+    try{const input=await readClaudePermissionInput(msg,request.signal);if(!request.signal.aborted)setFullInput(input);}catch(error){if(!request.signal.aborted)setDetailError(error instanceof Error?error.message:String(error));}finally{if(!request.signal.aborted)setLoading(false);}
+  };
 
   return (
     <Card className="p-4 border-amber-500/30 bg-amber-500/5 shadow-sm">
@@ -50,12 +74,12 @@ export function PermissionRequestCard({ msg, onResolve }: Props) {
             </code>
           </div>
         )}
-        {NO_RAW_INPUT_TOOLS.includes(msg.toolName) ? (
+        {incomplete ? <div role="status"><p>{msg.inputError??'完整审批参数需按需读取；读取完成前保留拒绝入口。'}</p>{msg.inputAvailable&&<Button type="button" size="sm" variant="outline" disabled={loading} onClick={()=>void load()}>{loading?'正在读取完整参数…':'查看完整审批参数'}</Button>}{detailError&&<p role="alert">{detailError}</p>}</div> : NO_RAW_INPUT_TOOLS.includes(msg.toolName) ? (
           (() => {
             const block = {
               type: 'tool_use',
               name: msg.toolName,
-              input: msg.toolInput,
+              input: toolInput,
               id: msg.requestId,
             } as any;
             const errorProps = { inlineError: null, showError: false, onToggleError: () => {} };
@@ -82,7 +106,7 @@ export function PermissionRequestCard({ msg, onResolve }: Props) {
           })()
         ) : (
           <ToolInputDisplay
-            input={msg.toolInput}
+            input={toolInput}
             highlightKeys={['file_path', 'path', 'command']}
           />
         )}
@@ -107,7 +131,8 @@ export function PermissionRequestCard({ msg, onResolve }: Props) {
             size="sm"
             variant="outline"
             className="h-8 border-red-500/30 text-red-500 hover:bg-red-500/5"
-            onClick={() => onResolve(msg.requestId, 'deny')}
+            onClick={() => void performResolve('deny')}
+            disabled={decisionPending||!active}
           >
             Deny
           </Button>
@@ -116,7 +141,8 @@ export function PermissionRequestCard({ msg, onResolve }: Props) {
               size="sm"
               variant="ghost"
               className="h-8 text-blue-600 dark:text-blue-400 hover:bg-blue-500/10"
-              onClick={() => onResolve(msg.requestId, 'allow_project')}
+              onClick={() => void performResolve('allow_project')}
+              disabled={!canApprove}
             >
               <ShieldCheck className="w-3 h-3 mr-1" /> Always Allow (project)
             </Button>
@@ -125,7 +151,8 @@ export function PermissionRequestCard({ msg, onResolve }: Props) {
               size="sm"
               variant="ghost"
               className="h-8 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10"
-              onClick={() => onResolve(msg.requestId, 'allow_always')}
+              onClick={() => void performResolve('allow_always')}
+              disabled={!canApprove}
             >
               <ShieldCheck className="w-3 h-3 mr-1" /> Always Allow (session)
             </Button>
@@ -133,12 +160,14 @@ export function PermissionRequestCard({ msg, onResolve }: Props) {
           <Button
             size="sm"
             className="bg-emerald-600 hover:bg-emerald-700 text-white h-8"
-            onClick={() => onResolve(msg.requestId, 'allow')}
+            onClick={() => void performResolve('allow')}
+            disabled={!canApprove}
           >
             Allow Once
           </Button>
         </div>
       )}
+      {detailError&&!incomplete&&<p role="alert" className="mt-2 text-xs text-red-500">{detailError}</p>}
     </Card>
   );
 }

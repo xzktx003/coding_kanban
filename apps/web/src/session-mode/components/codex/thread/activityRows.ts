@@ -1,3 +1,6 @@
+import { hasMcpAppResource } from "../presentation/mcpAppResource";
+import { isCachedTurnExecutionUnverified } from "@session/services/cachedTurnExecutionView";
+import type { RenderTermination } from "../presentation/renderTermination";
 import type { ServerNotification } from "@session/bindings";
 import type {
   CommandAction,
@@ -199,6 +202,7 @@ function entriesFor(row: ThreadRow): ActivityEntry[] | null {
   if (event.method !== "item/started" && event.method !== "item/completed")
     return null;
   const item = event.params.item;
+  if (item.type === "mcpToolCall" && hasMcpAppResource(item)) return null;
   if (
     nativeToolActivityMetadata(item).grouping === "hidden" &&
     groupable.has(item.type)
@@ -336,7 +340,7 @@ export function groupThreadActivities(
   runtime?: ActivityRuntime,
 ): ActivityDisplayRow[] {
   rows = projectNativeActivityRows(rows);
-  const turns = new Map<string, TurnStatus>();
+  const turns = new Map<string, RenderTermination>();
   for (const event of events) {
     if (event.method === "turn/started") {
       const key = turnKey(event.params.threadId, event.params.turn.id);
@@ -345,7 +349,9 @@ export function groupThreadActivities(
     } else if (event.method === "turn/completed")
       turns.set(
         turnKey(event.params.threadId, event.params.turn.id),
-        event.params.turn.status,
+        isCachedTurnExecutionUnverified(event)
+          ? "unverified"
+          : event.params.turn.status,
       );
     else if (
       event.method === "error" &&

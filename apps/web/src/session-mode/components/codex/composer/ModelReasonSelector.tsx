@@ -41,8 +41,8 @@ import { shouldSubmitOnEnter } from "./imeSubmitKey";
 import { useNativeUltraFullAccessConfirmation } from "./NativeUltraFullAccessConfirmation";
 import {
   needsUltraFullAccessConfirmation,
-  ULTRA_FALLBACK_SANDBOX,
 } from "./ultraFullAccessGate";
+import { preferredNonFullAccessMode } from "@session/services/nonFullAccessPreference";
 import {
   nextReasoningEffort,
   ReasoningEffortSelector,
@@ -648,13 +648,15 @@ export function ModelReasonSelector({
     sandbox,
     permissionsKnown,
     setAccessMode,
+    permissions,
   } = useThreadModelSettings(currentThreadId);
 
   // Original Lti awaits Pti before applying ultra while full access is on. The
   // sandbox lives here rather than in BaseModelSelector, which has no
   // permission state of its own, so the gate wraps the effort setter.
+  const fallbackSandbox = preferredNonFullAccessMode();
   const { ask: askUltra, confirmation: ultraConfirmation } =
-    useNativeUltraFullAccessConfirmation(ULTRA_FALLBACK_SANDBOX);
+    useNativeUltraFullAccessConfirmation(fallbackSandbox);
   const applyReasoningEffort = useCallback(
     (nextEffort: ReasoningEffort) => {
       if (
@@ -663,6 +665,7 @@ export function ModelReasonSelector({
           currentEffort: reasoningEffort,
           sandbox,
           permissionsKnown,
+          permissionProfile: permissions,
         })
       ) {
         setReasoningEffort(nextEffort);
@@ -672,7 +675,10 @@ export function ModelReasonSelector({
         // Dismissing applies nothing, leaving the saved effort as it was.
         if (choice === "dismiss") return;
         // Official onContinueWithFallback sets the mode, then applies.
-        if (choice === "fallback") setAccessMode(ULTRA_FALLBACK_SANDBOX);
+        if (choice === "fallback") {
+          if (!fallbackSandbox) return;
+          setAccessMode(fallbackSandbox);
+        }
         setReasoningEffort(nextEffort);
       });
     },
@@ -680,6 +686,8 @@ export function ModelReasonSelector({
       reasoningEffort,
       sandbox,
       permissionsKnown,
+      permissions,
+      fallbackSandbox,
       askUltra,
       setAccessMode,
       setReasoningEffort,

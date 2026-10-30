@@ -1,3 +1,4 @@
+vi.mock("./nativeOperationContext",()=>({readNativeOperationContext:async()=>({namespace:"private-fixture-native-domain",scopeToken:"a".repeat(64)})}));
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const boundary = vi.hoisted(() => ({
   capture: vi.fn(),
@@ -10,6 +11,7 @@ const api = vi.hoisted(() => ({
   threadStart: vi.fn(),
   threadFork: vi.fn(),
   threadRead: vi.fn(),
+  threadMetadata: vi.fn(),
   threadGoalGet: vi.fn(),
   turnStart: vi.fn(),
   postJsonWithOptions: vi.fn(),
@@ -29,8 +31,10 @@ vi.mock("./apiAdapt/shared", async (original) => ({
   postJsonWithOptions: api.postJsonWithOptions,
 }));
 vi.mock("./apiAdapt/codex", () => ({
+  ...api,
   threadAccess: vi.fn(async () => ({ state: "owned", generation: 1 })),
   threadFork: api.threadFork,
+  threadMetadata: api.threadMetadata,
 }));
 import { codexService, resetCodexRuntimeState } from "./codexService";
 import { followupService, useFollowupStore } from "./followupService";
@@ -71,6 +75,7 @@ const thread = (id: string) => ({
   updatedAt: 1,
 });
 beforeEach(() => {
+  for (let i=localStorage.length-1;i>=0;i--) { const key=localStorage.key(i); if(key?.startsWith("kanban.session.execution")) localStorage.removeItem(key); }
   vi.clearAllMocks();
   vi.spyOn(console, "error").mockImplementation(() => {});
   vi.spyOn(console, "log").mockImplementation(() => {});
@@ -328,23 +333,23 @@ it("a new account history request does not coalesce into the stale account read 
 
 it("the separate initial metadata read cannot merge an old account's cwd after a recent page", async () => {
   const metadata = deferred<any>();
-  api.threadRead.mockImplementation((params: any) =>
-    params.recent
-      ? Promise.resolve({
-          thread: thread("original"),
-          historyPage: { earlier: false, nextCursor: null },
-        })
-      : metadata.promise,
-  );
+  api.threadRead.mockResolvedValueOnce({
+    thread: thread("original"),
+    historyPage: { earlier: false, nextCursor: null },
+  });
+  api.threadMetadata.mockReturnValueOnce(metadata.promise);
   await codexService.loadThreadHistory("original", undefined, {
     background: true,
     recent: true,
   });
   await vi.waitFor(() =>
-    expect(api.threadRead.mock.calls.some((call) => !call[0].recent)).toBe(
-      true,
+    expect(api.threadMetadata).toHaveBeenCalledWith(
+      "original",
+      expect.objectContaining({ signal: expect.any(AbortSignal), suppressToast: true }),
     ),
   );
+  expect(api.threadRead).toHaveBeenCalledTimes(1);
+  expect(api.threadRead.mock.calls[0][0]).toEqual({ threadId: "original", recent: true });
   useCodexStore.setState({ accountNamespace: "account-metadata-after" });
   boundary.hydrate.mockClear();
   metadata.resolve({
@@ -394,3 +399,4 @@ it("a frozen override that omitted personality cannot inherit a later local pers
   );
   expect(api.turnStart.mock.calls[0][0]).not.toHaveProperty("personality");
 });
+vi.mock("./nativeOperationContext", () => ({ readNativeOperationContext: vi.fn(async () => ({ scopeToken: "fixture-runtime-scope", namespace: "fixture-history" })) }));

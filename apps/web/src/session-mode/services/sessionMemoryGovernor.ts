@@ -220,11 +220,40 @@ export function releaseSessionMemory(options: { pressure?: boolean } = {}) {
 export function startSessionMemoryGovernor() {
   let stopped = false;
   let pending: ReturnType<typeof setTimeout> | undefined;
+  let releaseInProgress = false;
+  const overPublishedEventLimit = (
+    state: ReturnType<typeof useCodexStore.getState>,
+    previous: ReturnType<typeof useCodexStore.getState>,
+  ) => {
+    for (const [id, events] of Object.entries(state.events)) {
+      if (events === previous.events[id]) continue;
+      // Explicitly paged history keeps its larger reading allowance and the
+      // existing deferred pass. Only unread bulk snapshots need this fast path.
+      if (id === state.currentThreadId && readingWindows.get(id)?.size) continue;
+      if (events.length > CODEX_TRANSCRIPT_MAX_EVENTS) return true;
+    }
+    return false;
+  };
   const run = () => {
-    if (!stopped) releaseSessionMemory();
+    if (stopped || releaseInProgress) return;
+    releaseInProgress = true;
+    try {
+      releaseSessionMemory();
+    } finally {
+      releaseInProgress = false;
+    }
   };
   const stop = useCodexStore.subscribe((state, previous) => {
-    if (state.events === previous.events || pending || stopped) return;
+    if (state.events === previous.events || stopped || releaseInProgress) return;
+    // Avoid rendering an oversized recovery snapshot and then replacing it
+    // again after the debounce. Normal streams retain the existing schedule.
+    if (overPublishedEventLimit(state, previous)) {
+      if (pending) clearTimeout(pending);
+      pending = undefined;
+      run();
+      return;
+    }
+    if (pending) return;
     pending = setTimeout(() => {
       pending = undefined;
       run();

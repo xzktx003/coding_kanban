@@ -12,8 +12,12 @@ import { useSessionDraftStore } from "../stores/useSessionDraftStore";
 import { useSessionAttentionStore } from "../stores/useSessionAttentionStore";
 
 const cancelCodexHistoryRead = vi.hoisted(() => vi.fn());
+const trafficPressure = vi.hoisted(() => vi.fn(() => false));
 
 vi.mock("./codexService", () => ({ cancelCodexHistoryRead }));
+vi.mock("./sessionMemoryPressure", () => ({
+  hasTranscriptTrafficPressure: trafficPressure,
+}));
 
 import type { Thread } from "../bindings/v2";
 import { useCodexStore } from "../components/codex/stores";
@@ -29,6 +33,7 @@ import {
   startSessionTranscriptRetention,
 } from "./sessionTranscriptRetention";
 import { pruneObservedCodexTranscriptBudget } from "./sessionTranscriptBudget";
+import { useSettingsStore } from "../stores/settings/useSettingsStore";
 
 const flushRetention = async () => {
   await Promise.resolve();
@@ -113,6 +118,8 @@ const transcriptEvents = (threadId: string, turns: number, body: string) =>
 
 beforeEach(() => {
   vi.clearAllMocks();
+  trafficPressure.mockReturnValue(false);
+  useSettingsStore.setState({ warmFollowedSessions: true });
   for (const id of trackedCodexTranscripts()) forgetCodexTranscript(id);
   useCodexDeliveryStore.setState({ entries: {} });
   localStorage.clear();
@@ -153,8 +160,60 @@ beforeEach(() => {
 
 afterEach(() => vi.useRealTimers());
 
-it("automatically releases an invisible followed running transcript after 60 seconds, preserving task state", async () => {
+it("keeps followed recent pages warm within the display budget after sixty seconds", async () => {
   vi.useFakeTimers();
+  useAgentCenterStore.setState({
+    sharedTabsInitialized: true,
+    cards: ["visible", "warm"].map((id) => ({
+      kind: "codex",
+      id,
+      cwd: "/repo",
+    })),
+  });
+  const events = transcriptEvents("warm", 2, "recent retained body");
+  useCodexStore.setState({
+    events: { warm: events },
+    historyLoadedMap: { warm: true },
+  });
+  const release = retainCodexTranscript("visible");
+  const stop = startSessionTranscriptRetention();
+  try {
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(useCodexStore.getState().events.warm).toBe(events);
+    expect(isCodexTranscriptDormant("warm")).toBe(false);
+  } finally {
+    stop();
+    release();
+  }
+});
+
+it("restores the original sixty-second policy when the device setting disables warm retention", async () => {
+  vi.useFakeTimers();
+  useSettingsStore.setState({ warmFollowedSessions: false });
+  useAgentCenterStore.setState({
+    sharedTabsInitialized: true,
+    cards: [{ kind: "codex", id: "legacy", cwd: "/repo" }],
+  });
+  const events = transcriptEvents("legacy", 2, "recent body");
+  useCodexStore.setState({
+    events: { legacy: events },
+    historyLoadedMap: { legacy: true },
+  });
+  const stop = startSessionTranscriptRetention();
+  try {
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(useCodexStore.getState().events.legacy).toBe(events);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(useCodexStore.getState().events.legacy).toBeUndefined();
+    expect(isCodexTranscriptDormant("legacy")).toBe(true);
+  } finally {
+    stop();
+  }
+});
+
+it("automatically releases an invisible followed running transcript under pressure after 60 seconds, preserving task state", async () => {
+  vi.useFakeTimers();
+  trafficPressure.mockReturnValue(true);
   useAgentCenterStore.setState({
     sharedTabsInitialized: true,
     cards: [
@@ -225,6 +284,7 @@ it("automatically releases an invisible followed running transcript after 60 sec
 
 it("defers dormant eviction while history is loading or a delivery receipt is unresolved", async () => {
   vi.useFakeTimers();
+  trafficPressure.mockReturnValue(true);
   useAgentCenterStore.setState({
     cards: [{ kind: "codex", id: "busy", cwd: "/repo" }],
   });
@@ -263,6 +323,7 @@ it("defers dormant eviction while history is loading or a delivery receipt is un
 
 it("retires a confirmed offscreen receipt before evicting its body instead of pinning it forever", async () => {
   vi.useFakeTimers();
+  trafficPressure.mockReturnValue(true);
   const id = "confirmed-offscreen";
   useAgentCenterStore.setState({
     cards: [{ kind: "codex", id, cwd: "/repo" }],

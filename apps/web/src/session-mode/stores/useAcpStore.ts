@@ -1,3 +1,8 @@
+import { admitAcpTranscript } from "../services/providerTranscriptAdmission";
+import {
+  providerTranscriptKey,
+  isProviderTranscriptDormant,
+} from "../services/sessionProviderTranscriptState";
 import { create } from "zustand";
 import type {
   AcpAuthMethod,
@@ -17,7 +22,16 @@ export type AcpToolContent =
 export type AcpToolLocation = { path: string; line?: number };
 
 /** A rendered line in the ACP transcript. */
-export type AcpEntry =
+export type AcpHistoryIdentity = {
+  /** Display correlation only; never a native ACP idempotency key. */
+  clientMessageId?: string;
+  partIndex?: number;
+  historySourceId?: number;
+  truncated?: boolean;
+  historyDetail?: { itemId: string };
+  historyImages?:Array<{index:number;mimeType:string;label?:string}>;
+};
+export type AcpEntry = AcpHistoryIdentity & (
   | { id: string; role: "user"; text: string; images?: string[] }
   | { id: string; role: "agent"; text: string }
   | { id: string; role: "thought"; text: string }
@@ -33,7 +47,7 @@ export type AcpEntry =
       locations?: AcpToolLocation[];
       rawInput?: unknown;
       rawOutput?: unknown;
-    };
+    });
 
 export type AcpPermissionOption = {
   optionId: string;
@@ -64,9 +78,17 @@ interface AcpStore {
   /** Currently selected ACP agent preset id. */
   agentId: string;
   connectionId: string | null;
+  /** Verified by this runtime's readonly connection snapshot, never persisted authority. */
+  runtimeInstance: string | null;
+  connectionEndpoint: string | null;
+  connectionRecovery: "recovering" | "failed" | null;
   sessionId: string | null;
+  /** Application history identity, distinct from the native RPC sessionId. */
+  historySessionId: string | null;
   /** Directory acknowledged by the native session operation, independent of browsing. */
   sessionCwd: string | null;
+  /** A previous session that this Agent cannot load; never native prompt context. */
+  inheritedHistory: {sessionId:string;title:string;cwd:string;agentId?:string;viewOnly?:boolean;nativeSessionId?:string;sourceScope?:ReturnType<typeof import("../components/history/historySourceScope").captureHistorySourceScope>} | null;
   agentTitle: string | null;
   authMethods: AcpAuthMethod[];
   /** `agentCapabilities.loadSession`: whether stored sessions can be resumed. */
@@ -112,7 +134,10 @@ interface AcpStore {
   setAgentId: (id: string) => void;
   setConnection: (v: {
     connectionId: string;
+    runtimeInstance?: string;
+    connectionEndpoint?: string;
     sessionId: string | null;
+    historySessionId?:string|null;
     cwd?: string;
     agentTitle: string | null;
     authMethods: AcpAuthMethod[];
@@ -166,12 +191,30 @@ interface AcpStore {
 }
 
 const newId = () => Math.random().toString(36).slice(2);
+const bodyOwner = (state: {
+  sessionId: string | null;
+  agentId: string;
+  connectionId: string | null;
+}) =>
+  state.sessionId && state.connectionId
+    ? providerTranscriptKey(
+        "acp",
+        state.sessionId,
+        state.agentId,
+        state.connectionId,
+      )
+    : null;
 
 /** Everything tied to a live connection, back to its disconnected state. */
 const cleared = {
   connectionId: null,
+  runtimeInstance: null,
+  connectionEndpoint: null,
+  connectionRecovery: null,
   sessionId: null,
+  historySessionId:null,
   sessionCwd: null,
+  inheritedHistory: null,
   agentTitle: null,
   authMethods: [],
   canLoadSession: false,
@@ -199,8 +242,13 @@ export const createAcpStore = () =>
     active: false,
     agentId: "gemini",
     connectionId: null,
+    runtimeInstance: null,
+    connectionEndpoint: null,
+    connectionRecovery: null,
     sessionId: null,
+  historySessionId:null,
     sessionCwd: null,
+    inheritedHistory: null,
     agentTitle: null,
     authMethods: [],
     canLoadSession: false,
@@ -227,7 +275,10 @@ export const createAcpStore = () =>
     setAgentId: (agentId) => set({ agentId }),
     setConnection: ({
       connectionId,
+      runtimeInstance,
+      connectionEndpoint,
       sessionId,
+      historySessionId,
       agentTitle,
       authMethods,
       canLoadSession,
@@ -236,7 +287,12 @@ export const createAcpStore = () =>
     }) =>
       set((s) => ({
         connectionId,
+        runtimeInstance: runtimeInstance ?? null,
+        connectionEndpoint: connectionEndpoint ?? null,
+        connectionRecovery: null,
         sessionId,
+        historySessionId:historySessionId??null,
+        inheritedHistory: null,
         sessionCwd: sessionId ? (cwd ?? null) : null,
         permission:
           s.pendingPermissions[
@@ -251,7 +307,9 @@ export const createAcpStore = () =>
     setSessionId: (sessionId) =>
       set((s) => ({
         sessionId,
+        historySessionId:sessionId===s.sessionId?s.historySessionId:null,
         sessionCwd: sessionId === s.sessionId ? s.sessionCwd : null,
+        inheritedHistory: sessionId === s.sessionId ? s.inheritedHistory : null,
         permission:
           s.pendingPermissions[
             JSON.stringify([s.connectionId, sessionId])
@@ -261,6 +319,8 @@ export const createAcpStore = () =>
     applySession: (session) =>
       set((s) => ({
         sessionId: session?.sessionId ?? null,
+        historySessionId:session?.historySessionId??(session?.sessionId===s.sessionId?s.historySessionId:null),
+        inheritedHistory: session?.sessionId === s.sessionId ? s.inheritedHistory : null,
         sessionCwd: session?.sessionId === s.sessionId ? s.sessionCwd : null,
         permission:
           s.pendingPermissions[
@@ -348,23 +408,52 @@ export const createAcpStore = () =>
             : {}),
         };
       }),
-    addEntry: (entry) => set((s) => ({ entries: [...s.entries, entry] })),
-    setEntries: (entries) => set({ entries, chunkSealed: false }),
+    addEntry: (entry) =>
+      set((s) => ({
+        entries: admitAcpTranscript(
+          bodyOwner(s),
+          s.sessionId,
+          [...s.entries, entry],
+          s.entries,
+        ),
+      })),
+    setEntries: (entries) =>
+      set((s) => ({
+        entries: admitAcpTranscript(
+          bodyOwner(s),
+          s.sessionId,
+          entries,
+          s.entries,
+        ),
+        chunkSealed: false,
+      })),
 
     sealChunk: () => set({ chunkSealed: true }),
 
     appendChunk: (role, text) =>
       set((s) => {
+        const owner = bodyOwner(s);
+        if (owner && isProviderTranscriptDormant(owner)) return s;
         const last = s.entries[s.entries.length - 1];
         if (last && last.role === role && !s.chunkSealed) {
           const updated = { ...last, text: last.text + text };
           return {
-            entries: [...s.entries.slice(0, -1), updated],
+            entries: admitAcpTranscript(
+              owner,
+              s.sessionId,
+              [...s.entries.slice(0, -1), updated],
+              s.entries,
+            ),
             chunkSealed: false,
           };
         }
         return {
-          entries: [...s.entries, { id: newId(), role, text }],
+          entries: admitAcpTranscript(
+            owner,
+            s.sessionId,
+            [...s.entries, { id: newId(), role, text }],
+            s.entries,
+          ),
           chunkSealed: false,
         };
       }),
@@ -380,26 +469,33 @@ export const createAcpStore = () =>
       rawOutput,
     }) =>
       set((s) => {
+        const owner = bodyOwner(s);
+        if (owner && isProviderTranscriptDormant(owner)) return s;
         const idx = s.entries.findIndex(
           (e) => e.role === "tool" && e.toolCallId === toolCallId,
         );
         if (idx === -1) {
           return {
-            entries: [
-              ...s.entries,
-              {
-                id: newId(),
-                role: "tool",
-                toolCallId,
-                title: title ?? toolCallId,
-                status: status ?? "pending",
-                kind,
-                content,
-                locations,
-                rawInput,
-                rawOutput,
-              },
-            ],
+            entries: admitAcpTranscript(
+              owner,
+              s.sessionId,
+              [
+                ...s.entries,
+                {
+                  id: newId(),
+                  role: "tool",
+                  toolCallId,
+                  title: title ?? toolCallId,
+                  status: status ?? "pending",
+                  kind,
+                  content,
+                  locations,
+                  rawInput,
+                  rawOutput,
+                },
+              ],
+              s.entries,
+            ),
           };
         }
         const prev = s.entries[idx] as Extract<AcpEntry, { role: "tool" }>;
@@ -414,7 +510,9 @@ export const createAcpStore = () =>
           rawInput: rawInput ?? prev.rawInput,
           rawOutput: rawOutput ?? prev.rawOutput,
         };
-        return { entries: next };
+        return {
+          entries: admitAcpTranscript(owner, s.sessionId, next, s.entries),
+        };
       }),
 
     reset: () => set(cleared),

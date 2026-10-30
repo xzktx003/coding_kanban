@@ -10,9 +10,23 @@ import { reconcileEventStream } from "../lib/eventStream";
 import { useCodexStore } from "../components/codex/stores";
 import { openEventStream } from "../lib/eventStream";
 import { useAgentCenterStore } from "../stores/useAgentCenterStore";
+import {
+  splitGroups,
+  useSessionSplitStore,
+} from "../stores/useSessionSplitStore";
 import { codexService } from "./codexService";
 import { openedCodexIds } from "./openedSessions";
 import { cachedTranscriptTimings } from "./sessionCacheState";
+import {
+  isCodexTranscriptDormant,
+  onCodexTranscriptReleased,
+  isCodexTranscriptVisible,
+  isCodexTranscriptPrepared,
+  onCodexTranscriptVisibilityChanged,
+  onCodexTranscriptWarmRestore,
+} from "./codexTranscriptActivity";
+import { setSessionPreload } from "./sessionPreloadState";
+import { isAgentInteractionVisible } from "../session-dom";
 
 function activeTurn(
   state: ReturnType<typeof useCodexStore.getState>,
@@ -27,6 +41,7 @@ function activeTurn(
 /** Hydrate followed Codex histories independently of which transcript is mounted.
  * Recovery uses read-only history, never execution ownership or message resubmission. */
 export function startFollowedSessionHistorySync() {
+  const startedAt = Date.now();
   let stopped = false;
   let opened = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -52,6 +67,10 @@ export function startFollowedSessionHistorySync() {
     repairing.add(id);
     if (wanted.get(id) === done.get(id) || !wanted.has(id))
       wanted.set(id, (wanted.get(id) ?? 0) + 1);
+    setSessionPreload(`codex:${id}`, {
+      phase: "queued",
+      revision: wanted.get(id)!,
+    });
     schedule();
   }
   function repairAfterCompletion(id: string) {
@@ -92,21 +111,58 @@ export function startFollowedSessionHistorySync() {
         completionAfterLoad.delete(id);
         repairing.delete(id);
         setSessionRecovery(id);
+        setSessionPreload(`codex:${id}`);
       }
     for (const id of members) {
       if (force) {
         wanted.set(id, (wanted.get(id) ?? 0) + 1);
         retryAt.delete(id);
       } else if (!wanted.has(id)) wanted.set(id, 1);
+      if (!loading.has(id) && wanted.get(id) !== done.get(id))
+        setSessionPreload(`codex:${id}`, {
+          phase: "queued",
+          revision: wanted.get(id)!,
+        });
     }
     schedule();
   }
   function pump() {
     if (stopped) return;
-    const selected = useAgentCenterStore.getState().currentAgentCardId;
-    const members = ids().sort(
-      (a, b) => Number(b === selected) - Number(a === selected),
+    const tabs = useAgentCenterStore.getState();
+    const displayed =
+      document.visibilityState !== "hidden" && isAgentInteractionVisible();
+    const selected =
+      displayed && tabs.currentAgentCardKind === "codex"
+        ? tabs.currentAgentCardId
+        : null;
+    const split = useSessionSplitStore.getState();
+    const groups =
+      displayed && tabs.cardsViewMode === "solo" ? splitGroups(split.tree) : [];
+    // The restored layout already tells us which panes will mount. Waiting for
+    // their effects can start an unrelated slow background read first.
+    const plannedVisible = new Set(
+      groups
+        .filter(
+          (group) =>
+            window.innerWidth >= 768 || group.id === split.activeGroupId,
+        )
+        .map((group) => group.selected)
+        .filter((key): key is string => !!key?.startsWith("codex:"))
+        .map((key) => key.slice("codex:".length)),
     );
+    const priority = (id: string) =>
+      id === selected
+        ? 0
+        : displayed && (isCodexTranscriptVisible(id) || plannedVisible.has(id))
+          ? 1
+          : 2;
+    for (const id of loading)
+      if (priority(id) < 2) codexService.promoteThreadHistoryRead?.(id);
+    const members = ids().sort((a, b) => priority(a) - priority(b));
+    const awaitingForeground =
+      displayed &&
+      members.some((id) => priority(id) < 2 && !isCodexTranscriptPrepared(id));
+    const foregroundGrace = 10_000 - (Date.now() - startedAt);
     let nextRetry = Infinity;
     for (const id of members) {
       const revision = wanted.get(id);
@@ -124,11 +180,22 @@ export function startFollowedSessionHistorySync() {
       // The selected session is what the reader is waiting for, so it may use
       // one slot beyond the background limit instead of queueing behind reads
       // that are already in flight.
-      // The selected session is what the reader is waiting for, so it may use
-      // one slot beyond the background limit instead of queueing behind reads
-      // that are already in flight.
-      if (loading.size >= 4 && !(id === selected && loading.size < 5)) continue;
+      // These are logical demands, not extra native transports: the shared
+      // sessionReadQueue retains its original three recent-read slots. Reserve
+      // demand space for all four displayed panes even if four old background
+      // demands are already waiting, then promote them in that shared queue.
+      const interactive = priority(id) < 2;
+      // Background publications fan out to task/title consumers. Let the
+      // requested rich panes commit before warming dozens of unrelated bodies.
+      // State/approval streams remain active; an unavailable renderer cannot
+      // starve background coverage forever.
+      if (!interactive && awaitingForeground && foregroundGrace > 0) {
+        nextRetry = Math.min(nextRetry, Math.min(500, foregroundGrace));
+        continue;
+      }
+      if (loading.size >= 4 && !(interactive && loading.size < 8)) continue;
       loading.add(id);
+      setSessionPreload(`codex:${id}`, { phase: "reading", revision });
       const controller = new AbortController();
       controllers.set(id, controller);
       const baseline = useCodexStore.getState();
@@ -142,11 +209,16 @@ export function startFollowedSessionHistorySync() {
           recent: true,
           signal: controller.signal,
           reportScopeChanges: true,
+          priority: interactive ? "interactive" : "background",
         })
         .then(
           () => {
             if (!stopped && wanted.has(id)) {
               done.set(id, revision);
+              setSessionPreload(`codex:${id}`, {
+                phase: isCodexTranscriptDormant(id) ? "reclaimed" : "ready",
+                revision,
+              });
               checked.set(id, Date.now());
               retryAt.delete(id);
               attempts.delete(id);
@@ -184,6 +256,7 @@ export function startFollowedSessionHistorySync() {
                 attempts.delete(id);
                 retryRequested.delete(id);
                 setSessionRecovery(id);
+                setSessionPreload(`codex:${id}`, { phase: "queued", revision });
                 return;
               }
               if (retryRequested.delete(id)) {
@@ -198,6 +271,7 @@ export function startFollowedSessionHistorySync() {
                 Date.now() + Math.min(30000, 5000 * 2 ** (failures - 1)),
               );
               setSessionRecovery(id, "retrying");
+              setSessionPreload(`codex:${id}`, { phase: "failed", revision });
             }
           },
         )
@@ -230,6 +304,23 @@ export function startFollowedSessionHistorySync() {
     )
       enqueue();
   });
+  const stopReleased = onCodexTranscriptReleased((id) => {
+    if (wanted.has(id))
+      setSessionPreload(`codex:${id}`, {
+        phase: "reclaimed",
+        revision: wanted.get(id)!,
+      });
+  });
+  const stopVisibility = onCodexTranscriptVisibilityChanged((id) => {
+    if (isCodexTranscriptVisible(id) && loading.has(id))
+      codexService.promoteThreadHistoryRead?.(id);
+    enqueue();
+  });
+  const stopWarmRestore = onCodexTranscriptWarmRestore(
+    repair,
+    (id) => !stopped && ids().includes(id),
+  );
+  const stopLayout = useSessionSplitStore.subscribe(() => enqueue());
   const closeStream = openEventStream({
     agents: ["codex"],
     onEvent: (event) => {
@@ -337,11 +428,18 @@ export function startFollowedSessionHistorySync() {
     for (const controller of controllers.values()) controller.abort();
     clearTimeout(timer);
     unsubscribe();
+    stopReleased();
+    stopVisibility();
+    stopWarmRestore();
+    stopLayout();
     stopQueues();
     stopCompletions();
     clearInterval(watchdog);
     window.removeEventListener("session-history-reconcile", manual);
-    for (const id of wanted.keys()) setSessionRecovery(id);
+    for (const id of wanted.keys()) {
+      setSessionRecovery(id);
+      setSessionPreload(`codex:${id}`);
+    }
     closeStream();
     window.removeEventListener("online", wake);
     window.removeEventListener("focus", wake);

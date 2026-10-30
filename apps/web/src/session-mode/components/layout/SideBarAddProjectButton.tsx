@@ -11,7 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@session/components/ui/dialog';
-import { BrowserProjects } from '@session/features/ProjectSelector';
+import { BrowserProjects } from '@session/features/ProjectSelector/BrowserProjects';
 import { isDesktopTauri } from '@session/hooks/runtime';
 import { useWorkspaceStore } from '@session/stores/useWorkspaceStore';
 

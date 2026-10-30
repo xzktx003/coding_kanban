@@ -82,13 +82,13 @@ it("collapses completed commentary and public reasoning under one duration row, 
     event: { params: { item: { text: "final report" } } },
   });
 });
-it("shows the running process below one live duration header", () => {
+it("shows the latest public progress below one live duration header by default", () => {
   const rows = project(fixture("inProgress"));
-  expect(rows).toHaveLength(5);
+  expect(rows).toHaveLength(4);
   expect(rows[1].work).toMatchObject({
     running: true,
     startedAtMs: 1000000,
-    expanded: true,
+    expanded: false,
   });
 });
 it("reopens the same process rows with stable message anchors", () => {

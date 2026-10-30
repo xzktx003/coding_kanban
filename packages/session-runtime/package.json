@@ -5,13 +5,14 @@
   "type": "module",
   "exports": {
     ".": "./package.json",
-    "./item-detail": "./dist/codex/item-detail-channel.js"
+    "./item-detail": "./dist/codex/item-detail-channel.js",
+    "./auxiliary-history": "./dist/auxiliary-history-channel.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
     "audit": "tsx src/audit.ts",
-    "test": "tsx --test --test-concurrency=4 src/**/*.test.ts",
+    "test": "tsx --test --test-concurrency=4 src/*.test.ts src/**/*.test.ts",
     "start": "node dist/main.js",
     "format": "prettier --write 'src/**/*.ts'"
   },

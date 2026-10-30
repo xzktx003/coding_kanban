@@ -1,5 +1,13 @@
 # Coding Kanban Project Overview
 
+新版会话运行层直接连接官方共享 Codex daemon，默认缺失时可按配置调用官方启动命令；与 CLI 共享实时任务和官方线程队列，看板退出或替换只释放自有连接。已有 CLI 任务通过显式入口连接实时交互；后台历史恢复保持只读。共享置顶和阅读状态绑定实际执行域，草稿、选择与分屏仍属于当前设备。完整非IDE/非云任务方案正在实施，专项绿灯、剩余性能与组合验收分别见[实施台账](designs/session-mode-implementation-20261029/README.md)，不把构建产物视为正式运行服务已切换。
+
+Claude/ACP进程仍由看板运行层管理；自动更新遇自有连接、初始化或活动缺测时保留旧运行层，显式维护才按已授权范围结束其任务。相同源码入口的其他SESSION_DATA_HOME只列为只读候选，不按“孤儿”自动清理，见[运行层替换保护](designs/session-mode-implementation-20261029/runtime-replacement.md)。
+
+会话模式的关注集合与正文生命周期分别维护：全部关注会话预加载最近正文页，当前读取与可见设备缓存优先，保留后台公平性及既有预算。按2026-10-30用户后续决定，无偏好默认开启有界保温，预算允许时持续留存，可见正文优先，压力或超预算时回收后台。显式false继续约60秒不可见回收且不后台再热，已有true/false不迁移；休眠正文不得被迟到回包或设备缓存填回，再热须经过既有预算、冷却和精确只读reader。任务、审批、未读及草稿独立，字节、并发及RPC限制不扩大。v5默认false的历史证据和当前整合验收分列于[会话体验记录](designs/session-mode-user-experience-acceptance-20261029.md)。Claude/ACP采用可变行高虚拟历史，输入依赖按Agent加载；连接、共享列表和实时流故障采用分链路紧凑反馈。
+
+旧会话服务即使尚不支持有界近期历史，网关也可在核实实际运行来源后使用独立文件型只读库；近期页、详情和图片不再依赖替换活跃运行层。ACP原SQLite不迁移，派生投影写独立缓存；Claude原生身份和公开会话别名在读取前后核对。无法核实时保留原服务并明确返回原因，不用完整raw正文作自动回退。见[旧服务历史兼容](designs/session-mode-implementation-20261029/auxiliary-history-compatibility.md)。
+
 DeepSeek Harness 接入采用独立 `packages/harness-kanban` 页面插件，复用当前 Kanban 服务、数据和运行层，不修改 Harness 或 Kanban 既有业务源码。首版提供持久 iframe、连接设置、DS Bot 整页界面的独立入口，以及可选的固定上游 HTTPS 入口；尚未接入 Agent 控制工具或公网／手机代理。真实浏览器验证、原生能力未验范围及卸载方式见 [实施记录](designs/deepseek-harness-kanban-plugin-implementation.md)。
 
 本机 Harness 按用户约定默认使用官方原生 HTTPS 3080，临时 3443 转发入口已停用；Kanban 仍使用原有地址。首次访问使用本机私有完整登录链接。
@@ -864,7 +872,7 @@ Codex 聊天以轮次显示工作摘要：运行中实时计时，完成后收�
 
 会话模式飞书回复由 `SessionCodexFeishuReplyService` 校验原生 metadata 并复用 Node `CodexFollowups` 入队；完成卡片分片记录独立的 `sessionModeThreadId`，共享私聊监听器按绑定区分终端和原生目标。原生队列承担持久化、任务串行执行和送达不确定保护，飞书入口不改变执行权、模型或审批规则。常规设置复用两个独立开关，详见 [会话飞书通知与回复](session-codex-feishu-notifications.md)。
 
-会话模式将关注状态与正文显示生命周期分开：不可见 Codex 正文经过 60 秒宽限期自动释放显示缓存，后台继续维护任务、审批和未读，重新显示时按需只读恢复。此机制与原有传输裁剪、正文预算共同工作，不中断 Agent，也不刷新整个页面；开发入口额外释放 React 19 调试性能记录的时间线留存，防止缓存之外的原生内存积累；任务完成提示音复用单个音频上下文并在空闲后关闭，避免连续完成反复创建原生音频资源；浏览器实际物理内存回收由引擎决定。详见 [内存防回归约定](session-memory-contract.md)。
+会话模式将关注状态与正文显示生命周期分开：默认在既有预算允许时持续保温关注最近页，可见正文优先，压力或超预算回收后台；显式关闭保温时，不可见 Codex 正文经过约60秒宽限期释放且不后台再热。休眠正文不能被迟到事件、历史回包或设备缓存填回，开启保温后的再热须通过现有预算、冷却和精确只读reader。后台任务、审批、未读与草稿持续维护，重新显示时只读恢复。此机制与原有传输裁剪、正文预算共同工作，不中断 Agent，也不刷新整个页面；开发入口额外释放 React 19 调试性能记录的时间线留存，防止缓存之外的原生内存积累；任务完成提示音复用单个音频上下文并在空闲后关闭，避免连续完成反复创建原生音频资源；浏览器实际物理内存回收由引擎决定。详见[预热与恢复](designs/session-mode-implementation-20261029/performance-recovery.md)及[内存防回归约定](session-memory-contract.md)。
 
 会话模式文件工具已补齐常用传输入口：选择目录后就地上传／新建，支持拖入多个文件、进度和取消、文件或文件夹 ZIP 下载及路径复制；手机操作栏换行、桌面右键与行末菜单一致。下载使用浏览器原生传输，并保留多文件编辑草稿及版本冲突保护。详见 [会话文件管理](session-file-management.md)。
 
@@ -901,3 +909,11 @@ Codex 回复、代码和表格复制失败现在与反馈 ID 复制统一使用�
 原生 Codex 工作台保留两种显式连接路径：授权连接副本运行于新私有 HOME，不导入历史；授权 `--shared-codex-home` 使用本机持久历史的私有链接视图，且将 IPC 与临时数据隔离。两者都不修改官方插件；连接范围、行为验收与运行限制见 Codex 工作台文档。
 
 会话中的本地文件引用先解析真实路径与所属的已注册项目，再在文件工具打开；因此项目内指向已注册兄弟仓库的目录软链接也能预览，且保存使用真实文件的版本校验。该解析仅返回元数据，不自动注册项目或扩大文件访问权限，规则见 [文件管理](session-file-management.md#对话文件链接与符号链接解析)。
+
+2026-10-30 会话模式插件管理沿用官方 marketplace、opaque plugin ID 与认证策略。看板的固定 mutation coordinator 保存有界 metadata receipt，断线/刷新后只读核对未知原意图；账号/运行/配对撤销与跨页目录刷新同步到现有输入候选。所有认证目标按原顺序明确处理，实际原生 app 可用性才计成功；不依赖 IDE、不建设云任务服务，真实在线 OAuth 仍单列。见 [插件客户端验收](designs/session-mode-implementation-20261029/plugins.md)。
+
+ACP多会话管理保留多个原生连接及其任务、审批，只维护一个明确输入目标。点击历史仅查看，继续操作显式建立独立连接或切回已核实owner；历史来源ID与执行用native ID分离。见 [ACP历史与连接边界](designs/session-mode-implementation-20261029/acp-history-selection.md)。
+
+ACP 多会话管理当前保持一个活动正文和公共输入，同时记录本页多个真实运行 owner；新聊天、提供方切换和历史查看不会隐式停止旧任务，后台审批可返回后处理。ACP原生session ID与应用historySessionId分离；历史点击只读，显式继续才在新连接加载上下文。该导航不会把ACP混入Codex/Claude的跨设备共享关注标签类型，具体行为与独立原生/浏览器证据见[多会话实施记录](designs/session-mode-implementation-20261029/performance-recovery.md)。
+
+会话模式的新窗口入口面向同一任务的多页管理：新页面先核对实际运行服务/原生范围和精确会话，再显示输入；页面操作现场与草稿按独立 UUID 保留，关注、置顶、已读及官方线程设置仍共享。它不是新的 Agent 实例，也不依赖 IDE。见 [新窗口设计](designs/session-mode-implementation-20261029/new-window.md)。

@@ -1,5 +1,6 @@
 import type { FollowupMessage } from "@agent-orchestrator/shared";
 export function FollowupSnapshot({ message }: { message: FollowupMessage }) {
+  if (message.authority === "native") return <div className="session-followup-snapshot" aria-label="官方队列执行设置"><p>由官方服务排队，按线程当前设置执行。修改线程模型与权限会影响尚未开始的消息。</p><small>图片 {message.images.length} · 用户输入保留在官方队列</small></div>;
   const p = message.parameters,
     policy = p.sandboxPolicy as { type?: string } | undefined,
     mode = p.collaborationMode as { mode?: string } | undefined;

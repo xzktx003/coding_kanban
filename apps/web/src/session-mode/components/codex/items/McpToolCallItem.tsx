@@ -1,5 +1,7 @@
-import { useState } from "react";
-import type { ThreadItem, TurnStatus } from "@session/bindings/v2";
+import type { RenderTermination } from "../presentation/renderTermination";
+import { hasMcpAppResource } from "../presentation/mcpAppResource";
+import { lazy, Suspense, useState } from "react";
+import type { ThreadItem } from "@session/bindings/v2";
 import { useTranslation } from "react-i18next";
 import {
   Dialog,
@@ -16,23 +18,37 @@ import {
 import { NativeToolDisclosure } from "./NativeToolDisclosure";
 import { isTranscriptMetadataOnly } from "../presentation/transcriptMetadata";
 import { TranscriptDetailsNotice } from "./TranscriptDetailsNotice";
+import { OptionalSessionPanel } from "@session/components/layout/OptionalSessionPanel";
+const McpAppView = lazy(() =>
+  import("@session/features/mcp-apps/McpAppView").then((module) => ({
+    default: module.McpAppView,
+  })),
+);
 export function McpToolCallItem({
   item,
   termination,
+  threadId,
+  turnId,
 }: {
   item: ThreadItem;
-  termination?: TurnStatus;
+  termination?: RenderTermination;
+  threadId?: string;
+  turnId?: string;
 }) {
   const { t, i18n } = useTranslation("thread"),
     [raw, setRaw] = useState(false),
     [argsOpen, setArgsOpen] = useState(false),
-    [argsMore, setArgsMore] = useState(false);
+    [argsMore, setArgsMore] = useState(false),
+    [appEntryDismissed, setAppEntryDismissed] = useState(false);
   if (item.type !== "mcpToolCall") return null;
   const metadataOnly = isTranscriptMetadataOnly(item);
   const running = item.status === "inProgress" && !termination,
     language = i18n?.language ?? "zh",
     chinese = language.startsWith("zh");
-  const label = nativeMcpToolLabel(item, language, !running),
+  const label =
+      termination === "unverified"
+        ? `正在核对轮次状态 · ${item.server}.${item.tool}`
+        : nativeMcpToolLabel(item, language, !running),
     progress = (item as typeof item & { progressMessage?: string })
       .progressMessage;
   const rawLabel = chinese
@@ -115,20 +131,26 @@ export function McpToolCallItem({
                 {nativeToolJson(structured)}
               </pre>
             )}
-            {!metadataOnly && !hasContent && structured == null && !error && (
-              <p>
-                {chinese ? "工具未返回任何内容" : "Tool returned no content"}
-              </p>
-            )}
+            {!metadataOnly &&
+              !hasContent &&
+              structured == null &&
+              !error &&
+              termination !== "unverified" && (
+                <p>
+                  {chinese ? "工具未返回任何内容" : "Tool returned no content"}
+                </p>
+              )}
             {termination && (
               <p role="status">
-                {t(
-                  termination === "interrupted"
-                    ? "activity.interrupted"
-                    : termination === "failed"
-                      ? "activity.failed"
-                      : "activity.ended",
-                )}
+                {termination === "unverified"
+                  ? "正在核对轮次状态"
+                  : t(
+                      termination === "interrupted"
+                        ? "activity.interrupted"
+                        : termination === "failed"
+                          ? "activity.failed"
+                          : "activity.ended",
+                    )}
               </p>
             )}
             {!metadataOnly && (
@@ -145,6 +167,16 @@ export function McpToolCallItem({
         )}
       </NativeToolDisclosure>
       {metadataOnly && <TranscriptDetailsNotice />}
+      {!appEntryDismissed && hasMcpAppResource(item) && threadId && turnId && (
+        <OptionalSessionPanel
+          label="工具应用"
+          onClose={() => setAppEntryDismissed(true)}
+        >
+          <Suspense fallback={<p role="status">正在加载应用入口…</p>}>
+            <McpAppView threadId={threadId} turnId={turnId} itemId={item.id} />
+          </Suspense>
+        </OptionalSessionPanel>
+      )}
       {progress && (
         <p role="status" className="codex-tool-progress">
           {progress}

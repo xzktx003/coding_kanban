@@ -275,7 +275,9 @@ for (const profile of profiles) {
             viewport: { width: innerWidth, height: innerHeight },
             pageScrollWidth: document.documentElement.scrollWidth,
             frame: rect(el.querySelector(".session-compact-frame")!),
-            context: rect(el.querySelector(".session-compact-meta")!),
+            context: rect(
+              el.querySelector(":scope > .flex.min-w-0.items-center")!,
+            ),
             toolbar: rect(el.querySelector(".session-composer-toolbar")!),
             editor: rect(el.querySelector("[contenteditable=true]")!),
             transcript: rect(
@@ -321,12 +323,10 @@ for (const profile of profiles) {
         expect(metrics.frame.y + metrics.frame.h).toBeLessThanOrEqual(
           profile.height + 1,
         );
-        if (metrics.frame.w <= 840) {
-          expect(
-            metrics.context.y + metrics.context.h,
-            "narrow composer context stays above the frame without crowding its controls",
-          ).toBeLessThanOrEqual(metrics.frame.y);
-        }
+        expect(
+          metrics.context.y,
+          "work environment footer follows the composer frame",
+        ).toBeGreaterThanOrEqual(metrics.frame.y + metrics.frame.h - 1);
         const sidebarGutter = await page.evaluate(() => {
           const handle = document.querySelector(".session-sidebar-edge");
           const header = document.querySelector(".codex-markdown th");

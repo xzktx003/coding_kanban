@@ -1,11 +1,14 @@
 import { codexRuntimeState } from "@session/utils/codexRuntimeState";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import type { ReviewTarget } from "@session/bindings/v2";
 import { useCodexStore } from "../stores";
 import { useFollowups } from "@session/hooks/useFollowups";
 import { useFollowupSettingsStore } from "@session/stores/useFollowupSettingsStore";
 import { runConversationReview } from "@session/services/conversationActions";
+import { hasPendingLifecycleMutation, LifecycleMutationUnknownError } from "@session/services/lifecycleMutation";
+import { captureCodexOperationScope, isCodexOperationScopeCurrent, type CodexOperationScope } from "@session/services/codexOperationScope";
+import { isSessionInteractionVisible } from "@session/session-dom";
 import { Button } from "../../ui/button";
 import {
   Dialog,
@@ -17,14 +20,24 @@ import {
 export function ReviewDialog({
   threadId,
   onClose,
+  targetScope,
 }: {
   threadId: string | null;
   onClose: () => void;
+  targetScope?: CodexOperationScope;
 }) {
   const { reviewDelivery, setReviewDelivery } = useFollowupSettingsStore();
   const [target, setTarget] = useState("changes"),
     [value, setValue] = useState(""),
     [busy, setBusy] = useState(false);
+  const [unknown, setUnknown] = useState(false), [error, setError] = useState<string | null>(null);
+  const [scope] = useState(() => targetScope ?? captureCodexOperationScope());
+  useEffect(() => {
+    if (!threadId) return;
+    let live = true;
+    void hasPendingLifecycleMutation("review", threadId).then(value => { if (live) setUnknown(value); }).catch(reason => { if (live) setError(String(reason)); });
+    return () => { live = false; };
+  }, [threadId]);
   const running = useCodexStore(
     (s) =>
       !!threadId &&
@@ -37,9 +50,10 @@ export function ReviewDialog({
       state.items.some((m) => m.status === "queued" || m.status === "sending"));
   const submit = async () => {
     if (!threadId || busy) return;
+    if (!isSessionInteractionVisible() || !isCodexOperationScopeCurrent(scope)) { setError("账号或运行服务已变化，尚未执行操作，请重新打开面板。"); return; }
     setBusy(true);
     try {
-      if (reviewDelivery === "inline" && inlineBlocked)
+      if (!unknown && reviewDelivery === "inline" && inlineBlocked)
         throw new Error("请先停止任务并暂停队列，或选择独立审查");
       const request: ReviewTarget =
         target === "changes"
@@ -50,11 +64,14 @@ export function ReviewDialog({
               ? { type: "commit", sha: value.trim(), title: null }
               : { type: "custom", instructions: value.trim() };
       await runConversationReview(threadId, reviewDelivery, request);
+      if (!isCodexOperationScopeCurrent(scope)) throw new Error("账号或运行服务已变化，原审查回执已保留。");
       onClose();
       toast.success(
-        reviewDelivery === "detached" ? "独立审查已启动" : "当前会话审查已启动",
+        unknown ? "审查结果已核对" : reviewDelivery === "detached" ? "独立审查已启动" : "当前会话审查已启动",
       );
     } catch (e) {
+      if (e instanceof LifecycleMutationUnknownError) setUnknown(true);
+      setError(e instanceof Error ? e.message : String(e));
       toast.error(String(e));
     } finally {
       setBusy(false);
@@ -116,6 +133,8 @@ export function ReviewDialog({
             onChange={(e) => setValue(e.target.value)}
           />
         )}
+        {unknown && <p role="status">审查结果待核对；再次点击只读取原操作回执，不启动另一场审查。</p>}
+        {error && <p role="alert">{error}</p>}
         <DialogFooter>
           <Button
             type="button"
@@ -130,12 +149,12 @@ export function ReviewDialog({
             disabled={
               busy ||
               !threadId ||
-              (reviewDelivery === "inline" && inlineBlocked) ||
-              (target !== "changes" && !value.trim())
+              (!unknown && reviewDelivery === "inline" && inlineBlocked) ||
+              (!unknown && target !== "changes" && !value.trim())
             }
             onClick={() => void submit()}
           >
-            {busy ? "正在启动…" : "开始审查"}
+            {busy ? unknown ? "正在核对…" : "正在启动…" : unknown ? "核对审查结果" : "开始审查"}
           </Button>
         </DialogFooter>
       </DialogContent>

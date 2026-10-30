@@ -12,7 +12,7 @@ import {
   CardTitle,
 } from "@session/components/ui/card";
 import { Input } from "@session/components/ui/input";
-import type { PluginEntry } from "../hooks/pluginTargets";
+import { pluginEntryKey, type PluginEntry } from "../hooks/pluginTargets";
 import { usePluginsMarketplace } from "../hooks/usePluginsMarketplace";
 import { hideBrokenImage } from "./imageFallback";
 import { MarketplaceErrorCard, PluginCard } from "./PluginCard";
@@ -62,9 +62,11 @@ function CategorySection({
       <div className="grid gap-4 md:grid-cols-2">
         {visible.map(({ marketplace, plugin }) => (
           <PluginCard
-            key={plugin.id}
+            key={pluginEntryKey(marketplace, plugin)}
             plugin={plugin}
-            isInstalling={installingPluginId === plugin.id}
+            isInstalling={
+              installingPluginId === pluginEntryKey(marketplace, plugin)
+            }
             canInstall
             onInstall={() => onInstall(marketplace, plugin)}
             onUse={() => onUse(plugin)}

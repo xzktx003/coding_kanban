@@ -1,3 +1,5 @@
+- 2026-10-30（断网重连后 Codex 停在「已在另一个应用中打开」）：官方 `writerConflict` 按界面语言渲染。观察器原先只匹配英文 `Retry` + “This is open in another app” / “Close it there to continue here.”，简体是「重试」+「已在另一个应用中打开」+「请先在那边关闭会话，才能在这里继续。」，因此 `blockedByOtherApp` 恒为假，释放旧实例的入口不会出现。第二层：字符级 lock watch 在 conversationId 出现 30 秒后停止，断线重连的提示通常晚于这个窗口。文案以 VSIX `26.51007.21434` 的 `local-conversation-thread` 与 `zh-CN`/`zh-HK`/`zh-TW` 包为准；单独的「重试」按钮不能当占用。占用未解除前不要停观察。
+
 - 2026-10-29（会话回收自反馈与热更新旧store正文留存）：不可缩小附件使回收器无实际变化也发布新数组，无输入2.1秒重复9次；现引用/顺序不变不发布，回归0次。另真实Vite三次更新保留四份不同store及约6MiB旧正文，现HMR复用唯一store并更新动作、保留数据和订阅；五次更新外部字符串仅增约28KiB。修复不刷新或停止任务，旧标签页需用户手动刷新一次；现场GB级与原长期RSS仍未闭合，见 [回收与HMR](../../docs/session-memory-feedback-loop.md)。
 
 - 2026-10-29（8MiB显示预算在冷历史/旧缓存恢复时可被绕过）：历史先发布后异步回收、超长用户文字受保护、earlierLoading跳过回收，旧IDB读侧又不重新限额，确定性反例首发22.45MB和旧缓存6.25MB。现历史发布前裁剪、用户有界头尾/UTF-8标注映射、加载中继续回收、缓存读侧重验原2MiB预算；裁剪窗口同步恢复游标，不能安全缩小的显示附件拒绝准入。原生任务/草稿不改，不强制GC或刷新；复现、回归和未闭合的现场/长期RSS边界见 [预算准入](../../docs/session-memory-admission.md)。
@@ -1630,6 +1632,13 @@ jsdom 渲染 172ms，没有性能依据，于是保留扁平列表并把分叉�
 的拖动反馈。修正时直接改掉原段落，再追加实测依据，而不是在后面叠一条新结论让两种说法
 并存。
 
+## 2026-10-30 多会话与官方共享服务
+
+- 运行层替换仅向已核实的看板runtime PID发信号；进程组领导身份不能证明共享daemon所有权。共享daemon退出/重启独立于看板部署，不以刷新推断任务中断。
+- pin动作按provider kind+thread ID，跨设备实体另加稳定账号/历史namespace；不能用裸UUID或短期运行代次作全部身份。
+- 手动未读有独立修订，自动已读固定观察开始前的原生opaque revision；冲突后不能自动取新revision重试。相同账号/已读通知的新事件也撤销旧观察。
+- 开发首屏全量lucide导出会增加浏览器下载/解析；按安装包真实alias映射拆具名导入，类型/字符串/namespace import保持原语义。功能和性能证据见`docs/designs/session-mode-implementation-20261029/`，局部通过不关闭两秒或长期RSS关卡。
+
 - 2026-10-28（会话模式“加载更早消息”失败后再也不自动分页、失败原因不可读）：确认的用户可见根因是 `loadEarlierHistory` 的 catch 把连接/账号变化（`HistoryReadScopeChangedError`）和被取消的读取（`AbortError`）也写进 `earlierErrors`，而 `shouldLoadEarlierOnScroll` 把非空 error 当作停止条件，于是一次重连就同时锁死重试横幅和向上滚动自动分页；错误文案还是固定串“加载失败，可重试”，看不到真实原因。修复：按错误类型归类，取消/撤销直接 return，真正失败写 `error.message`，按钮在失败后显示“重试加载更早消息”。另两处为正确性加固而非已复现故障：`CodexThread` 阅读锚点失效时的补读原来只看 `earlierCursor`，内存回收场景（游标 null、只有 `trimmedHistoryAnchors`）进不去，改为 `earlierAvailable`；`loadThreadHistory` 把恢复锚点页（`afterTurnId`）与并发最近页检查按不同页处理。更正上一轮记录中的两点：入口按钮渲染条件在 HEAD 中已是 `earlierAvailable`，并不存在“入口整体消失”；`loadEarlierHistory` 本身已先 await 前一次读取，所以 UI 路径不会走到 `afterTurnId` 复用分支，该守卫未能复现为用户故障。验收：新增 jsdom `codexEarlierHistory.ux.test.ts` 5 条与浏览器 `tests/e2e/session-earlier-history-paging.spec.ts` 3 条；其中错误归类+文案一条在浏览器中先红后绿，`afterTurnId` 一条在 jsdom 中先红后绿，其余为回归守卫（还原实现后仍通过，不计为缺陷证据）。web 会话全量 636 文件 4048 条、`pnpm check` 通过。
 
 - 2026-10-28（内置浏览器实测：“加载更早消息”点了真的没反应）：这是上一轮漏掉的真正根因，不在分页链路而在内存治理。实测证据：点击后 store 事件数 26→6764，约 400ms 后被改回 26，DOM 行数始终 8；`earlierLoading` 已为 false，所以 `releaseSessionMemory` 开头那条 `earlierLoading` 守卫完全挡不住。根因是 `sessionMemoryGovernor.ts` 里 `protectedTurnIds: pressure || (globalPressure && id !== currentThreadId) ? undefined : readingWindows.get(id)`——`heapUnderPressure()` 用的是固定 `min(256MB, limit*0.7)`，该页实测 heap 367MB/上限 4192MB，`pressure` 恒为 true，于是 `pinMemoryHistoryPage` 刚钉住的恢复页被丢弃，`targetEvents:750` 把 2604 条裁回 750。表现就是恢复页落地即被裁回、点击永远无进展（与网络、游标、按钮状态都无关）。修复：正在查看的会话（`id === currentThreadId`）始终保留 `readingWindows` 的钉住页，压力下仍按预算回收其他会话与该页之外的旧轮次。验收：`sessionMemoryGovernor.test.ts` 新增一条按真实规模（2600 条恢复页 + pressure:true）的用例，先红（750 条里不含钉住页）后绿；真实浏览器复验两个会话，事件数 975→1185→1217 且跨治理心跳不再回落，另一会话读到 cursor=null、更早轮次正文真实出现。web 会话全量 636 文件 4049 条、`pnpm check` 通过。注意：排查这类“点了没反应”不要只看请求和按钮状态，要订阅 store 观察事件数是否先涨后落。
@@ -1639,3 +1648,178 @@ jsdom 渲染 172ms，没有性能依据，于是保留扁平列表并把分叉�
 - 2026-10-28（续：加载更早消息在 `kanban-memory-items:` 单轮恢复路径上空转/报错）：用户截图仍卡在「正在加载更早消息…」。在真实浏览器中定位到此前两条记录之外的第三类根因，位于单轮工具项恢复分支（`apiAdapt/codex.ts` 的 `MEMORY_ITEM_CURSOR`）。一是续页游标丢弃进度：当 `older` 为空时仍按 `nextCursor` 原样发出同形游标，点击真的发出 `items/list` 且返回 200，但返回项全部已在 store 中，`mergeHistoryPage` 按 item id 去重后净变化为零、游标字符串不变，形成「可点击→真请求→零变化→游标不前进」的闭环。改为仅在 `nextCursor && older.length` 时续发单轮游标，否则交给整轮恢复 `MEMORY_HISTORY_RESTART_CURSOR`；并确认续页只带原生 `cursor`、不得再带 `beforeItemId`（原生游标已排除其翻过的项，重复下发会去搜索已被消费的锚点，实测直接抛出 `Released tool history could not be located`）。二是锚点消失被当作读取失败：陈旧 `beforeItemId` 扫不到即 throw，前端 latch 成错误横幅，而该横幅同时会禁用向上滚动触发，读者彻底无法翻页。改为降级到整轮恢复并返回空轮次，不再抛错。验收：新增 `sessionMemoryItemCursor.test.ts` 4 条（续页只带原生游标、耗尽转整轮、锚点消失转整轮、恢复轮次被钉住），先红后绿并逐条还原实现确认载荷性（还原续页分支→`expected undefined to be 'older-1'` 红；还原 throw→`Released tool history could not be located` 红）。真实浏览器 REF_xh3_accu 会话连点：轮次 10→20→30→40（三次各 +10 个真实新轮次），错误横幅不再出现。另有两项过程纠正记入经验：（1）用裸路径 `import()` 探测页面模块会拿到重复模块实例（`bareMatchesResourceModule:false`），必须用 `location.origin + '/src/...'` 同源 specifier 才能读到真实 store；（2）`[data-turn-id]` 选择器在该页恒为 0，不可用于判断是否有进展，应读 store 的事件/轮次计数。此外确认一项非 bug 边界：该会话达到非压力档 3000 事件/8MB 单线程上限后，新页会被接纳后立即按预算裁回，总量稳定在约 3430 条，这是既有内存策略的设计行为，不属分页缺陷，本次未改预算（`codexTranscriptMemoryBudget.ts` 保持原样）。
 
 - 2026-10-28（续：翻页到约 61 轮次后停住，用户定方向「功能优先，向上翻页时这个会话不再限制内存」）：上一条修好游标后，真实会话仍停在约 3430 条/61 轮次。根因不是分页缺陷而是内存预算：当前阅读线程与后台线程共用3000 条/8MB 单线程上限，新页被接纳后立刻按预算裁回。按用户明确方向改为阅读优先，共三处。一是单线程预算分流：`id === currentThreadId` 时用 `READING_THREAD_EVENTS=120000`/`READING_THREAD_BYTES=256MB`，其他线程保持原 3000 条/8MB（压力档 1500/4MB），避免一个读者把所有会话预算一起抬高。二是全局 32MB 判定改为只累加后台线程字节（`backgroundBytes`）：阅读线程自身的字节不计入，否则一次刻意翻回的长历史会自己越过全局阈值并取消自己的额度（实测该会话约 12MB，原逻辑必然触顶）。三是阅读线程不再受 `globalPressure` 压制，但真实堆压力（`usedJSHeapSize > jsHeapSizeLimit*0.7`）与高入流仍然回收，因为此时宁可裁剪也不能让标签页 OOM 丢掉全部正文；钉住页在该档位下仍由 `protectedTurnIds` 保护。验收：新增 `the thread being read keeps paging past the former 3000-event ceiling` 与`background threads stay bounded so one reader cannot grow every transcript` 两条，先红后绿；还原 `reading` 判定后两条同时变红（`expected 1500 to be 7200`），确认载荷性。三条既有用例与新契约正面冲突，按原意重新限定到后台线程而非削弱断言：两条压力/高入流用例改用 `currentThreadId:'other'`（它们测的是压力回收，与是否在阅读无关），`recovered pages survive the event ceiling` 改名为 `a pinned page survives real heap pressure`，只断言钉住页在显式 `pressure:true` 下存活，不再断言同线程未钉住部分被回收。真实浏览器 REF_xh3_accu 会话连点 8 次：轮次 30→40→50→60→70→80→90→100，按钮消失（历史读到起点），事件 2547→5340、正文 9.34MB→14.67MB，heap 稳定在 1.8–2.1GB（远低于 4192MB 上限），无错误横幅。web 会话全量 638 文件 4059 条、`pnpm check` 通过。
+
+- 2026-10-30 Claude/ACP长历史留存：原虚拟列表只减少DOM，完整SDK消息/ACP delta仍全量送入浏览器。新增2MiB有界最近页和绑定provider/session的真实前向游标，ACP按稳定源行增量折叠chunk/tool完整基线，metadataOnly不读正文；大预览明确标记并保留有界只读详情。后端7项红绿/分页重建/HTTP兼容及类型检查通过，浏览器释放和恢复另行组合验收；不以裁剪摘要冒充完整回复。
+
+- 2026-10-30 Codex已读域省略proof绕过：配置了原生read同步时，旧判断只在nativeReadRevision存在才调用原生，因此遗留或不完整调用可只改看板已读。现在Codex read/unread必须同时携带观察时捕获的revision与scope，HTTP拒绝半组proof，CC/ACP和无nativeRead隔离fixture保留原语义；新增先红后绿用例，13项server、19项web及LAN双context HTTP回归通过。见[共享阅读验收](designs/session-mode-implementation-20261029/readsync.md)。
+
+- 2026-10-30 Claude/ACP实时工具大包：此前view=chat仅裁剪Codex通知，ACP rawOutput/content和Claude tool_result/tool_use仍把巨量正文传到浏览器。新增共享结构化工具投影，在网关SSE序列化前裁剪，保留源序号、实际session/sourceID、工具状态、审批和普通最终答复；截断项带精确只读详情引用。3项shared红绿及真实LAN HTTP→正式网关→Chromium原生EventSource通过：上游67,113,626 bytes，浏览器180,218 bytes，最大事件11,256 bytes；19序号、8源ID、两Agent审批及终稿全部保留。这是传输短测，不覆盖30分钟RSS验收。
+
+- 2026-10-30 自动运行层替换误停Claude/ACP或独立数据域：旧逻辑只查Codex活动，且凭相同cwd/entrypoint清理“孤儿”。现在health只给自有CC/ACP标量活动计数，初始化ACP也受保护；自动替换遇连接/缺测/不完整分页延后，显式维护仍可结束精确已核实runtime并报告未知。其他同入口进程只读列候选，绝不自动发信号。脚本21项及runtime22项红绿/回归、类型检查通过，未操作正式进程；见[替换边界](designs/session-mode-implementation-20261029/runtime-replacement.md)。
+
+- 2026-10-30 Claude历史用户问题/裁剪入口消失：SDK user.content数组被保留但renderer只读text，用户问题和图片不显示；同时silent-tool分组会吞掉裁剪源的完整详情入口。现渲染支持的数组正文/图片并为裁剪源保留独立行、精确只读分片详情，64KiB响应解析前限额、源修订变化拒绝混合、关闭/隐藏释放。新单测红绿及CC/ACP两尺寸4项实际Workbench回归通过；大图片二进制查看单独验收，不能用可读base64 JSON冒充。
+
+- 2026-10-30 实时语音生命周期：切换会话后旧stop回执会覆盖新phase，返回聊天卸载Dialog又会卸载音频接收节点，已结束context仍留在32项准入表使连续使用被阻止。UI回调绑定owner/启动代次，音频节点独立常驻并提供扬声器静音，服务端回收revoked context；新增组件/控制器/32轮次反例红绿，并通过真实UI→实际网关/运行层→官方0.165私有daemon→Chromium双WebRTC peer/typed/owned stop整链。取消后迟到麦克风lease增加释放守卫；无登录夹具不代表在线模型音频或实体手机已验。
+- 2026-10-30 项目引用和环境面板：同值账号通知没有改变owner/root，迟到文件快照或环境配置仍可发布到已失效的工作流。面板增加账号/设备/运行代次撤销、取消和写前检查；原生创建记录手动关联还核对跨页面更新。快照客户端补UTF-8字节预算及根路径防御守卫；后端原有注册根/字节限制继续保留。
+- 2026-10-30 语音文字迟到投递：输入内容哈希等待期间账号被撤销，原流程仍可创建unknown记录并调用appendText。哈希完成后重新核对启动代次、账号/连接和精确目标；新组件反例先红后绿，撤销时保留草稿且无原生写入。
+- 2026-10-30 MCP认证详情可读性：详情区继承的次要文字在浅色/深色主题分别只有4.471/3.937对比度。使用现有主题正文前景色，保留4.5门槛；桌面/手机、深浅主题4项真实浏览器红灯全部转绿。
+- 2026-10-30 Claude/ACP工具预算转义漏计：预览键按原始UTF-8计数，ACP历史字符串也未计JSON转义；控制字符可让64KiB预览超限，旧投影行超出整页时还返回空页和结束游标，隐藏前面的用户问题。共享预览改为准确计算键、字符串、标量与分隔符，历史复用同一深度/条目/字节预算；既有超页投影保留真实行/源ID、前向游标及原始工具只读详情。三个先红后绿反例和相关12项通过。
+- 2026-10-30 App/语音并发预检越限：只在异步读取前检查context数量，40个并发语音预检可全被接受，63个App再开6个会达到69。发布context前再次同步核对实际容量及语音owner；32/64固定预算不放宽，两个并发反例先红后绿，预检不启动或停止任务。
+- 2026-10-30 手机工具遮罩背景仍可操作：文件/变更/终端使用移动遮罩时，原条件只有VSCode才将背后的聊天设为inert，Tab可进入被遮挡composer。现所有已显示移动工具统一隔离背景，聊天与草稿保持挂载；挂载单测及393px实际键盘先红后绿，桌面/手机文件全文、保存/关闭保稿、分栏与编辑器iframe保留回归通过。
+
+### 2026-10-30：辅助 Agent 大图与 steer 刷新显示
+
+CC/ACP大图截断后的原始JSON不是图片体验。`historyImages`保留精确源index/MIME，显式二进制只读预览/下载，单blob、10MiB/40MP、源撤销/隐藏立即释放并上报统一数字资源账本；4项真实浏览器验证解码/原字节下载/URL失效。官方0.165 steer确已执行但完成历史可能不单列userMessage，使用明确的display-only持久receipt，禁止伪造native项或重发。仅服务端持久索引确认唯一且精确thread/turn/clientId可合并，歧义必须保留distinct source原文。
+
+- 2026-10-30 会话输入依赖与恢复：已关闭且从未打开的项目/工具面板仍经layout barrel拉入正文重模块，Git操作又经无关计数器引入动画包；慢模块或下载失败会拖住真实输入。改为首次可见加载并保留已访问树，错误局部承接，GitActions直达导入；Git元数据观察独立于面板寿命。Workbench在App加载期间只读准备精确已保存输入目标，ACP先建恢复屏障，迟到选择/账号变化取消旧准备。真实LAN桌面/手机持模块、503、精确owner输入回归通过；本条不代表多页两秒已通过。
+- 2026-10-30 网页数字导航与临时owner：此前缺少聊天/窗口数字键目标偏好，临时菜单卸载还会清掉仍挂载的主标签选择器。新增浏览器可用的Ctrl/Cmd+Shift+1–9与次目标组合、持久目标偏好和冲突检查；选择器按独立注册回收并恢复上一个有效owner。两尺寸浏览器核对真实输入目标、草稿、刷新和无任务写入；模态弹窗/隐藏模式不处理快捷键。
+- 2026-10-30 ACP选择隐式停止与迟到覆盖：AgentSelector/AgentBadge直接停止旧连接，AgentModelPanel的停止回执还可能覆盖等待期间选中的新输入。三个入口统一显式确认、精确旧连接停止、目标/工作目录/账号运行域及离开再返回修订守卫，失败保留原连接；选择已保存owner先只读核对，不隐式创建第二连接。组件反例先红后绿。
+- 2026-10-30 H18字体设置缺口：网页只有语言和主题，缺少聊天/代码字体字号设置；原生代码fence另有固定12px覆盖代码字号变量。增加本机逐字段持久偏好、跨页重读、仅session根应用及显式重置，无自定义值保持原视觉；只有显式代码字号才覆盖fence。真实正文和代码字号的桌面/手机红绿、刷新及草稿回归见composer实施记录。
+- 2026-10-30 开发模块内联source map：Vite开发脚本将完整base64映射附在每个关键响应，增加LAN三页首屏传输。仅serve时复用Vite已持有的真实map和原.map路由，脚本改为同源外部引用，不删除调试信息、不建立第二map缓存；固定7.3.1并核验query/304/HEAD/真实HMR映射。未知版本明确要求重验，文档连续性和React保护保持；脚本字节减少不等于两秒验收已绿。
+
+- 2026-10-30（批准基线纠正）：此前预热偏好记录“无偏好默认关闭”与Q5/Q8的有界关注预热不符。缺键/新设备恢复默认true，已有显式true/false保持，优先可见/聚焦并受统一资源预算回收；没有关闭预热来满足两秒验收。默认/旧版本缺键用例先红后绿，性能正式测试须在true基线上重跑。
+
+### 2026-10-30 Claude 刷新 owner 和审批恢复
+
+activeSessionIds 不是运行实例证明；恢复与切换必须只读核对现有 Query。canonical/native 别名同时约束事件、历史和活动保护；新会话指定 SDK UUID，旧映射按真实历史根保存纯身份元数据。大审批保留原 SDK input 引用并设8/16MiB预算，按精确 runtime/session/request/execution/revision 分片，隐藏/取消释放；超预算仍可拒绝。迟到 snapshot 不覆盖新事件，异步审批不得按旧下标写当前会话。详见 docs/designs/session-mode-implementation-20261029/claude-live-recovery.md。
+
+
+### 2026-10-30 共享队列、归档恢复与原生卡片身份
+
+- 多页面同时操作队列或生命周期时，整数组 localStorage 回写会抹掉另一目标的未知回执，同目标不同参数的并发调用也会误复用前次成功。改成每 operation 独立 metadata key、参数指纹与保留终态的有界 journal；核对旧操作后明确提示新修改未提交，未知只读查询原回执。
+- 删除最后一条待发消息后 rail 卸载，原撤销按钮依赖已卸载组件，确认框无法出现。撤销提示自身持有独立确认与计时暂停，确认前不恢复执行；发送时重查精确目标、账号与原生范围，未发送草稿保持。
+- 归档设置只显示前50项且失败回滚整数组，可能恢复另一条已成功移出的行。使用真实游标、重复游标保护、取消及账号代次守卫；按每行等待恢复ACK。列表管理动作中文化，置顶统一共享服务的实际ACK与异步undo/CAS proof。
+- 官方已接受 steer 的唯一原文现以独立 display receipt 留存：每段最多512项/8MiB，旧段按需分页而不设累计发送次数硬限；响应最多30项/1MiB，默认最新页。精确来源身份歧义永不按文本或相同client ID合并，不建立第二调度器。
+- 可信完成卡片此前没有原账号/运行范围，直接抓当前context会将旧卡片重新授权给同UUID的新账号。完成记录读取前后绑定原 scope/namespace 并持久保存，回复链继承原绑定；旧卡缺身份、跨namespace、同账号新修订、运行实例切换均拒绝写入。最终原生guard使用原scope，已接受的native queue重放不二次add。
+- 验证：C服务端125项、前端领域116项通过；官方0.165真实私有daemon/provider的update/reorder/queued-steer保持精确ID与原轮次。真实网页组合结果及全量、性能和资源限制分别记入[共享管理实施记录](designs/session-mode-implementation-20261029/shared-management.md)，不把单测或accepted当成任务执行完成。
+
+- 2026-10-30 单张图片预览无法继续标注：全附件列表提供标注动作，单张图片详情分支只有移除，保存的草图/图片点击后无编辑入口。详情分支补相同ready状态门控和精确item回调；关闭预览再进入绘图，上传中保持禁用。真实sketch/原图浏览器红灯与两个组件反例确认，组件改后绿，完整浏览器另行复验。
+
+### 2026-10-30 小压缩图片绕过历史预览尺寸限制
+
+- 现象：几十字节GIF声明50MP，CC/ACP最近页和实时SSE的小图内联分支绕过显式二进制预览的40MP检查；旧ACP派生缓存也可继续透传。修复：共享真实header/MIME/尺寸检查覆盖新旧最近页与实时投影，超限改精确源的按需查看/下载入口，保留文字、序号、源ID和安全小图。新源与旧缓存两轮红→绿，连同原图片HTTP/官方SDK私有JSONL与工具预算组合14项通过；自然内存长测及动画全部帧解码分别记账。见 [只读历史与图片](../../docs/designs/session-mode-implementation-20261029/auxiliary-history.md)。
+
+### 2026-10-30 默认单测命令遗漏根目录测试
+
+- 现象：运行层与后端的npm script使用`src/**/*.test.ts`，在默认`/bin/sh`中只匹配下一层目录，未包含`src/*.test.ts`；交互式zsh手动全量与`pnpm test`的覆盖不一致。修复：两包显式并列根目录和子目录模式，将独立只读历史/取消与后端app集成纳入标准命令；并发上限保持4。完整运行与专项结果在本轮验收记录单列。
+
+
+- 2026-10-30 生命周期 operation ID 跨目标竞态：线程锁不能保护全局 receipt key，两个线程并发复用同一operation ID会分别读到不存在并各自写入native，最后只保存后一条。为resume/settings/rename/archive增加操作ID claim外层与原线程锁内层，四个真实并发反例全红后18项生命周期回归全绿；独立操作仍并行。
+- 2026-10-30 原生列表名称降级：列表能读到native name但没有初始化独立名称store，首次关注又把preview作为fallback名称，选择后标题从原名跳成聊天预览。列表/续页接收native name仅提升空值或fallback，保留manual名称与独立preview；新增反例先红，名称相关3文件21项转绿。
+
+### 2026-10-30 首屏隐藏弹窗与手机 Sheet 交接
+
+HistoryProjectsDialog 按需加载前，必须切断 browser-dialog/WorkspaceSwitcher/SidebarAddProjectButton/ProjectSelector 自身的 barrel 旁路，否则仍会阻塞整个模块图。首手势保存到实际模块完成，取消或隐藏后不得迟到打开。手机加载反馈须使用既有受 scope 管理的 Dialog/Portal；普通 fixed 通知会落在 Sidebar Sheet 遮罩之后，按钮可见却点不到。10 单测和 1440/393 真实浏览器验收通过。
+
+- 2026-10-30：同一配对地址只换凭据时，Codex 登录旧验证码/API key 与迟到登录 ACK、用量旧额度没有立即失效。登录 owner 新增精确 host/port/token 捕获并同步清旧输入；额度订阅配对/账号域清旧值、取消旧读。三项作用域单测先红后绿，1440/393 的 ACK 前后/迟到额度 HTTP 六项真实 UI 回归通过，完整账号四项另行通过。见 `docs/designs/session-mode-implementation-20261029/client-account-feedback.md`。
+- 2026-10-30：反馈上传遗漏 SSE resync 撤销，重连后旧报告可残留。现在释放旧报告与观察，但已发 HTTP 不取消、不重发，迟到回执不复活 UI；桌面/手机真实 EventSource 缺口与同值账号通知四项通过。当前26.51007原包反馈六态/关窗后台完成四组逐项对照通过；补报告高度测量及 ResizeObserver 关闭释放红绿灯。
+
+- 2026-10-30 主输入菜单无法重命名：正常composer未传可选onRename回调，菜单项始终禁用。无回调时复用捕获owner表单，名称与pending按原thread保存；切换后仍只提交原目标，账号/运行范围撤销拒写且保留输入。2个反例先红，表单与原菜单106项回归绿，真实浏览器另列。
+- 2026-10-30 早期输入准备离开再返回误恢复：只比较最终UUID/cwd无法察觉下载等待期间曾切到其他目标。增加局部单向失效守卫，selection/sender/cwd/provider变化即取消，短期store订阅在完成/取消释放；不恢复旧输入焦点，不增加native写入。
+
+- 2026-10-30 跨页共享管理ACK丢失：另一页面先消费pending并删除它后，原页面只在内存查确认，置顶成功却无法加入撤销历史。现在先持久保存精确operation/window/namespace/target/action指纹的有界只读回执，再删pending；账号或原意图不匹配拒绝，未知不重发。19项单测及桌面/393手机双页置顶、取消置顶、旧undo拒绝浏览器通过。
+- 2026-10-30 ACP同native session ID混历史：两个独立连接均返回s1会覆盖同一SQLite元信息并混写双方正文。改用runtime/connection/agent/nativeSID哈希组成historySessionId，RPC保持native ID，旧裸ID历史只读保留；fresh source保存真实load回放，已有源不重复。双真实stdio+SQLite红例转绿，重启/同agent多connection/legacy隔离均核对，权限仍按精确connection/request处理。
+- 2026-10-30 ACP删除历史须按源记录的runtime/connection/agent/native ID重新核对owner；运行、待审批或未知时409拒绝，防止旧UI删除后台持久正文。畸形new/load结果保持DELIVERY_UNKNOWN且不重发；ACP v1合法空load结果只投影原请求目标。真实stdio/SQLite反例转绿，未停止正式Agent。
+- 2026-10-30 Bot历史不能以title=NULL判空：实际native load回放没有本地首问标题，须按updates存在性保留并列出。新增连接只清理真正零更新的空来源，防止误删真实回放；SQLite删除/列表反例均转绿。
+- 2026-10-30 ACP load仅在实际initialize的loadSession===true时允许；不支持时NOT_SENT且不分配来源，原会话仍可发送。已发送但未知的load部分来源虽未进入sessions，仍按精确owner保护不允许删除；真实stdio反例均转绿。
+- 2026-10-30 官方daemon stop不结束独立pid-update-loop，原生夹具须启动前注册新私有HOME，运行中捕获精确updater PID/start ticks/exe/argv，再在官方stop之后回收该自有monitor；不能按/tmp前缀、同UID或PPID1清扫。八项真实native资源断言转绿，旧57个无捕获凭据的monitor不清理。
+- 2026-10-30 native版本只从实际initialize首段读取，不依赖codexia品牌或已安装CLI/管理包。当前官方0.163与保留二进制SHA一致，私有8项原生及Chromium WebRTC验证后精确支持0.163/0.165；未知版本仍拒实时写入。正式daemon未停止/升级/重启。
+
+- 2026-10-30 插件操作不再按裸 ID 跨市场更新；以精确原生市场目标和详情 selection generation 阻挡串状态与迟到回执。全部 appsNeedingAuth 明确逐项处理，app/list 实际 isAccessible 才算可用。固定 mutation API 的持久 metadata unknown receipt 在刷新/重复点击后仅只读核对，不重发；账号同值/配对/连接撤销清掉目录、详情、认证与迟到候选。证据见 docs/designs/session-mode-implementation-20261029/plugins.md。
+
+- 2026-10-30 首次打开按需菜单丢键盘焦点：菜单下载期间Radix仅聚焦空容器，正文到达后未进入可用项。现只在焦点仍属原菜单时于下一帧聚焦首项；卸载取消，不抢回已移开的焦点。Git慢下载反馈移到可交互的同scope浮层。桌面/393手机慢模块、Cancel/Escape、首次键盘、保留提交/主输入草稿与503局部关闭3项真实browser绿。
+
+- 2026-10-30：听写权限浏览器验收曾在 describe 内设置 worker 级 launchOptions，导致整文件无法收集；拆为独立权限 spec。另默认 headless shell 的 NotSupportedError 及 fake-UI 绕过拒绝均不能证明用户拒绝路径，改用完整 headless Chromium、真实 CDP/Permissions denied 与严格 NotAllowedError 断言；四项媒体/重试/发送/权限回归通过，未更改产品错误映射或放宽断言。
+
+- 2026-10-30 ACP历史选择不再隐式load/中断：同native ID多连接曾误选最近owner，历史点击还可能改动当前上下文。现在按精确historySessionId只读打开，显式继续才建立独立连接；旧ID不猜归属、不支持load明确保留只读来源。原任务、草稿、审批保留；错目标回执/迟到/账号撤销禁止采用。相关21+15单测通过，真实浏览器与性能证据独立验收。
+
+- 2026-10-30 详情首次手势来源保护：CC/ACP预览挂载时捕获来源scope；同值账号/同endpoint token撤销后不能在点击时给旧source换新身份。两红→15详情/图片单测绿；不增加常驻观察/正文cache。Playwright混合CJS/ESM导出误报通过私有tsx只读预检worker隔离，原handler与RPC限制保持。
+
+- 2026-10-30 HTTP409响应正文丢失不能按状态码推定操作被拒绝：保留outcome-unknown，禁止清除未知回执后自动重发。公共JSON按字节流解码并释放reader/临时正文，错误仅消费一次；已消费但已解锁正文仍报TypeError。红绿/真实HTTP、完整Chrome负结果及headless对照见docs/designs/session-mode-implementation-20261029/json-response-memory.md；不代替30分钟RSS验收。
+
+- 2026-10-30：ACP native session ID 在不同进程不唯一；历史、owner查找和通用输入旁路必须使用独立 historySessionId（精确Agent/endpoint/connection），不能按同nativeID最近owner猜测或自动导入旧草稿。新聊天 busy/审批/未知时创建独立连接，原任务继续。
+- 2026-10-30：AcpSession source ID 暂时清空时 `historySessionId ?? useStore(...)` 会改变hook顺序并触发整页Boundary；所有hook须无条件调用。已有source有→空→有真实红绿，桌面/手机显式历史继续路径复验。
+
+- 2026-10-30：冷图移除 API 总导出后，部分模型/历史/权限 fixture 仍只拦旧 barrel，导致全量中 30 文件漏拦截协议 I/O。迁移 fixture 到 codex/filesystem 等实际模块，合并同模块 RPC 与目录 mock，保留真实组件和“无意外网络”断言；409 项专项通过。菜单寿命回归改用真实空撤销栈的禁用操作，避免把已经恢复正常的重命名当作禁用能力。
+
+- 2026-10-30 ACP删除等待新上下文后跨账号风险：异步替代期间账号scope撤销，旧入口曾继续用新凭据删原记录。现在捕获原来源并在实际删除前再次验证，不能被列表重读替换；迟到撤销红例转绿，原记录保留。
+
+- 2026-10-30 插件详情初次 enrich 可接收另一市场/插件的响应或超预算正文：新增精确原请求目标、结构及 2 MiB 发布前校验，旧摘要保留并显示该选择代次的局部错误；旧选择的迟到错误不会污染新详情。三项红灯、选择错误代次与真实浏览器拒绝分支均转绿，见 [插件验收](../../docs/designs/session-mode-implementation-20261029/plugins.md)。
+- 2026-10-30 插件页关闭期间的同值账号撤销/运行代次变化不能使模块缓存失效：缓存现在保存并复核捕获的 scope，读取时释放失效内容，不增加模块级全局监听；两项关闭页反例先红后绿，刷新目录仍走只读原生接口。
+
+- 2026-10-30 会话“新窗口”只有复制链接/计划弹窗与分屏，没有实际聊天入口；同源新页还会继承原选中、布局和草稿。新增真实同源 noopener 窗口及只读身份 gate，按 UUID 隔离该页持久现场和草稿 owner，保留共享关注集合与真实任务。缺意图/错来源/在途 nonce 变化拒绝挂输入，刷新保留该页后续目标。旧菜单真实红灯与新 68 项协议/store回归及两尺寸浏览器见 [新窗口验收](../../docs/designs/session-mode-implementation-20261029/new-window.md)。
+
+- 2026-10-30 同ID来源重新确认：旧preview scope失效后，actual accepted CC/ACP readonly页为canonical行登记memory-only WeakMap proof，不以新render或对象ref授权；显式“重新核对来源”保留原scope/signal，失效或迟到不发布，同item真实新页确认后可恢复，无整页刷新死路。
+
+- 2026-10-30 新窗口插件与子 Agent 引用草稿仍用共享 whole-map key，独立 owner 不能阻止旧 map 回写原页 metadata；该明确新页面的引用 store 现也使用 window UUID 持久键，普通页面键不变。两个原实现初始化/写入反例红后绿，见 [新窗口](../../docs/designs/session-mode-implementation-20261029/new-window.md)。
+
+- 2026-10-30：窄顶栏真实溢出不是viewport切换后的React延迟；手机theme/sync转更多并保留状态提示，<=1000px次要导航走既有菜单，触摸目标44px不缩水。native EventSource暂停+320/393/768横屏/932横屏操作与几何回归通过，关闭嵌套popover需等待实际关闭后再关闭父菜单，不能固定sleep掩盖遮挡。
+
+- 2026-10-30：tooltip/separator 改直接 Radix 包后，公共 button/sidebar/sheet/popover 仍从总包导入，导致主输入冷启动继续加载不相关控件目录。四入口改用已锁定的直接 primitive；先红后绿的冷图脚本、Popover/Dialog 严格上下文身份、Slot 两版本 DOM/事件/ref 和 Sheet 焦点回归通过（4 脚本、5 文件 18 单测、tsc）。具体两秒收益保留独立实测，未延迟可见输入或改变 API。
+
+
+- 2026-10-30：修复长历史预览来源撤销后无法重新展开。仅刷新近期页不能确认仍显示的向前页 item；实际接受的只读页证明现保留内存原 cursor，显式核对重读原页，拒绝游标时提示重新选择历史，不回退 raw/recent 或操作 Agent。CC/ACP 原 cursor 两红转绿，另覆409拒绝无后续读取。
+
+- 2026-10-30 新窗口把看板 runtime 代次固定，替换看板运行层后即使官方任务仍活也会挡住原窗口/草稿。对已有 Codex 窗口新增同官方端点 identity +原 namespace +精确 ID/cwd 的严格只读前后核对，核实后仅更新该窗口 authority，不改变 UUID/稿/任务。旧 history namespace 不再被误称 daemon identity；未知/不同端点、账号或二次代次仍拒绝，CC 无稳定来源证明时保留 guard。红绿与边界见 [新窗口](../../docs/designs/session-mode-implementation-20261029/new-window.md)。
+
+- 2026-10-30 新窗口读取旧启动记录时保留未知字段，可能把旧 credential/body/draft 字段再次写入 accepted metadata。读取现投影为明确身份字段，网关也仅透传合法的 opaque endpoint identity；注入额外字段的真实反例红后绿，不保存 scopeToken 或正文。见 [新窗口](../../docs/designs/session-mode-implementation-20261029/new-window.md)。
+
+- 2026-10-30 刷新假中断有独立IDB入口：正文缓存不能作为执行权威；最新未核实中断及工具用中性状态，原生SSE/activity/turn-start ACK纯内存proof绑定精确对象/轮次/账号与运行来源，先后顺序都即时收敛。旧真实中断、草稿/审批/任务保留。Codex held历史按endpoint/token锁存取消，不能复用旧请求；fresh相同JSON也须清掉未核实显示标记。见docs/designs/session-mode-implementation-20261029/cached-execution-recovery.md。最终桌面/手机浏览器8/8；此前7/8和6/8诊断确认正文实际已恢复、只是最新进展折叠，修正测试先展开再断言并保留原失败，不替代长期RSS。
+
+- 2026-10-30：共享daemon身份不得复用history namespace或看板runtime UUID。operationContext按固定Unix端点realpath/dev/inode/ctime派生daemonIdentity，并在account/read前后验证；换绑/缺失拒绝，不恢复/发送任务。真实私有官方0.163同HOME重启identity改变、仅Kanban连接替换identity稳定，资源回收为零；见docs/designs/session-mode-implementation-20261029/daemon-endpoint-identity.md。
+
+- 2026-10-30 新窗口性能验收夹具：补齐 @ 文件搜索的真实数组响应，保留未过滤 console error 断言；键入耗时从原生 keydown 内计两个 RAF 并核对更新文字，消除把 Playwright/CDP 往返计入帧延迟的误判。原 30 样本和 2000/100ms 门槛不变，保留首次红灯；真实第四窗口专项 p95 composer 1722.599853515625ms、输入 39.800048828125ms，通过且无任务写入，详见 composer 实施文档。
+
+
+- 2026-10-30：修复会话 App 启动被未使用的 Codex hooks 模块阻塞。App 从 hooks 聚合入口取 useCodexEvents，ESM 同时等待新建、滚动、过滤等未调用 hooks；仅将该值导入改为具体模块，保留原公共导出和 App 显式事件/输入 facade 初始化。桌面/手机持有未使用 useNewThread 网络响应时原 composer 两红，修复后精确 composer 可编辑；后加载原入口仍是同一 hook/store且只有一个原生 EventSource。独立冷进入两秒指标仍待整合验收。
+
+- 2026-10-30 shared 根桶使冷进入必须链接未用的预览/云端再导出，held Slack leaf 可复现桌面/手机无导航。仅 19 个关键 Web 运行导入切八个明确子路径，原模块及弱缓存引用不复制，Node 根 API 与 HMR 流程不变；八个身份反例转绿，浏览器及两秒边界见 docs/designs/session-mode-implementation-20261029/shared-entry-dependencies.md。
+
+- 2026-10-30：ACP零update不等于可删除：同bot另一connection/runtime可能处于首个响应前、replay或unknown。scoped注册禁止自动prune其他source；legacy兼容prune仅限无runtime/connection/native绑定空行。真实SQLite两红→绿，晚到输出仍归原source；docs/designs/session-mode-implementation-20261029/shared-management.md。
+- 2026-10-30（LAN 验收防误判）：新增只读 runner 的评审发现仅验后端可能漏掉前端代理错源，按整个 offline 阶段隐藏错误也会漏掉恢复故障。现前后核对两端 source，通过实际 request 身份及有界故障窗口归因，幂等关闭仍保存失败 metadata；开页前同时验证原生显式已读及共享最新回复已读，不猜 namespace 等价。仅预检已运行，正式浏览器仍待部署信号，见 [验收边界](../../docs/designs/session-mode-implementation-20261029/lan-readonly-acceptance.md)。
+
+- 2026-10-30 性能夹具的API路由也拦截全页脚本：Playwright1.58.2任意Page.route会先启用Fetch全请求拦截并关闭HTTP缓存，API-only pattern仍让数百静态模块经测试worker往返。旧90样本2.45秒红灯保留；新增真实同源Vite HTTPS/H2 API middleware、原生SSE/HMR且无Page.route/Fetch的同指标对照，90/90正确输入p95为1.904/1.932/1.895秒、最大1.976秒，完整正文单列。逐轮传输、独立复算及全部前端/shared来源核对通过；缓存命中数0，不将传输校正误报为缓存或产品单因素加速。见[性能与恢复验收](../../docs/designs/session-mode-implementation-20261029/performance-recovery.md)。
+
+- 2026-10-30 运行代次恢复测试同步 UI / 后台历史读取的取消契约：UI 静默消费来源失效，`reportScopeChanges:true` 的后台消费者得到明确类型错误，且旧传输中止、新请求入场、迟到旧快照不覆盖的检查全部保留。专项 2 文件 21 项、最终完整 Web 752 文件 4606 项通过；产品源码未为此改动，原失败证据保留。
+
+- 2026-10-30 Codex metadata/list 的 account/epoch guard 不足以隔离 Pairing endpoint/token 切换，旧模型/权限、cwd 与列表会迟到覆盖；同源不同项目的列表也缺请求顺序。现使用短期完整来源租约、锁存取消、排队/发布前 guard 与最新列表请求身份，旧成功/错误均不能覆盖新列表。12 项源隔离/去重/取消清理回归先 11 红 1 绿再全绿；凭证只在读取闭包内，不进入 key/日志/磁盘，结束释放 Pairing 订阅。见 docs/designs/session-mode-implementation-20261029/cached-execution-recovery.md。
+
+### 2026-10-30：运行层维护命令的 pnpm 参数分隔符
+
+- 现象：照启动文档执行维护立即报 `Unknown argument: --`，尚未编译、发信号或替换服务。
+- 根因：pnpm 10 会把显式 `--` 传给脚本，文档误用了 npm 的参数写法。
+- 修复：统一为 `pnpm dev:restart --restart-runtime`，与现有脚本帮助和受测参数解析一致；首次失败日志保留在私有部署证据中。
+
+- 上述 pnpm 维护命令已实际验证：正确参数返回成功，新运行层为 current/shared-daemon，官方 daemon 的进程与 socket 身份前后保持。
+
+### 2026-10-30：transcript cache 字节核算的额外编码分配
+
+- 现象：每次缓存读写在 `JSON.stringify` 后又通过 `TextEncoder.encode` 生成与 JSON 等长的 UTF-8 buffer，只为读取 `byteLength`。
+- 修复：用精确 UTF-8 字节计数器替代读写两处编码分配；BigInt 替换、record.bytes、2 MiB 单条/30 MiB 总预算、structured clone、cursor 与缓存正文语义保持不变。
+- 回归：覆盖 Unicode、非 BMP、组合字符、孤立 surrogate、BigInt、实际 IndexedDB 读写以及与 TextEncoder oracle 的预算边界等价。旧版 75 秒 probe 的 42 次大编码/28,193,397 字节是分配机会证据，不是 RSS 因果闭合；新 freeze 的严格 30 分钟测量仍是验收依据。
+
+### 2026-10-30：归档 thread 的 followups / Goal 只读失败
+
+- 现象：原生 archived queue/list 与 goal/get 使用 `-32600`，没有专属 archived code/data；Followup GET 把 5xx 降成确定拒绝并最终报 500。
+- 修复：5xx 保持 unknown；只读 followups 返回 `FOLLOWUP_READ_UNAVAILABLE`，Goal 只对精确 `RpcError(-32600)` 标记 `NATIVE_READ_UNAVAILABLE`，不把未知队列/Goal 视为空。
+- 防回归：独立 private HOME + 0.163.0 原生 daemon fixture 复现并清理；不读取旧 thread 正文，不触碰共享 daemon。
+
+- 2026-10-30 Codex大文件diff经结构化传输后的二次投影会丢失`transcriptMetadataOnly`，turn摘要显示错误`+0/-0`与空预览。现保留继承的metadata-only标记，短diff统计/预览/复制保持，无标记空diff不伪标；私有候选页面及共享/Web红绿证据位于`.dev-runtime/composer-scenarios-20261030/`，immutable旧freeze未改。
+
+- 2026-10-30 浏览器离线时共享 EventSource 可能仍保持 `OPEN`，页面连接状态因此滞留。现收到 `offline` 后关闭当前原生连接并显示 `reconnecting`，保留游标/审批态；`online` 从相同 chat view 与游标重连，runtime-restarted 即使发生在离线期间仍清旧游标，最后一名 subscriber 离开时释放监听，且不由 online 解除超预算暂停。12 项单测通过；显式真实 HTTP/EventSource 短测实际观测原生 readyState 1→2→1、EventHub 总订阅数基线4→5→4、`since=1` 间隙回放及两类审批快照、草稿保持、零写请求。浏览器关卡只在 `SESSION_EVENTSTREAM_OFFLINE_LIVE_RUN=1` 时执行。
+
+### 2026-10-30：M03/M34 isolated native fixture 的路径与 teardown
+
+- 现象：放在 `/tmp` 的官方 0.163 HOME 无法创建 managed helper；更长的 repo `.dev-runtime` 路径又超过 Unix socket pathname 限制。早期 teardown 在官方 stop/owned identity 失败时仍删除 HOME，留下本任务自己的 daemon/updater。
+- 修复：fixture 使用短的私有用户 HOME 随机目录；teardown 只按已捕获的 fixture PID/startTicks、UID、argv 做有界 fallback，updater 根据同次 owned 记录清理；任何 owned root 未确认退出就保留目录并报错。
+- 验收：pinned official 0.163 M03 新聊天首轮与 M34 native 历史双页串行浏览器用例 2/2 通过，覆盖 loopback provider、cursor cancellation/retry、工具输出裁剪与 cleanup。早期失败日志及最终 evidence 保留在 `.dev-runtime/m03-m34-20261030/`；正式/共享 daemon 未触碰。
+
+- 2026-10-30 大批未展开历史的快照先进入界面，250ms 后 governor 再裁剪，导致重复渲染并拖慢最新回复出现。现仅在变更快照超过既有3000事件上限且不是当前固定阅读窗口时同步执行原预算回收，清除待执行debounce并防止自身发布递归；普通流、字节/压力检查及显式阅读仍走原调度，活动轮次、审批和恢复游标不变。3项回归先2红/1绿，修复后连同原预算/governor共54项通过。另修M08预热条件：预览中的同名文字不代表完整聊天组件就绪，改为真实聊天行可见且预览已消失；原500ms/行数/DOM/正文断言不变。私有候选3次357.5/431.3/394.8ms及3项滚动通过，最终源码性能与内存验收另记，不把候选结果代替最终验收。
+
+- 2026-10-30 原生 HTTP 内存测试夹具的 WebSocket upgrade 曾无差别返回 101 后关闭，导致 HMR 反复重连。夹具现只转发精确 `/`、`vite-hmr`、单个非空 token query 至固定 source origin，并按 HTTP(S) 映射 ws(s)；身份复核、pending upgrade、frame/buffer 限额和有限期 teardown 均覆盖。此为夹具修复，不据此归因 renderer RSS 差异或宣称 30 分钟内存验收通过。证据 `.dev-runtime/root-native-memory-20261030/hmr-ws-proof/`。
+
+- 2026-10-30 历史同快照比较用 JSON.stringify，官方 hook 的 BigInt 计数导致重复最近页恢复失败，相同大回复还会生成两份正文字符串。改为现有逐字段比较，精确区分 BigInt、缓存执行可信度与数组长度，仍保留原数组 no-op。history converter→merge 的 BigInt/大正文用例2红→绿，相关102项及公共比较器5项通过；这不证明长期 RSS 根因，冻结浏览器与长测另记。
+
+- 2026-10-30 Markdown 公式预处理每片段重复三次、无公式消息仍逐字重建，缓存预算核算也生成完整正文 JSON。改为每片段一次适配、无分隔符复用当前输入，以及原生 JSON 骨架加精确转义字符串字节计数。未新增全局正文缓存；BigInt/structured clone、原预算与休眠保护保持。相关57文件346项通过，1600随机值与原生 JSON oracle 一致，先红后绿日志保留。4分钟采样仅为分配热点证据，stopSampling 后强制GC不能作自然回收或长期 RSS 通过证据。
+
+- 2026-10-30 App预载完成仍等待loading占位：新源M54 p95超2秒13.4ms；单页原生HTTP时序显示模块在health前已resolve，但App render后303.6ms才释放占位，与React Suspense重试节流吻合，具体lane未定位。改用普通state承接共享import，保留错误边界、真实子组件Suspense、卸载清理及草稿组件身份。10文件30项回归通过，正式新源M54/M39仍须另记，不靠重跑同版挑绿。

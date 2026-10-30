@@ -43,6 +43,7 @@
   flex-shrink: 0;
 }
 .session-mode .session-codex-mcp-server-card .session-mcp-server-details {
+  color: var(--foreground);
   margin-top: 10px;
   line-height: 18px;
   overflow-wrap: anywhere;

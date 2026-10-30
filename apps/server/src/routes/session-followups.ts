@@ -13,6 +13,7 @@ import {
   FollowupRejected,
   type FollowupRuntime,
 } from "../services/codex-followups.js";
+import { NativeCodexFollowups } from "../services/native-codex-followups.js";
 import type { SessionCodexFeishuNotifier } from "../services/session-codex-feishu-notifier.js";
 
 class QueueOwnedElsewhere extends Error {
@@ -23,6 +24,8 @@ class QueueOwnedElsewhere extends Error {
 function followupErrorHandler(error: Error, _request: FastifyRequest, reply: FastifyReply) {
   if (error instanceof QueueOwnedElsewhere)
     return reply.code(409).send({ error: error.message, code: error.code, deliveryStage: "not-admitted" });
+  if (error instanceof FollowupRejected)
+    return reply.code(409).send({ error: error.message, code: "FOLLOWUP_REJECTED" });
   return reply.send(error);
 }
 
@@ -63,9 +66,11 @@ function submit(value: unknown): FollowupSubmit {
     "mode",
     "expectedTurnId",
     "recoverAfterError",
+    "expectedScope",
   ]);
   id(v.id);
   id(v.threadId);
+  if (v.expectedScope !== undefined && (typeof v.expectedScope !== "string" || v.expectedScope.length < 1 || v.expectedScope.length > 512)) invalid();
   message(v.text);
   if (!["queue", "steer", "replace"].includes(v.mode)) invalid();
   if (v.expectedTurnId !== undefined) id(v.expectedTurnId);
@@ -156,8 +161,11 @@ function submit(value: unknown): FollowupSubmit {
     "sandboxPolicy",
     "collaborationMode",
     "personality",
+    "permissions",
   ]);
   if (JSON.stringify(p).length > 32000) invalid();
+  if (p.permissions != null && (typeof p.permissions !== "string" || !p.permissions.trim() || p.permissions.length > 4096 || /[\x00-\x1f]/.test(p.permissions))) invalid();
+  if (p.permissions != null && p.sandboxPolicy != null) invalid("命名权限配置不能与沙箱策略同时提交");
   for (const name of ["cwd", "model", "effort"])
     if (
       p[name] != null &&
@@ -271,8 +279,15 @@ function submit(value: unknown): FollowupSubmit {
 function action(value: unknown): FollowupAction {
   const a = object(value);
   if (a.type === "undo") {
-    keys(a, ["type", "token"]);
+    keys(a, ["type", "token", "confirmExecution"]);
     id(a.token);
+    if (a.confirmExecution != null && a.confirmExecution !== true) invalid();
+    return a as FollowupAction;
+  }
+  if (a.type === "migrate") {
+    keys(a, ["type", "id", "confirmThreadSettings"]);
+    id(a.id);
+    if (a.confirmThreadSettings !== true) invalid();
     return a as FollowupAction;
   }
   if (["clear", "pause", "resume"].includes(a.type)) {
@@ -313,6 +328,9 @@ export function registerSessionFollowupRoutes(
     fetch?: typeof fetch;
     runtime?: FollowupRuntime;
     autoStart?: boolean;
+    nativeQueue?: boolean;
+    /** Same admission gate as explicit lifecycle operations; never a native lock. */
+    withWrite?: <T>(threadId: string, work: () => Promise<T>) => Promise<T>;
     completionNotifier?: Pick<
       SessionCodexFeishuNotifier,
       "cursor" | "observe" | "close"
@@ -399,12 +417,21 @@ export function registerSessionFollowupRoutes(
       try {
         error = ((await response.json()) as any).error ?? error;
       } catch {}
-      if (response.status >= 502) throw new Error(error);
+      if (response.status >= 500)
+        throw Object.assign(new Error(error), { upstreamStatus: response.status });
       throw new FollowupRejected(error);
     }
     return response.json() as Promise<any>;
   }
   const runtime = options.runtime ?? {
+    context: () => upstream("/api/internal/codex/operation-context"),
+    guardedCall: (method: string, params: Record<string, unknown>, expectedScope: string) => {
+      if (method === "thread/queue/restore") return upstream("/api/internal/codex/guarded-queue-restore", { expectedScope, ...params });
+      if (method === "review/start") return upstream("/api/internal/codex/guarded-review", { expectedScope, ...params });
+      if (method === "turn/interrupt") return upstream("/api/internal/codex/guarded-interrupt", { expectedScope, ...params });
+      if (method === "thread/resume") return upstream("/api/internal/codex/guarded-queue-load", { expectedScope, threadId: params.threadId });
+      return upstream("/api/internal/codex/guarded-queue", { expectedScope, method, params });
+    },
     syncHolds: async (snapshot: { busy: boolean; threadIds: string[] }) => {
       const origin = options.origin();
       if (!origin) throw new Error("会话服务尚未连接");
@@ -460,7 +487,34 @@ export function registerSessionFollowupRoutes(
       return result;
     },
   };
-  const queue = new CodexFollowups(runtime, options.file);
+  const admit = <T>(threadId: string, work: () => Promise<T>): Promise<T> =>
+    options.withWrite ? options.withWrite(threadId, work) : work();
+  const writeMethods = new Set(["turn/start", "turn/steer", "turn/interrupt", "review/start", "thread/fork", "thread/resume", "thread/settings/update", "thread/queue/add", "thread/queue/update", "thread/queue/delete", "thread/queue/reorder", "thread/queue/start", "thread/queue/restore"]);
+  const admittedRuntime: FollowupRuntime = {
+    ...runtime,
+    ...(runtime.guardedCall ? { guardedCall: async (method: string, params: Record<string, unknown>, expectedScope: string) => {
+      let entered = false;
+      try { return await admit(String(params.threadId), () => { entered = true; return runtime.guardedCall!(method, params, expectedScope); }); }
+      catch (error) { if (!entered) throw new FollowupRejected(error instanceof Error ? error.message : "会话正在归档"); throw error; }
+    } } : {}),
+    call: async (method, params) => {
+      if (!writeMethods.has(method) || typeof params.threadId !== "string")
+        return runtime.call(method, params);
+      let entered = false;
+      try {
+        return await admit(params.threadId, () => { entered = true; return runtime.call(method, params); });
+      } catch (error) {
+        // Admission rejection is certain: native never received this attempt.
+        if (!entered) throw new FollowupRejected(error instanceof Error ? error.message : "会话正在归档");
+        throw error;
+      }
+    },
+  };
+  // A real runtime now uses the official persistent queue. The old file remains
+  // an explicit migration source; no timer dispatches its frozen submissions.
+  const queue = (options.nativeQueue ?? !options.runtime)
+    ? new NativeCodexFollowups(admittedRuntime, options.file)
+    : new CodexFollowups(admittedRuntime, options.file);
   const dispatchSoon = () => {
     if (options.autoStart === false) return;
     void queue
@@ -484,19 +538,35 @@ export function registerSessionFollowupRoutes(
   async function enqueue(input: unknown) {
     const data = submit(input);
     await ready();
-    const result = await queue.submit(data);
+    const result = await admit(data.threadId, () => queue.submit(data));
     dispatchSoon();
     return result;
   }
   app.get<{ Querystring: { threadId: string } }>(
     "/api/session/followups",
     { errorHandler: followupErrorHandler },
-    async (request) => {
+    async (request, reply) => {
       const threadId = id(request.query.threadId);
       await ready();
-      return queue.get(threadId);
+      try {
+        return await queue.get(threadId);
+      } catch (error) {
+        if (Number((error as { upstreamStatus?: unknown })?.upstreamStatus) >= 500)
+          return reply.code(409).send({
+            error: "官方队列状态暂不可用；原队列状态未知，已保留当前显示",
+            code: "FOLLOWUP_READ_UNAVAILABLE",
+          });
+        throw error;
+      }
     },
   );
+  app.get<{ Querystring: { threadId?: string; expectedScope?: string; cursor?: string; limit?: string } }>("/api/session/followups/steer-receipts", { errorHandler: followupErrorHandler }, async (request, reply) => {
+    if (!(queue instanceof NativeCodexFollowups)) return reply.code(409).send({ error: "旧运行服务不支持持久补充说明回执" });
+    const threadId = id(request.query.threadId), limit = request.query.limit === undefined ? 30 : Number(request.query.limit);
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 30 || (request.query.cursor !== undefined && (typeof request.query.cursor !== "string" || request.query.cursor.length > 280))) invalid("补充说明分页参数无效");
+    await ready(); reply.header("cache-control", "no-store");
+    return queue.steerReceipts(threadId, request.query.expectedScope, request.query.cursor ?? null, limit);
+  });
   app.post(
     "/api/session/followups/submit",
     { bodyLimit: 1024 * 1024, errorHandler: followupErrorHandler },
@@ -506,27 +576,35 @@ export function registerSessionFollowupRoutes(
   );
   app.post("/api/session/followups/change", { errorHandler: followupErrorHandler }, async (request) => {
     const data = object(request.body);
-    keys(data, ["threadId", "revision", "action"]);
+    keys(data, ["threadId", "revision", "action", "expectedScope", "operationId"]);
     const threadId = id(data.threadId);
     if (!Number.isSafeInteger(data.revision) || data.revision < 0) invalid();
     const op = action(data.action);
     await ready();
-    const result = await queue.change(threadId, data.revision, op);
+    const result = await admit(threadId, () => queue instanceof NativeCodexFollowups ? queue.change(threadId, data.revision, op, data.expectedScope, runtime.context ? id(data.operationId) : data.operationId) : queue.change(threadId, data.revision, op));
     dispatchSoon();
     return result;
   });
+  app.get<{ Querystring: { threadId?: string; operationId?: string; expectedScope?: string } }>("/api/session/followups/actions", { errorHandler: followupErrorHandler }, async (request, reply) => {
+    if (!(queue instanceof NativeCodexFollowups)) return reply.code(409).send({ error: "旧运行服务不支持官方队列操作回执" });
+    await ready(); reply.header("cache-control", "no-store");
+    return await queue.actionReceipt(id(request.query.threadId), id(request.query.operationId), request.query.expectedScope) ?? reply.code(404).send({ error: "尚未登记此队列操作" });
+  });
   app.post("/api/session/followups/stop", { errorHandler: followupErrorHandler }, async (request) => {
     const data = object(request.body);
-    keys(data, ["threadId", "turnId"]);
+    keys(data, ["threadId", "turnId", "expectedScope"]);
     const threadId = id(data.threadId),
       turnId = id(data.turnId);
     await ready();
-    await queue.stop(threadId, turnId);
+    if (queue instanceof NativeCodexFollowups) {
+      if (runtime.context && (typeof data.expectedScope !== "string" || data.expectedScope.length > 512)) invalid("请先核对当前运行服务后再停止");
+      await queue.stop(threadId, turnId, data.expectedScope);
+    } else await queue.stop(threadId, turnId);
     return queue.get(threadId);
   });
   app.post("/api/session/followups/review", { errorHandler: followupErrorHandler }, async (request) => {
     const data = object(request.body);
-    keys(data, ["threadId", "delivery", "target"]);
+    keys(data, ["threadId", "delivery", "target", "operationId", "expectedScope"]);
     const threadId = id(data.threadId);
     if (!["inline", "detached"].includes(data.delivery)) invalid();
     const target = object(data.target);
@@ -544,7 +622,13 @@ export function registerSessionFollowupRoutes(
       if (!message(target[field]).trim()) invalid();
     if (target.title != null) message(target.title);
     await ready();
-    return queue.review(threadId, data.delivery, target);
+    return admit(threadId, () => queue instanceof NativeCodexFollowups ? queue.review(threadId, data.delivery, target, id(data.operationId), data.expectedScope) : queue.review(threadId, data.delivery, target));
+  });
+  app.get<{ Querystring: { threadId?: string; operationId?: string; expectedScope?: string } }>("/api/session/followups/review", { errorHandler: followupErrorHandler }, async (request, reply) => {
+    if (!(queue instanceof NativeCodexFollowups)) return reply.code(409).send({ error: "旧运行服务不支持持久审查回执" });
+    const threadId = id(request.query.threadId), operationId = id(request.query.operationId);
+    await ready(); reply.header("cache-control", "no-store");
+    return (await queue.reviewReceipt(threadId, operationId, request.query.expectedScope)) ?? reply.code(404).send({ error: "尚未登记此审查操作" });
   });
   let timer: ReturnType<typeof setTimeout> | undefined,
     streamTimer: ReturnType<typeof setTimeout> | undefined;
@@ -651,5 +735,12 @@ export function registerSessionFollowupRoutes(
     lease?.stdin?.end();
     await leaseExit?.catch(() => {});
   });
-  return Object.assign(queue, { enqueue });
+  return Object.assign(queue, {
+    enqueue,
+    pause: async (threadId: string) => {
+      if (queue instanceof NativeCodexFollowups) return queue.pause(threadId);
+      const state = await queue.inspect(threadId);
+      await queue.change(threadId, state.revision, { type: "pause" });
+    },
+  });
 }

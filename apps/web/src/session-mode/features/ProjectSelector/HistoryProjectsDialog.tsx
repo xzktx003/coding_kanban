@@ -20,12 +20,13 @@ import { useAgentSettingsStore } from '@session/stores/useAgentSettingsStore';
 import { useLayoutStore } from '@session/stores/useLayoutStore';
 import { useWorkspaceStore } from '@session/stores/useWorkspaceStore';
 import { getFilename } from '@session/utils/getFilename';
+import { isSessionInteractionVisible } from '@session/session-dom';
 
-export function HistoryProjectsDialog() {
+export function HistoryProjectsDialog({initialOpen=false}:{initialOpen?:boolean}={}) {
   const { projects, historyProjects, setCwd, addProject } = useWorkspaceStore();
   const { selectedAgent, setSelectedAgent } = useAgentSettingsStore();
   const { setView, setActiveSidebarTab } = useLayoutStore();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(initialOpen);
   const [continueAgent, setContinueAgent] = useState<'codex' | 'cc'>(selectedAgent);
   const [selectedProjects, setSelectedProjects] = useState<string[]>([]);
   const [isContinuing, setIsContinuing] = useState(false);
@@ -43,7 +44,7 @@ export function HistoryProjectsDialog() {
   );
 
   useEffect(() => {
-    const show = () => setOpen(true);
+    const show = () => { if(isSessionInteractionVisible())setOpen(true); };
     window.addEventListener("session-project-history", show);
     return () => window.removeEventListener("session-project-history", show);
   }, []);

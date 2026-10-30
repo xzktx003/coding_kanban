@@ -1,8 +1,7 @@
 import { beforeEach, expect, it, vi } from "vitest";
 const api = vi.hoisted(() => ({ turnStart: vi.fn(), post: vi.fn() }));
-vi.mock("./apiAdapt", async original => ({ ...(await original<object>()), turnStart: api.turnStart }));
 vi.mock("./apiAdapt/shared", async original => ({ ...(await original<object>()), postJsonWithOptions: api.post }));
-vi.mock("./apiAdapt/codex", async original => ({ ...(await original<object>()), threadAccess: vi.fn(async () => ({ state: "owned", generation: 1 })) }));
+vi.mock("./apiAdapt/codex", async original => ({ ...(await original<object>()), turnStart: api.turnStart, threadAccess: vi.fn(async () => ({ state: "owned", generation: 1 })) }));
 import { codexService } from "./codexService";
 import { followupService, useFollowupStore } from "./followupService";
 import { changeThreadModel, ensureThreadModelSettings, flushThreadModelSettings, hydrateThreadModel } from "../stores/useThreadModelStore";
@@ -55,3 +54,4 @@ it("explicit frozen child/retry parameters bypass unrelated unknown permission p
   await followupService.submit("child", { revision: 1, writeId: "edit3_00000000-0000-4000-8000-000000000092" }, "permission-send", "retry", [], "queue", undefined, frozen);
   expect(api.post.mock.calls[0][1].parameters).toEqual(frozen);
 });
+vi.mock("./nativeOperationContext", () => ({ readNativeOperationContext: vi.fn(async () => ({ scopeToken: "fixture-runtime-scope", namespace: "fixture-history" })) }));

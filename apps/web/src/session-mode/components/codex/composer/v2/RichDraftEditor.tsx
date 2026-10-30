@@ -3,6 +3,7 @@ import { splitDraftBlocks, replaceDraftBlock } from "./content";
 import { formatDraftRange } from "../editor/formatSelection";
 import { CodeLanguagePicker } from "./CodeLanguagePicker";
 import { canonicalCodeLanguage } from "./codeLanguages";
+import { matchesSessionShortcut } from "@session/services/sessionKeyboardShortcuts";
 const CodeBlockEditor = lazy(() => import("./CodeBlockEditor"));
 // Textareas normalize CRLF to LF; draft offsets always address the original text.
 function draftOffset(raw: string, offset: number) {
@@ -96,16 +97,14 @@ export function RichDraftEditor({
       if (composing.current || event.isComposing || event.keyCode === 229)
         return;
       const listKind =
-        (event.altKey && !event.shiftKey && event.key === "4") ||
-        (event.shiftKey && !event.altKey && event.key === "9")
+        matchesSessionShortcut(event, "ordered-list")
           ? "ol"
-          : (event.altKey && !event.shiftKey && event.key === "5") ||
-              (event.shiftKey && !event.altKey && event.key === "8")
+          : matchesSessionShortcut(event, "unordered-list")
             ? "ul"
-            : event.altKey && !event.shiftKey && event.key === "6"
+            : matchesSessionShortcut(event, "checklist")
               ? "check"
               : null;
-      if (!listKind || !(event.metaKey || event.ctrlKey)) return;
+      if (!listKind) return;
       const target = event.target;
       if (
         !(target instanceof HTMLTextAreaElement) ||

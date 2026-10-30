@@ -73,11 +73,13 @@ for (const streaming of [false, true]) {
       <AgentMessageItem threadId="own" streaming={streaming} text={value} />,
     );
     if (streaming) {
+      await waitFor(() =>
+        expect(container.querySelector("table")).not.toBeNull(),
+      );
+      expect(container.querySelector(".codex-markdown")).not.toBeNull();
       expect(
-        container.querySelector("[data-codex-streaming-text]")?.textContent,
-      ).toBe(value);
-      expect(container.querySelector("table")).toBeNull();
-      expect(container.querySelector(".codex-markdown")).toBeNull();
+        container.querySelector(".codex-message-native-actions"),
+      ).toBeNull();
       rerender(<AgentMessageItem threadId="own" text={value} />);
     }
     await waitFor(() =>

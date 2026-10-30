@@ -23,12 +23,16 @@ const api = vi.hoisted(() => ({
   gitPush: vi.fn(),
   gitCreateBranch: vi.fn(),
   gitBranchInfo: vi.fn(),
+  renameSession: vi.fn(),
 }));
 vi.mock("@session/services/apiAdapt/codex", () => ({
   ...api,
   threadAccess: vi.fn(),
 }));
 vi.mock("@session/services/apiAdapt/git", () => api);
+vi.mock("@session/services/sessionNames", () => ({
+  renameSession: api.renameSession,
+}));
 vi.mock("@session/hooks/useThreadModelSettings", () => ({
   useThreadModelSettings: () => ({
     model: "fixture",
@@ -90,6 +94,7 @@ async function open(label: string) {
     { key: "ArrowDown" },
   );
   fireEvent.click(await screen.findByRole("menuitem", { name: label }));
+  await screen.findByRole("dialog");
 }
 it.each([
   ["归档聊天", "确认归档", "archiveThread"],
@@ -408,4 +413,44 @@ it("retains a clean confirmation through StrictMode effect replay", async () => 
   await open("归档聊天");
   fireEvent.click(screen.getByRole("button", { name: "确认归档" }));
   await waitFor(() => expect(api.archiveThread).toHaveBeenCalledWith("form-a"));
+});
+
+it("enables the normal rename action without an optional host callback, retaining its opening owner", async () => {
+  const view = mount();
+  await open("重命名聊天");
+  fireEvent.change(screen.getByRole("textbox", { name: "会话名称" }), {
+    target: { value: "Renamed A" },
+  });
+  view.switchTo("form-b");
+  fireEvent.click(screen.getByRole("button", { name: "保存名称" }));
+  await waitFor(() =>
+    expect(api.renameSession).toHaveBeenCalledExactlyOnceWith(
+      "codex",
+      "form-a",
+      "Renamed A",
+    ),
+  );
+});
+it("preserves a cancelled rename and rejects a revoked account before writing", async () => {
+  mount();
+  await open("重命名聊天");
+  fireEvent.change(screen.getByRole("textbox", { name: "会话名称" }), {
+    target: { value: "Saved local rename" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "关闭面板" }));
+  await open("重命名聊天");
+  expect(
+    (screen.getByRole("textbox", { name: "会话名称" }) as HTMLInputElement)
+      .value,
+  ).toBe("Saved local rename");
+  act(() => invalidateCodexOperationScope());
+  fireEvent.click(screen.getByRole("button", { name: "保存名称" }));
+  await waitFor(() =>
+    expect(screen.getByRole("alert").textContent).toContain("账号已变化"),
+  );
+  expect(api.renameSession).not.toHaveBeenCalled();
+  expect(
+    (screen.getByRole("textbox", { name: "会话名称" }) as HTMLInputElement)
+      .value,
+  ).toBe("Saved local rename");
 });

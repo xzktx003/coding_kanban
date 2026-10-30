@@ -436,44 +436,47 @@ export function CodexMarkdown({
       <VisualizationContent
         text={value}
         projectRoot={cwd ?? undefined}
-        renderMarkdown={(text) => (
-          <MarkdownStreaming.Provider value={streaming}>
-            <NativeMarkdownSource.Provider value={nativeMathMarkdown(text)}>
-              <Streamdown
-                components={components}
-                allowedTags={nativeCitationTags}
-                plugins={{ code, math }}
-                remarkPlugins={[
-                  ...Object.values(defaultRemarkPlugins),
-                  remarkNativeFileCitations(nativeMathMarkdown(text)),
-                  fileReferences,
-                ]}
-                controls={{
-                  code: true,
-                  table: true,
-                  mermaid: {
-                    copy: true,
-                    download: true,
-                    fullscreen: false,
-                    panZoom: true,
-                  },
-                }}
-                shikiTheme={code.getThemes()}
-                mode={streaming ? "streaming" : "static"}
-                isAnimating={streaming}
-                className="codex-markdown-blocks"
-                rehypePlugins={nativeRehypePlugins}
-                urlTransform={(url, key, node) =>
-                  parseFileReference(url, cwd) || /^sms:/i.test(url)
-                    ? url
-                    : defaultUrlTransform(url, key, node)
-                }
-              >
-                {nativeMathMarkdown(text)}
-              </Streamdown>
-            </NativeMarkdownSource.Provider>
-          </MarkdownStreaming.Provider>
-        )}
+        renderMarkdown={(text) => {
+          const normalized = nativeMathMarkdown(text);
+          return (
+            <MarkdownStreaming.Provider value={streaming}>
+              <NativeMarkdownSource.Provider value={normalized}>
+                <Streamdown
+                  components={components}
+                  allowedTags={nativeCitationTags}
+                  plugins={{ code, math }}
+                  remarkPlugins={[
+                    ...Object.values(defaultRemarkPlugins),
+                    remarkNativeFileCitations(normalized),
+                    fileReferences,
+                  ]}
+                  controls={{
+                    code: true,
+                    table: true,
+                    mermaid: {
+                      copy: true,
+                      download: true,
+                      fullscreen: false,
+                      panZoom: true,
+                    },
+                  }}
+                  shikiTheme={code.getThemes()}
+                  mode={streaming ? "streaming" : "static"}
+                  isAnimating={streaming}
+                  className="codex-markdown-blocks"
+                  rehypePlugins={nativeRehypePlugins}
+                  urlTransform={(url, key, node) =>
+                    parseFileReference(url, cwd) || /^sms:/i.test(url)
+                      ? url
+                      : defaultUrlTransform(url, key, node)
+                  }
+                >
+                  {normalized}
+                </Streamdown>
+              </NativeMarkdownSource.Provider>
+            </MarkdownStreaming.Provider>
+          );
+        }}
       />
     </div>
   );

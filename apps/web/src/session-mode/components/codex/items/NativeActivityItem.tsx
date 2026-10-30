@@ -1,11 +1,8 @@
+import type { RenderTermination } from "../presentation/renderTermination";
 import { Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type {
-  ThreadItem,
-  TurnStatus,
-  WebSearchAction,
-} from "@session/bindings/v2";
+import type { ThreadItem, WebSearchAction } from "@session/bindings/v2";
 import type { WebSearchItem } from "@session/bindings";
 import { CodexImage } from "../presentation/CodexImage";
 import { nativeImageData } from "../presentation/nativeMedia";
@@ -134,7 +131,7 @@ export function NativeActivityItem({
 }: {
   item: ThreadItem;
   running?: boolean;
-  termination?: TurnStatus;
+  termination?: RenderTermination;
   startedAtMs?: number | null;
 }) {
   const { t, i18n } = useTranslation("thread");
@@ -150,7 +147,11 @@ export function NativeActivityItem({
           summary={
             <>
               <span>
-                {t(active ? "activity.searchingWeb" : "activity.searchedWeb")}
+                {termination === "unverified"
+                  ? "正在核对轮次状态"
+                  : t(
+                      active ? "activity.searchingWeb" : "activity.searchedWeb",
+                    )}
               </span>
               {detail && (
                 <>
@@ -180,9 +181,11 @@ export function NativeActivityItem({
               icon={<NativeToolIcon name="image" />}
               running={active}
               summary={
-                count === 1
-                  ? t("activity.viewedImage")
-                  : `Viewed ${count} images`
+                termination === "unverified"
+                  ? "正在核对轮次状态"
+                  : count === 1
+                    ? t("activity.viewedImage")
+                    : `Viewed ${count} images`
               }
             />
           </div>
@@ -191,11 +194,13 @@ export function NativeActivityItem({
         <NativeToolDisclosure
           icon={<NativeToolIcon name="image" />}
           summary={
-            count === 1
-              ? t("activity.viewedImage")
-              : (i18n?.language ?? "zh").startsWith("zh")
-                ? `已查看 ${count} 张图像`
-                : `Viewed ${count} images`
+            termination === "unverified"
+              ? "正在核对轮次状态"
+              : count === 1
+                ? t("activity.viewedImage")
+                : (i18n?.language ?? "zh").startsWith("zh")
+                  ? `已查看 ${count} 张图像`
+                  : `Viewed ${count} images`
           }
         >
           <div className="codex-native-image-gallery">
@@ -234,6 +239,10 @@ export function NativeActivityItem({
     }
     case "dynamicToolCall":
       if (nativeToolActivityMetadata(item).grouping === "hidden") return null;
+      if (termination === "unverified")
+        return (
+          <NativeToolDisclosure summary={`正在核对轮次状态 · ${item.tool}`} />
+        );
       if (item.namespace === "codex_app")
         return <NativeDynamicToolItem item={item} running={active} />;
       return (

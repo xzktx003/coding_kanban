@@ -1,3 +1,4 @@
+import { sessionWindowId, sessionWindowDraftOwner, sessionWindowStorageName } from "@session/services/sessionWindowContext";
 import { useEffect } from "react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
@@ -18,12 +19,13 @@ export const sessionDraftKey = (
   cwd?: string | null,
   agentId?: string,
 ) =>
-  JSON.stringify([
+  sessionWindowDraftOwner(JSON.stringify([
     kind,
     agentId ?? "",
     id ? "session" : "new",
     id ?? cwd ?? "",
-  ]);
+  ]));
+const TEXT_DRAFT_STORAGE_NAME = sessionWindowStorageName("kanban.session.text-drafts");
 const EMPTY: TextDraft = { text: "", revision: 0 };
 interface DraftStore {
   drafts: Record<string, TextDraft>;
@@ -71,7 +73,7 @@ export const useSessionDraftStore = create<DraftStore>()(
         const current = readDraft(owner);
         if (!sameTextDraft(current, snapshot)) return;
         const next = storage.clearSubmitted(
-          "kanban.session.text-drafts",
+          TEXT_DRAFT_STORAGE_NAME,
           owner,
           snapshot,
         );
@@ -98,7 +100,7 @@ export const useSessionDraftStore = create<DraftStore>()(
         });
       },
       migrateLegacy: (kind, owner) => {
-        if (get().migrated.includes(kind)) return;
+        if (sessionWindowId() || get().migrated.includes(kind)) return;
         const name =
           kind === "cc"
             ? "kanban.session.cc-input-storage"
@@ -133,7 +135,7 @@ export const useSessionDraftStore = create<DraftStore>()(
       },
     }),
     {
-      name: "kanban.session.text-drafts",
+      name: TEXT_DRAFT_STORAGE_NAME,
       version: 1,
       storage,
       partialize: (s) => ({ drafts: s.drafts, migrated: s.migrated }),

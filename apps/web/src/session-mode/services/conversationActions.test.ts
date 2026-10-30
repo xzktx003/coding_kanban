@@ -1,10 +1,15 @@
 // @vitest-environment jsdom
 import { beforeEach, expect, it, vi } from "vitest";
-const api = vi.hoisted(() => ({ threadFork: vi.fn(), startReview: vi.fn() }));
+const api = vi.hoisted(() => ({ threadFork: vi.fn(), startReview: vi.fn(), readReview: vi.fn() }));
 vi.mock("./apiAdapt/codex", () => api);
 vi.mock("./apiAdapt/shared", () => ({
-  postJsonWithOptions: (_path: string, body: unknown) => api.startReview(body),
+  postJsonWithOptions: async (_path: string, body: any) => ({ ...(await api.startReview(body)), operationId: body.operationId, threadId: body.threadId, status: "accepted" }),
+  getJsonWithOptions: api.readReview,
+  isExplicitRequestRejection: () => false,
 }));
+vi.mock("./nativeOperationContext", () => ({ readNativeOperationContext: async () => ({ scopeToken: "fixture-scope", namespace: "fixture-domain" }) }));
+import { invalidateCodexOperationScope } from "./codexOperationScope";
+import { useSideChatStore } from "../stores/useSideChatStore";
 import { createSideChat, runConversationReview } from "./conversationActions";
 import { useCodexStore } from "../components/codex/stores";
 import { useAgentCenterStore } from "../stores/useAgentCenterStore";
@@ -14,6 +19,8 @@ import {
 } from "../stores/useSessionDraftStore";
 beforeEach(() => {
   vi.clearAllMocks();
+  localStorage.clear();
+  useSideChatStore.getState().close();
   useCodexStore.setState({
     currentThreadId: "main",
     currentTurnId: "active",
@@ -28,6 +35,18 @@ beforeEach(() => {
     currentAgentCardId: "main",
     currentAgentCardKind: "codex",
   });
+});
+it("does not publish a detached review's late acknowledgement after the account or runtime changes", async () => {
+  let finish!: (value: unknown) => void;
+  api.startReview.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+  const pending = runConversationReview("main", "detached", { type: "uncommittedChanges" });
+  await vi.waitFor(() => expect(api.startReview).toHaveBeenCalledTimes(1));
+  invalidateCodexOperationScope();
+  finish({ reviewThreadId: "old-review", turn: { id: "old-turn", status: "inProgress", items: [] } });
+  await expect(pending).rejects.toThrow(/账号|运行/);
+  expect(useCodexStore.getState().turnTimingMap["old-review"]).toBeUndefined();
+  expect(useAgentCenterStore.getState().cards.some(card => card.id === "old-review")).toBe(false);
+  expect(useSideChatStore.getState().chat).toBeNull();
 });
 it("forks a side chat and carries the question without switching the main conversation", async () => {
   api.threadFork.mockResolvedValue({

@@ -1,3 +1,4 @@
+import { sessionWindowStorageName } from "@session/services/sessionWindowContext";
 import { v4 as randomUUID } from "uuid";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
@@ -17,7 +18,7 @@ import {
   type SessionTabAction,
   type SessionTabOperation,
   type SharedSessionTabs,
-} from "@agent-orchestrator/shared";
+} from "@agent-orchestrator/shared/session-tabs";
 
 export type AgentCenterCard = FollowedSession;
 export const sharedCardMetadata = (card: AgentCenterCard): AgentCenterCard => ({
@@ -364,7 +365,7 @@ export const useAgentCenterStore = create<AgentCenterState>()(
         })),
     }),
     {
-      name: "kanban.session.agent-center-store",
+      name: sessionWindowStorageName("kanban.session.agent-center-store"),
       storage: createDeduplicatedJSONStorage(),
       version: 5,
       migrate: (

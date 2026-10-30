@@ -4,7 +4,7 @@ import {
   type SubagentThread,
   type SubagentStopTarget,
   type SubagentStopResult,
-} from "@agent-orchestrator/shared";
+} from "@agent-orchestrator/shared/session-subagents";
 import { postJsonWithOptions } from "@session/services/apiAdapt/shared";
 import { threadMetadata } from "@session/services/apiAdapt/codex";
 import {

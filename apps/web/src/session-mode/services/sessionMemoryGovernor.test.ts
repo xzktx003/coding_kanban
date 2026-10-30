@@ -33,6 +33,102 @@ beforeEach(() => {
   memoryHistoryWindows.clear();
 });
 afterEach(() => vi.useRealTimers());
+it("bounds an oversized unpinned snapshot synchronously while preserving the active turn and approval", () => {
+  vi.useFakeTimers();
+  const stop = startSessionMemoryGovernor();
+  const events = Array.from({ length: 4001 }, (_, index) =>
+    message(`burst-${index}`),
+  );
+  const approvals = [
+    {
+      type: "fileChange" as const,
+      requestId: "pending-burst",
+      threadId: "active",
+      turnId: "burst-0",
+      itemId: "patch",
+      startedAtMs: 1,
+    },
+  ];
+  useApprovalStore.setState({ pendingApprovals: approvals });
+  const timing = {
+    turnId: "burst-0",
+    status: "inProgress" as const,
+    startedAtMs: 1,
+    durationMs: null,
+  };
+  try {
+    useCodexStore.setState({
+      events: { active: events },
+      turnTimingMap: { active: timing },
+    });
+    const retained = useCodexStore.getState().events.active;
+    expect(retained.length).toBeLessThanOrEqual(1500);
+    expect(retained).toContain(events[0]);
+    expect(retained.at(-1)).toBe(events.at(-1));
+    expect(useCodexStore.getState().turnTimingMap.active).toBe(timing);
+    expect(useApprovalStore.getState().pendingApprovals).toBe(approvals);
+    expect(useSessionSyncStore.getState().cursors.active).toMatch(
+      /^kanban-memory-reload:/,
+    );
+    // The synchronous release must not schedule itself through its own write.
+    expect(vi.getTimerCount()).toBe(1);
+  } finally {
+    stop();
+    useApprovalStore.setState({ pendingApprovals: [], currentApproval: null });
+  }
+});
+
+it("does not let a pending debounce defer an oversized snapshot", () => {
+  vi.useFakeTimers();
+  const stop = startSessionMemoryGovernor();
+  try {
+    const small = [message("small")];
+    useCodexStore.setState({ events: { active: small } });
+    expect(useCodexStore.getState().events.active).toBe(small);
+    expect(vi.getTimerCount()).toBe(2);
+    useCodexStore.setState({
+      events: {
+        active: Array.from({ length: 4001 }, (_, index) =>
+          message(`pending-${index}`),
+        ),
+      },
+    });
+    const retained = useCodexStore.getState().events.active;
+    expect(retained.length).toBeLessThanOrEqual(1500);
+    expect(vi.getTimerCount()).toBe(1);
+    vi.advanceTimersByTime(250);
+    expect(useCodexStore.getState().events.active).toBe(retained);
+  } finally {
+    stop();
+  }
+});
+
+it("keeps explicitly paged reading windows on the existing deferred budget path", () => {
+  vi.useFakeTimers();
+  const stop = startSessionMemoryGovernor();
+  const events = Array.from({ length: 4001 }, (_, index) =>
+    message(`reading-${index}`),
+  );
+  memoryHistoryWindows.set(
+    "active",
+    new Set(events.map((event) => event.params.turnId)),
+  );
+  try {
+    useSessionSyncStore.setState({ cursors: { active: "native-older-page" } });
+    useCodexStore.setState({ events: { active: events } });
+    expect(useCodexStore.getState().events.active).toBe(events);
+    expect(vi.getTimerCount()).toBe(2);
+    vi.advanceTimersByTime(250);
+    expect(useCodexStore.getState().events.active).toBe(events);
+    expect(useSessionSyncStore.getState().cursors.active).toBe(
+      "native-older-page",
+    );
+    expect(vi.getTimerCount()).toBe(1);
+  } finally {
+    stop();
+  }
+});
+
 it("releases already retained old turns to a low watermark and restores history access", () => {
   const events = Array.from({ length: 80 }, (_, i) =>
     message(`turn-${i}`, `${i}:` + "x".repeat(80_000)),

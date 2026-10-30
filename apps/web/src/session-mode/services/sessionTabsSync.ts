@@ -1,4 +1,14 @@
-import { requestTimeout } from "../lib/requestTimeout";
+import {
+  beginConnectionCheck,
+  connectionCheckFailed,
+  connectionCheckSucceeded,
+  connectionFailureText,
+  readSharedSnapshot,
+  scheduleConnectionRetry,
+  SessionSyncError,
+  syncRetryDelay,
+  useSessionConnectionDiagnostics,
+} from "./sessionConnectionDiagnostics";
 import type { SharedSessionTabs } from "@agent-orchestrator/shared";
 import {
   TAB_OPERATION_PREFIX,
@@ -22,6 +32,8 @@ export function startSessionTabsSync(
   let timer: ReturnType<typeof setTimeout>;
   let controller: AbortController | undefined;
   let initialized = false;
+  let failures = 0;
+  let lastFailure: unknown;
   // Seed from the pre-sync cache once; server accepts it only if no collection exists.
   const seed = useAgentCenterStore.getState().cards.map(sharedCardMetadata);
   function schedule(delay = pollMs) {
@@ -30,14 +42,20 @@ export function startSessionTabsSync(
       return;
     }
     clearTimeout(timer);
-    if (!stopped) timer = setTimeout(() => void sync(), delay);
+    if (!stopped) {
+      scheduleConnectionRetry("tabs", delay);
+      timer = setTimeout(() => void sync(), delay);
+    }
   }
   async function sync() {
     if (stopped || busy) return;
     busy = true;
     requested = false;
     controller = new AbortController();
-    const deadline = requestTimeout(controller.signal, 10000);
+    let localPhase = true;
+    const pendingCount =
+      useAgentCenterStore.getState().pendingTabOperations.length;
+    beginConnectionCheck("tabs", pendingCount ? "write" : "read", pendingCount);
     try {
       useAgentCenterStore.getState().refreshTabOperations();
       const state = useAgentCenterStore.getState();
@@ -53,27 +71,30 @@ export function startSessionTabsSync(
         ? [{ seq: 1, action: operation.action }]
         : legacy;
       const post = !initialized || operations.length > 0;
-      const response = await fetcher("/api/session/tabs", {
-        method: post ? "POST" : "GET",
-        cache: "no-store",
-        ...(post
-          ? {
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({
-                clientId: operation?.id
-                  ? `tabop_${operation.id}`
-                  : state.syncClientId,
-                operations,
-                ...(!initialized ? { seed } : {}),
-              }),
-            }
-          : {}),
-        signal: deadline.signal,
-      });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const snapshot = (await response.json()) as SharedSessionTabs & {
-        sequence?: number;
-      };
+      localPhase = false;
+      const snapshot = await readSharedSnapshot<
+        SharedSessionTabs & { sequence?: number }
+      >(
+        "/api/session/tabs",
+        {
+          method: post ? "POST" : "GET",
+          cache: "no-store",
+          ...(post
+            ? {
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({
+                  clientId: operation?.id
+                    ? `tabop_${operation.id}`
+                    : state.syncClientId,
+                  operations,
+                  ...(!initialized ? { seed } : {}),
+                }),
+              }
+            : {}),
+        },
+        controller.signal,
+        fetcher,
+      );
       if (
         !Array.isArray(snapshot.cards) ||
         typeof snapshot.initialized !== "boolean" ||
@@ -82,8 +103,9 @@ export function startSessionTabsSync(
           (!Number.isSafeInteger(snapshot.sequence) ||
             (operation?.id && snapshot.sequence !== 1)))
       )
-        throw new Error("Invalid response");
+        throw new SessionSyncError("response");
       if (stopped) return;
+      localPhase = true;
       const currentSnapshot = snapshot.revision >= latestTabRevision();
       // Repair old closes that the shared page counter could silently discard.
       // Do not reissue acknowledged old adds/moves: those can resurrect tabs.
@@ -115,20 +137,28 @@ export function startSessionTabsSync(
             : undefined,
           operation?.id ? [operation.id] : [],
         );
-      if (!fresh) requested = true;
-    } catch {
-      if (!stopped)
+      if (!fresh) throw new SessionSyncError("stale");
+      failures = 0;
+      lastFailure = undefined;
+      connectionCheckSucceeded("tabs");
+    } catch (error) {
+      if (!stopped) {
+        failures++;
+        lastFailure = error;
+        connectionCheckFailed("tabs", error, localPhase);
         useAgentCenterStore.setState({
-          tabSyncError: "关注会话同步暂不可用，正在重试",
+          tabSyncError: connectionFailureText(
+            useSessionConnectionDiagnostics.getState().tabs.failure,
+          ),
         });
+      }
     } finally {
-      deadline.dispose();
       busy = false;
       schedule(
         requested
           ? 0
           : useAgentCenterStore.getState().tabSyncError
-            ? 5000
+            ? syncRetryDelay(failures, lastFailure)
             : useAgentCenterStore.getState().pendingTabOperations.length
               ? 50
               : pollMs,
@@ -143,6 +173,9 @@ export function startSessionTabsSync(
     if (document.visibilityState !== "hidden") schedule(0);
   };
   const retry = () => schedule(0);
+  const scopedRetry = (event: Event) => {
+    if ((event as CustomEvent).detail?.channel === "tabs") schedule(0);
+  };
   const storage = (event: StorageEvent) => {
     if (
       event.key?.startsWith(TAB_OPERATION_PREFIX) ||
@@ -152,6 +185,7 @@ export function startSessionTabsSync(
   };
   window.addEventListener("online", wake);
   window.addEventListener("session-connection-retry", retry);
+  window.addEventListener("session-sync-retry", scopedRetry);
   window.addEventListener("storage", storage);
   document.addEventListener("visibilitychange", wake);
   // Let the mounted workspace finish restoring local selection before syncing membership.
@@ -163,6 +197,7 @@ export function startSessionTabsSync(
     unsubscribe();
     window.removeEventListener("online", wake);
     window.removeEventListener("session-connection-retry", retry);
+    window.removeEventListener("session-sync-retry", scopedRetry);
     window.removeEventListener("storage", storage);
     document.removeEventListener("visibilitychange", wake);
   };

@@ -1,9 +1,10 @@
 import { create } from "zustand";
+import { sessionWindowStorageName } from "@session/services/sessionWindowContext";
 import { persist } from "zustand/middleware";
 import {
   validNativeInputMention,
   type NativeInputMention,
-} from "@agent-orchestrator/shared";
+} from "@agent-orchestrator/shared/session-subagents";
 import type { PluginSummary } from "@session/bindings/v2/PluginSummary";
 export function pluginInputMention(
   plugin: Pick<PluginSummary, "id" | "name" | "interface">,
@@ -18,7 +19,7 @@ export const usePluginInputDrafts = create<{
   drafts: Record<string, NativeInputMention[]>;
 }>()(
   persist(() => ({ drafts: {} }), {
-    name: "kanban.session.plugin-inputs",
+    name: sessionWindowStorageName("kanban.session.plugin-inputs"),
     version: 1,
   }),
 );

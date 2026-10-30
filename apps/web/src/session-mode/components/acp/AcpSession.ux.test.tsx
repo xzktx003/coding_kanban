@@ -24,6 +24,12 @@ beforeEach(() => {
     configurable: true,
     value: vi.fn(),
   });
+  Object.defineProperty(Element.prototype, "scrollTo", {
+    configurable: true,
+    value: vi.fn(function (this: HTMLElement, options: ScrollToOptions) {
+      this.scrollTop = options.top ?? this.scrollTop;
+    }),
+  });
   useAcpStore.setState({
     connectionId: "conn",
     sessionId: "session",
@@ -111,6 +117,7 @@ it("new output does not pull the reader away from older history", () => {
     clientHeight: { configurable: true, value: 200 },
     scrollTop: { configurable: true, writable: true, value: 100 },
   });
+  fireEvent.wheel(history, { deltaY: -100 });
   fireEvent.scroll(history);
   act(() =>
     useAcpStore.setState({
@@ -119,6 +126,48 @@ it("new output does not pull the reader away from older history", () => {
   );
   expect(scroll).not.toHaveBeenCalled();
   expect(screen.getByRole("button", { name: "回到最新消息" })).toBeTruthy();
+});
+it("layout scroll events before a user gesture keep following new output", async () => {
+  useAcpStore.setState({ sessionId: "layout-only-session" });
+  const scroll = vi.spyOn(Element.prototype, "scrollIntoView");
+  const { container } = render(<AcpSession />);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const history = container.querySelector("[data-acp-history]")!;
+  Object.defineProperties(history, {
+    scrollHeight: { configurable: true, value: 1000 },
+    clientHeight: { configurable: true, value: 200 },
+    scrollTop: { configurable: true, writable: true, value: 0 },
+  });
+  fireEvent.scroll(history);
+  scroll.mockClear();
+  act(() =>
+    useAcpStore.setState({
+      entries: [{ id: "layout", role: "agent", text: "latest" }],
+    }),
+  );
+  expect(scroll).toHaveBeenCalled();
+  expect(screen.queryByRole("button", { name: "回到最新消息" })).toBeNull();
+});
+it("tapping current message content keeps following subsequent output", () => {
+  useAcpStore.setState({
+    sessionId: "tap-only-session",
+    entries: [{ id: "tap", role: "agent", text: "Current output" }],
+  });
+  const scroll = vi.spyOn(Element.prototype, "scrollIntoView");
+  render(<AcpSession />);
+  scroll.mockClear();
+  fireEvent.pointerDown(screen.getByText("Current output"));
+  fireEvent.touchStart(screen.getByText("Current output"));
+  act(() =>
+    useAcpStore.setState({
+      entries: [
+        ...useAcpStore.getState().entries,
+        { id: "next", role: "agent", text: "Next output" },
+      ],
+    }),
+  );
+  expect(scroll).toHaveBeenCalled();
+  expect(screen.queryByRole("button", { name: "回到最新消息" })).toBeNull();
 });
 it("an older failure cannot erase the current permission error after session changes", async () => {
   let rejectOld!: (error: Error) => void;
@@ -162,4 +211,23 @@ it("an older failure cannot erase the current permission error after session cha
       .getByRole("button", { name: "允许当前请求" })
       .hasAttribute("disabled"),
   ).toBe(false);
+});
+it("native load can temporarily clear source identity without changing hook order", () => {
+  useAcpStore.setState({
+    runtimeInstance: "runtime",
+    historySessionId: "source-before",
+    permission: null,
+  });
+  render(<AcpSession />);
+  expect(() =>
+    act(() =>
+      useAcpStore.setState({
+        historySessionId: null,
+        sessionId: "loaded-native",
+      }),
+    ),
+  ).not.toThrow();
+  expect(() =>
+    act(() => useAcpStore.setState({ historySessionId: "source-after" })),
+  ).not.toThrow();
 });

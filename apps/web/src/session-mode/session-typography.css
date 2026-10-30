@@ -1,0 +1,18 @@
+/* Device choices stay inside session mode; unset choices preserve each provider's defaults. */
+.session-mode[data-session-chat-font] [data-acp-history] {
+  font-family: var(--session-chat-font);
+}
+.session-mode[data-session-chat-size] [data-acp-history] {
+  font-size: var(--session-chat-font-size);
+}
+.session-mode[data-session-code-size] .claude-presentation pre code,
+.session-mode[data-session-code-size] .claude-tool-body-row-content pre {
+  font-size: var(--session-code-font-size);
+}
+.session-mode[data-session-code-size]
+  .codex-markdown
+  .codex-native-code-fence
+  pre[data-streamdown="code-block-body"] {
+  font-size: var(--session-code-font-size);
+  line-height: 1.666667;
+}

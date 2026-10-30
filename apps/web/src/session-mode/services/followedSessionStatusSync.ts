@@ -1,5 +1,7 @@
 import { requestTimeout } from "../lib/requestTimeout";
 import type { ThreadStatus } from "../bindings/v2";
+import type { TurnTiming } from "../components/codex/stores/types";
+import { isCachedTurnExecutionUnverified } from "./cachedTurnExecutionView";
 import {
   useCodexStore,
   useApprovalStore,
@@ -13,9 +15,12 @@ import { useAgentCenterStore } from "../stores/useAgentCenterStore";
 import { openedCodexIds } from "./openedSessions";
 import { acceptTurnStart } from "../utils/codexRuntimeState";
 import {
-  captureCodexOperationScope,
-  isCodexOperationScopeCurrent,
-} from "./codexOperationScope";
+  captureNativeExecutionScope as captureCodexOperationScope,
+  isNativeExecutionScopeCurrent as isCodexOperationScopeCurrent,
+  recordNativeExecutionTiming,
+  currentNativeExecutionTiming,
+  reconcileNativeExecutionEvents,
+} from "./nativeTurnExecutionProof";
 
 function followedIds() {
   return new Set(openedCodexIds());
@@ -159,7 +164,13 @@ export function startFollowedSessionStatusSync(fetcher: typeof fetch = fetch) {
                 continue;
               }
               const timing = baseline.turnTimingMap[id];
-              if (status.type === "active" && timing?.status !== "inProgress")
+              if (
+                (status.type === "active" &&
+                  (timing?.status !== "inProgress" ||
+                    !currentNativeExecutionTiming(id, timing))) ||
+                ((status.type === "idle" || status.type === "systemError") &&
+                  state.events[id]?.some(isCachedTurnExecutionUnverified))
+              )
                 recoverActive.add(id);
               // A short turn can start and finish between metadata snapshots.
               // Recent history may observe it running while status stays idle.
@@ -216,9 +227,12 @@ export function startFollowedSessionStatusSync(fetcher: typeof fetch = fetch) {
             const timing = snapshot.turnTimingMap[id];
             if (
               !followedIds().has(id) ||
-              status?.type !== "active" ||
+              !status ||
+              !["active", "idle", "systemError"].includes(status.type) ||
               timing !== baseline.turnTimingMap[id] ||
-              timing?.status === "inProgress"
+              (status.type === "active" &&
+                timing?.status === "inProgress" &&
+                !!currentNativeExecutionTiming(id, timing))
             )
               continue;
             try {
@@ -240,19 +254,32 @@ export function startFollowedSessionStatusSync(fetcher: typeof fetch = fetch) {
               if (!response.ok) continue;
               const page = await response.json();
               const turn = page?.turn;
+              const live = status.type === "active";
+              const pendingCached = (snapshot.events[id] ?? []).some(
+                (event) =>
+                  event.method === "turn/completed" &&
+                  isCachedTurnExecutionUnverified(event) &&
+                  event.params.turn.id === turn?.id,
+              );
               if (
                 !turn ||
                 typeof turn.id !== "string" ||
                 !turn.id.trim() ||
-                turn.status !== "inProgress" ||
-                typeof turn.startedAt !== "number" ||
-                !Number.isFinite(turn.startedAt) ||
-                turn.startedAt < 0 ||
-                !Number.isFinite(turn.startedAt * 1000) ||
+                (live
+                  ? turn.status !== "inProgress"
+                  : !["completed", "failed", "interrupted"].includes(
+                      turn.status,
+                    ) || !pendingCached) ||
+                ((turn.startedAt !== null || live) &&
+                  (typeof turn.startedAt !== "number" ||
+                    !Number.isFinite(turn.startedAt) ||
+                    turn.startedAt < 0 ||
+                    !Number.isFinite(turn.startedAt * 1000))) ||
                 page.threadId !== id ||
-                page.status?.type !== "active" ||
+                page.status?.type !== status.type ||
                 (turn.threadId !== undefined && turn.threadId !== id) ||
-                (!acceptTurnStart(timing, turn) &&
+                (live &&
+                  !acceptTurnStart(timing, turn) &&
                   !(
                     timing?.turnId === turn.id &&
                     timing.status === "interrupted"
@@ -269,18 +296,43 @@ export function startFollowedSessionStatusSync(fetcher: typeof fetch = fetch) {
                   state.turnTimingMap[id] !== timing
                 )
                   return state;
+                const nativeTiming = {
+                  turnId: turn.id,
+                  startedAtMs:
+                    turn.startedAt === null
+                      ? timing?.turnId === turn.id
+                        ? timing.startedAtMs
+                        : 0
+                      : turn.startedAt * 1000,
+                  durationMs: live
+                    ? null
+                    : typeof turn.durationMs === "number" &&
+                        Number.isFinite(turn.durationMs) &&
+                        turn.durationMs >= 0
+                      ? turn.durationMs
+                      : null,
+                  status: turn.status as TurnTiming["status"],
+                };
+                recordNativeExecutionTiming(id, nativeTiming, scope);
+                const events = state.events[id];
+                const projected = events
+                  ? reconcileNativeExecutionEvents(
+                      id,
+                      events,
+                      nativeTiming,
+                      live,
+                    )
+                  : events;
                 return {
+                  ...(projected !== events
+                    ? { events: { ...state.events, [id]: projected! } }
+                    : {}),
                   turnTimingMap: {
                     ...state.turnTimingMap,
-                    [id]: {
-                      turnId: turn.id,
-                      startedAtMs: turn.startedAt * 1000,
-                      durationMs: null,
-                      status: "inProgress",
-                    },
+                    [id]: nativeTiming,
                   },
                   ...(state.currentThreadId === id
-                    ? { currentTurnId: turn.id }
+                    ? { currentTurnId: live ? turn.id : null }
                     : {}),
                 };
               });
@@ -343,6 +395,14 @@ export function startFollowedSessionStatusSync(fetcher: typeof fetch = fetch) {
       schedule();
   };
   window.addEventListener("online", wake);
+  const cachedExecutionPending = (event: Event) => {
+    const id = (event as CustomEvent<unknown>).detail;
+    if (typeof id === "string" && followedIds().has(id)) schedule();
+  };
+  window.addEventListener(
+    "session-cached-execution-pending",
+    cachedExecutionPending,
+  );
   document.addEventListener("visibilitychange", wake);
   const watchdog = setInterval(() => {
     const state = useCodexStore.getState();
@@ -368,6 +428,10 @@ export function startFollowedSessionStatusSync(fetcher: typeof fetch = fetch) {
     unsubscribe();
     closeStream();
     window.removeEventListener("online", wake);
+    window.removeEventListener(
+      "session-cached-execution-pending",
+      cachedExecutionPending,
+    );
     document.removeEventListener("visibilitychange", wake);
   };
 }

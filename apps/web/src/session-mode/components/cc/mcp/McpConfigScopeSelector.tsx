@@ -6,7 +6,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@session/components/ui/select';
-import { ProjectSelector } from '@session/features/ProjectSelector';
+import { ProjectSelector } from '@session/features/ProjectSelector/ProjectSelector';
 import { type McpScope, usePluginStore, useWorkspaceStore } from '@session/stores';
 
 interface McpConfigScopeSelectorProps {

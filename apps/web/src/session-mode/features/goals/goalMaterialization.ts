@@ -1,7 +1,7 @@
 import {
   validNativeInputMention,
   type NativeInputMention,
-} from "@agent-orchestrator/shared";
+} from "@agent-orchestrator/shared/session-subagents";
 import { authHeaders, buildUrl } from "@session/hooks/runtime";
 import {
   isExplicitRequestRejection,

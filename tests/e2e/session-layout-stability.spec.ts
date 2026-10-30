@@ -147,25 +147,24 @@ for (const width of [1440, 390]) {
       await page.evaluate(() =>
         window.dispatchEvent(new Event("session-connection-retry")),
       );
-      await expect(page.getByText("同步待重试", { exact: true })).toBeVisible();
+      const syncTrigger = page.getByRole("button", { name: /同步待重试/ });
+      await expect(syncTrigger).toBeVisible();
+      await expect(syncTrigger).toHaveAttribute("aria-expanded", "false");
       expect(await geometry()).toEqual(before);
-      await page
-        .getByRole("button", { name: "收起同步待重试", exact: true })
-        .click();
+      await syncTrigger.click();
+      await page.getByRole("button", { name: "收起同步详情", exact: true }).click();
       expect(await geometry()).toEqual(before);
-      await page
-        .getByRole("button", { name: "展开同步待重试", exact: true })
-        .click();
+      await syncTrigger.click();
       await expect(
         page.getByRole("button", { name: "立即同步", exact: true }),
       ).toBeVisible();
-      const notice = (await page.locator(".session-notices").boundingBox())!;
+      const notice = (await page.locator(".session-sync-details").boundingBox())!;
       const input = (await editor.boundingBox())!;
       expect(notice.y + notice.height).toBeLessThan(input.y);
       await page.screenshot({ path: info.outputPath("sync-notice.png") });
       tabsUnavailable = false;
       await page.getByRole("button", { name: "立即同步", exact: true }).click();
-      await expect(page.getByText("同步待重试", { exact: true })).toHaveCount(
+      await expect(page.getByRole("button", { name: /同步待重试/ })).toHaveCount(
         0,
       );
       expect(await geometry()).toEqual(before);

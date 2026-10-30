@@ -7,7 +7,7 @@ import {
   useRequestUserInputStore,
 } from "@session/components/codex/stores";
 import { buildUrl, isDesktopTauri } from "@session/hooks/runtime";
-import { getAccountWithParams } from "@session/services";
+import { getAccountWithParams } from "@session/services/apiAdapt/codex";
 import { confirmGoalCompletionAccountScope } from "@session/services/goalCompletionAutoClear";
 import { useLayoutStore } from "@session/stores";
 import { useSettingsStore } from "@session/stores/settings";

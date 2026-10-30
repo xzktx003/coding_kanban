@@ -3,10 +3,16 @@ import { LayoutGrid, List, Square } from "lucide-react";
 import { useActiveSessionProject } from "../../hooks/useActiveSessionProject";
 import { useWorkspaceStore } from "../../stores/useWorkspaceStore";
 import { useVsCodePanelStore } from "../../stores/useVsCodePanelStore";
-import { SessionThemeToggle } from "../common/SessionThemeToggle";
+import {
+  SessionThemeToggle,
+  SessionThemeMenuItem,
+} from "../common/SessionThemeToggle";
 import { VsCodeIcon } from "@session/features/vscode/VsCodeIcon";
 import { openVsCodePanel } from "@session/stores/useVsCodePanelStore";
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useId, useRef, useState } from "react";
+import { useSessionSyncStore } from "../../stores/useSessionSyncStore";
+import { useSessionManagementSyncStatus } from "../../services/sessionManagementClient";
+import { OptionalSessionPanel } from "./OptionalSessionPanel";
 import { useIsMobile } from "@session/hooks/use-mobile";
 import {
   MoreHorizontal,
@@ -38,6 +44,8 @@ import type { SessionConnectionState } from "../../hooks/useFollowedSessionState
 import type { WorkbenchMode } from "../../../lib/workbench-mode";
 import { WorkbenchModeSwitch } from "../../../components/WorkbenchModeSwitch";
 import { SessionRemoteUpdateNotice } from "./SessionRemoteUpdateNotice";
+import { SessionSyncIndicator } from "./SessionSyncIndicator";
+import { downloadSessionConnectionDiagnostic } from "../../services/sessionConnectionDiagnostics";
 
 const NewAgentButton = lazy(() =>
   import("../common/NewAgentButton").then((module) => ({
@@ -45,7 +53,7 @@ const NewAgentButton = lazy(() =>
   })),
 );
 const GitActions = lazy(() =>
-  import("../../features/git").then((module) => ({
+  import("../../features/git/GitActions").then((module) => ({
     default: module.GitActions,
   })),
 );
@@ -81,6 +89,22 @@ export function SessionTopNavigation({
 }) {
   const layout = useLayoutStore();
   const mobile = useIsMobile();
+  const noticeId = useId();
+  const streamNeedsReview = useSessionSyncStore(
+    (s) => s.connection === "paused" || s.connection === "reconnecting",
+  );
+  const tabsNeedReview = useAgentCenterStore((s) => !!s.tabSyncError);
+  const projectsNeedReview = useWorkspaceStore((s) => !!s.projectSyncError);
+  const managementNeedsReview = useSessionManagementSyncStatus(
+    (s) => !!s.error || s.blocked > 0,
+  );
+  const needsReview =
+    mobile &&
+    (status !== "ready" ||
+      streamNeedsReview ||
+      tabsNeedReview ||
+      projectsNeedReview ||
+      managementNeedsReview);
   const project = useActiveSessionProject();
   const pinned = useVsCodePanelStore((s) => s.pinnedPath);
   const prepareProject = () => {
@@ -89,6 +113,8 @@ export function SessionTopNavigation({
   const { cardsViewMode, setCardsViewMode } = useAgentCenterStore();
   const acp = useAcpStore((s) => s.active);
   const [importOpen, setImportOpen] = useState(false);
+  const hasOpenedImport = useRef(false);
+  if (importOpen) hasOpenedImport.current = true;
   const secondaryActive = secondary.find((s) => s.view === layout.view);
   const setView = (view: viewType) => layout.setView(view);
   return (
@@ -146,6 +172,9 @@ export function SessionTopNavigation({
           active={active}
           onOpenUpdate={() => onModeChange?.("terminal")}
         />
+        {!mobile && (
+          <SessionSyncIndicator healthOffline={status === "offline"} />
+        )}
         <Suspense fallback={null}>
           <RunningSessionsSummary status={status} />
           <FollowedSessionsMenu summary status={status} />
@@ -194,13 +223,15 @@ export function SessionTopNavigation({
             )}
           </>
         )}
-        <SessionThemeToggle />
+        {!mobile && <SessionThemeToggle />}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              className="session-top-icon"
+              className="session-top-icon session-top-more"
               aria-label="更多功能"
+              aria-describedby={needsReview ? noticeId : undefined}
+              data-attention={needsReview}
               title={secondaryActive?.label ?? "更多功能"}
               data-active={Boolean(secondaryActive)}
             >
@@ -208,6 +239,16 @@ export function SessionTopNavigation({
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="session-main-menu">
+            {mobile && (
+              <>
+                <SessionThemeMenuItem />
+                <SessionSyncIndicator
+                  menu
+                  healthOffline={status === "offline"}
+                />
+                <DropdownMenuSeparator />
+              </>
+            )}
             {(acp || cardsViewMode !== "solo") && (
               <DropdownMenuItem
                 className="session-menu-new"
@@ -238,6 +279,10 @@ export function SessionTopNavigation({
             <DropdownMenuItem onSelect={() => setImportOpen(true)}>
               <Download size={15} />
               导入会话
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={downloadSessionConnectionDiagnostic}>
+              <Download size={15} />
+              导出连接诊断
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuLabel>会话布局</DropdownMenuLabel>
@@ -329,14 +374,28 @@ export function SessionTopNavigation({
             </p>
           </DropdownMenuContent>
         </DropdownMenu>
+        {needsReview && (
+          <span id={noticeId} className="sr-only">
+            有连接或同步状态待核对，请展开更多功能查看。
+          </span>
+        )}
       </nav>
-      <Suspense fallback={null}>
-        <DataImportDialog
-          open={importOpen}
-          onOpenChange={setImportOpen}
-          hideTrigger
-        />
-      </Suspense>
+      {hasOpenedImport.current && (
+        <OptionalSessionPanel
+          label="数据导入"
+          visible={importOpen}
+          overlay
+          onClose={() => setImportOpen(false)}
+        >
+          <Suspense fallback={null}>
+            <DataImportDialog
+              open={importOpen}
+              onOpenChange={setImportOpen}
+              hideTrigger
+            />
+          </Suspense>
+        </OptionalSessionPanel>
+      )}
     </>
   );
 }

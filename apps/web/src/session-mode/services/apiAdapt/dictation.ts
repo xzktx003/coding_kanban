@@ -1,7 +1,7 @@
 import { invokeTauri, isDesktopTauri, getJson, postJson } from './shared';
 
-// Dictation runs entirely on-device (mic capture + Whisper transcription) and
-// is desktop-only for now; there is no web/remote backend implementation.
+// Desktop Tauri uses its native dictation commands. Web clients capture the
+// microphone locally and send bounded PCM to the configured host transcriber.
 
 
 export type DictationModelState = 'missing' | 'downloading' | 'ready' | 'error';

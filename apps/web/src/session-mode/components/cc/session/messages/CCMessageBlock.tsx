@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useTranscriptRowBoolean } from "@session/components/agent/TranscriptRowState";
 import { Streamdown } from "streamdown";
 import { VisualizationContent } from "@session/features/visualizations/VisualizationContent";
 import { Button } from "@session/components/ui/button";
@@ -37,7 +37,9 @@ export function CCMessageBlock({
   context,
 }: Props) {
   const blockKey = `block-${index}`;
-  const [showWriteResult, setShowWriteResult] = useState(false);
+  const [showWriteResult, setShowWriteResult] = useTranscriptRowBoolean(
+    `write-result:${index}`,
+  );
   const { enabledThinking } = useCCSettingsStore();
   // Falls back to the provider so every card gets the host capabilities even
   // when a caller does not thread them explicitly.

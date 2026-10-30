@@ -103,17 +103,20 @@ export async function createRuntime(options: RuntimeOptions) {
     const codex = new CodexService({
       hub,
       instance: options.instance,
+      dataHome: options.dataHome,
       env,
       resolveEnv: () => resolveCodexEnv(dataDir, env),
     });
     cleanup.push(() => codex.close());
     const claude = createClaudeService({
       hub,
+      runtimeInstance: options.instance,
       dataHome: options.dataHome,
       env,
     });
     cleanup.push(() => claude.close());
     const acp = createAcpService({
+      runtimeInstance:options.instance,
       hub,
       dataHome: options.dataHome,
       env,
@@ -170,7 +173,20 @@ export async function createRuntime(options: RuntimeOptions) {
       automation.startScheduler();
     });
     app.setErrorHandler((error, _request, reply) => {
-      const failure = error as { statusCode?: number; message?: string };
+      const failure = error as {
+        statusCode?: number;
+        message?: string;
+        code?: string;
+        nativeErrorCode?: number;
+      };
+      const structuredReadError =
+        failure.code === "NATIVE_READ_UNAVAILABLE" &&
+        typeof failure.nativeErrorCode === "number"
+          ? {
+              code: failure.code,
+              nativeErrorCode: failure.nativeErrorCode,
+            }
+          : {};
       reply
         .code(
           failure.statusCode ??
@@ -182,7 +198,9 @@ export async function createRuntime(options: RuntimeOptions) {
                 ? 502
                 : 500),
         )
-        .send({ error: failure.message ?? "Runtime request failed" });
+        .send({ error: failure.message ?? "Runtime request failed",
+          ...("code" in failure && typeof failure.code==="string" && failure.code.startsWith("HISTORY_IMAGE_") ? {code:failure.code} : {}),
+          ...structuredReadError });
     });
     registerRuntimeCors(app, { allowedOrigins: options.allowedOrigins });
     app.addHook("onRequest", async (request, reply) => {
@@ -199,6 +217,9 @@ export async function createRuntime(options: RuntimeOptions) {
       status: "ok",
       instance: options.instance,
       runtime: "typescript",
+      codexBackend: "shared-daemon",
+      codexConnection: codex.connectionSnapshot(),
+      ownedAgents: { cc: claude.activitySnapshot(), acp: acp.activitySnapshot() },
       capabilities: {
         codexOwnership: true,
         codexMcpAuthV1:true,

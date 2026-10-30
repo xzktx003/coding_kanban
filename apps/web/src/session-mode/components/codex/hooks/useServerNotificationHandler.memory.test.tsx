@@ -6,7 +6,7 @@ import { useRequestUserInputStore } from "../stores/useRequestUserInputStore";
 import { useAgentCenterStore } from "@session/stores/useAgentCenterStore";
 import { useSubagentStore } from "@session/features/subagents/store";
 import { useServerNotificationHandler } from "./useServerNotificationHandler";
-import { allowSleep } from "@session/services/apiAdapt";
+import { allowSleep } from "@session/services/apiAdapt/codex";
 import {
   trackCodexTranscript,
   markCodexTranscriptDormant,
@@ -19,7 +19,7 @@ import {
 } from "@session/services/codexTranscriptMemoryBudget";
 import { installGoalCompletionAutoClear } from "@session/services/goalCompletionAutoClear";
 
-vi.mock("@session/services/apiAdapt", () => ({
+vi.mock("@session/services/apiAdapt/codex", () => ({
   allowSleep: vi.fn().mockResolvedValue(undefined),
   preventSleep: vi.fn().mockResolvedValue(undefined),
 }));

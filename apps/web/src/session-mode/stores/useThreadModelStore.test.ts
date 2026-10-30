@@ -8,6 +8,7 @@ import {
   flushThreadModelSettings,
 } from "./useThreadModelStore";
 import { useConfigStore } from "../components/codex/stores/useConfigStore";
+import { threadPermissionParameters } from "../services/threadPermissionProjection";
 beforeEach(() => {
   localStorage.clear();
   useThreadModelStore.setState({ threads: {} });
@@ -27,6 +28,14 @@ beforeEach(() => {
     modelProvider: "custom",
     reasoningEffort: "low",
   });
+});
+it("persists the named native profile as a settings intent without restoring a stale sandbox policy", async () => {
+  changeThreadModel("a", { permissions: "team-profile", sandboxPolicy: null });
+  await flushThreadModelSettings("a");
+  useThreadModelStore.setState({ threads: {} });
+  await useThreadModelStore.persist.rehydrate();
+  expect(getThreadModelSettings("a").permissions).toBe("team-profile");
+  expect(threadPermissionParameters(getThreadModelSettings("a"))).toEqual({ permissions: "team-profile" });
 });
 it("keeps model, provider and effort local to one thread and preserves new-chat defaults", () => {
   changeThreadModel("a", { model: "luna", reasoningEffort: "medium" });

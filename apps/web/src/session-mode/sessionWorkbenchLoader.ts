@@ -26,9 +26,8 @@ export function loadSessionApp() {
 
 export function preloadSessionApp() {
   const app = loadSessionApp();
-  // The composer is the first critical control. Preload it directly so Vite
-  // does not also fetch the transcript, session list, and optional tool graph
-  // that would be pulled in by preloading AgentView as a whole.
+  // Start the critical composer graph alongside the app's dependencies. Its
+  // provider-specific inputs, transcripts, and optional tools remain deferred.
   return Promise.all([app, import("./components/agent/AgentComposer")])
     .then(() => undefined)
     .catch(() => undefined);

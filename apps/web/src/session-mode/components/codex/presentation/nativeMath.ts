@@ -6,6 +6,10 @@ const escaped = (text: string, index: number) => {
 
 /** Adapt the plugin's LaTeX delimiters to KaTeX while keeping literal dollars and code. */
 export function nativeMathMarkdown(text: string): string {
+  // Most fragments contain no math delimiters. Keep their existing bounded
+  // source instead of rebuilding it one character at a time.
+  if (!text.includes("$") && !text.includes("\\(") && !text.includes("\\["))
+    return text;
   let result = "",
     index = 0,
     inlineTicks = 0;

@@ -7,7 +7,12 @@ test("unattended bot runner propagates cancellation and treats denied work as fa
   const runner = botAutomationRunner({
     runBotUnattended: async (...args) => {
       received = args;
-      return { sessionId: "s", reply: "denied", blocked: true };
+      return {
+        sessionId: "s",
+        historySessionId: "history-s",
+        reply: "denied",
+        blocked: true,
+      };
     },
   });
   await assert.rejects(

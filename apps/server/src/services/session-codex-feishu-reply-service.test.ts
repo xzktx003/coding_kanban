@@ -15,6 +15,25 @@ function thread(overrides: Record<string, unknown> = {}) {
   return { thread: { id: "thread-one", ...overrides } };
 }
 
+test("trusted native cards require their original account/runtime scope and reject scope changes during verification", async () => {
+  const original = { scope: "native-scope", namespace: "account-a" }, submitted: FollowupSubmit[] = [];
+  let current = original, changeDuringRead = false;
+  const service = new SessionCodexFeishuReplyService({
+    context: async () => current,
+    readThread: async () => { if (changeDuringRead) current = { ...original, scope: "same-account-new-revision" }; return thread(); },
+    submit: async input => { submitted.push(input); },
+  });
+  const input = { messageId: "om_scope_reply", threadId: "thread-one", text: "当前范围内继续", nativeContext: original };
+  await service.send(input); assert.equal(submitted[0].expectedScope, original.scope);
+  for (const next of [{ scope: "new-account-scope", namespace: "account-b" }, { ...original, scope: "same-account-new-revision" }, { ...original, scope: "new-runtime" }]) {
+    current = next; await assert.rejects(service.send(input), /目标会话不可用/);
+  }
+  current = original; changeDuringRead = true;
+  await assert.rejects(service.send(input), /目标会话不可用/);
+  assert.equal(submitted.length, 1);
+  await assert.rejects(service.send({ messageId: "om_legacy_scope", threadId: "thread-one", text: "旧卡片" }), /目标会话不可用/);
+});
+
 test("queues a verified native thread reply with a stable Feishu request id", async () => {
   const submitted: FollowupSubmit[] = [];
   const service = new SessionCodexFeishuReplyService({

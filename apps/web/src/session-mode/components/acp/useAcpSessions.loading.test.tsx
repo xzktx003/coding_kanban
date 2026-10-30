@@ -5,6 +5,9 @@ const api = vi.hoisted(() => ({ list: vi.fn() }));
 vi.mock("@session/services/apiAdapt/acp", () => ({
   acpListSessions: api.list,
 }));
+vi.mock("@session/lib/eventStream", () => ({
+  openEventStream: () => () => {},
+}));
 beforeEach(() => api.list.mockReset());
 test("ACP list exposes loading, failure and retry success independently of empty results", async () => {
   api.list

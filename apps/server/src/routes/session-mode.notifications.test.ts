@@ -97,6 +97,9 @@ async function fixture(
       const body = init?.body ? JSON.parse(String(init.body)) : {};
       calls.push({ path, body });
       if (path === "/health") return Response.json({ instance: "fixture" });
+      if (path === "/api/internal/codex/operation-context") return Response.json({ scope: "notification-scope", namespace: "notification-namespace" });
+      if (path === "/api/codex/thread/queue/list") return Response.json({ data: [], nextCursor: null });
+      if (path === "/api/codex/thread/loaded/list") return Response.json({ data: [threadId], nextCursor: null });
       if (path === "/api/events")
         return new Response(
           new ReadableStream({

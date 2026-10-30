@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { isAbsolute } from "node:path";
+import type { Readable, Writable } from "node:stream";
 import { isObject, object, type Json, type JsonObject } from "../core/json.js";
 
 export class RpcError extends Error {
@@ -17,11 +18,7 @@ export interface ServerRequest {
   method: string;
   params: Json;
 }
-interface RpcOptions {
-  command: string;
-  args: string[];
-  cwd?: string;
-  env?: NodeJS.ProcessEnv;
+export interface RpcCallbacks {
   jsonrpc?: boolean;
   maxFrameBytes?: number;
   maxQueuedBytes?: number;
@@ -30,15 +27,20 @@ interface RpcOptions {
   onDiagnostic?: (message: string) => void;
   onExit?: (error: Error) => void;
 }
+export interface RpcOptions extends RpcCallbacks {
+  command: string;
+  args: string[];
+  cwd?: string;
+  env?: NodeJS.ProcessEnv;
+}
 interface Pending {
   resolve: (value: Json) => void;
   reject: (error: Error) => void;
   cleanup: () => void;
 }
 
-/** Newline JSON-RPC over an explicitly owned process. Never restarts or replays requests. */
-export class StdioRpc {
-  readonly child: ChildProcessWithoutNullStreams;
+/** Bounded JSONL protocol shared by owned stdio processes and attached daemon connections. */
+export class JsonLineRpc {
   private pending = new Map<string, Pending>();
   private nextId = 1;
   private failure?: Error;
@@ -50,54 +52,27 @@ export class StdioRpc {
   private discardingReply = false;
   private stderrTail = "";
   private readonly maxFrameBytes: number;
-  private readonly exited: Promise<void>;
 
-  constructor(private readonly options: RpcOptions) {
-    if (
-      !options.command ||
-      /[\x00-\x1f]/.test(options.command) ||
-      options.args.some((s) => s.includes("\0"))
-    )
-      throw new Error("Invalid process command or arguments");
-    if (
-      options.cwd &&
-      (!isAbsolute(options.cwd) || /[\x00-\x1f]/.test(options.cwd))
-    )
-      throw new Error("Invalid process working directory");
+  constructor(
+    private readonly options: RpcCallbacks,
+    protected readonly input: Writable,
+    protected readonly output: Readable,
+    private readonly exited: Promise<void>,
+    diagnostics?: Readable,
+  ) {
     this.maxFrameBytes = options.maxFrameBytes ?? 32 * 1024 * 1024;
-    this.child = spawn(options.command, options.args, {
-      cwd: options.cwd,
-      env: options.env ?? process.env,
-      shell: false,
-      stdio: ["pipe", "pipe", "pipe"],
-      windowsHide: true,
-    });
-    this.exited = new Promise((resolve) =>
-      this.child.once("close", () => resolve()),
+    input.on("error", (error) =>
+      this.fail(new Error(`DELIVERY_UNKNOWN: input failed: ${error.message}`)),
     );
-    this.child.on("error", (error) =>
-      this.fail(
-        new Error(`DELIVERY_UNKNOWN: process failed: ${error.message}`),
-      ),
+    output.on("error", (error) =>
+      this.fail(new Error(`DELIVERY_UNKNOWN: output failed: ${error.message}`)),
     );
-    this.child.on("exit", (code, signal) =>
-      this.fail(
-        new Error(`DELIVERY_UNKNOWN: process exited (${signal ?? code})`),
-      ),
-    );
-    this.child.stdin.on("error", (error) =>
-      this.fail(new Error(`DELIVERY_UNKNOWN: stdin failed: ${error.message}`)),
-    );
-    this.child.stdout.on("error", (error) =>
-      this.fail(new Error(`DELIVERY_UNKNOWN: stdout failed: ${error.message}`)),
-    );
-    this.child.stdout.on("end", () =>
+    output.on("end", () =>
       this.fail(new Error("DELIVERY_UNKNOWN: protocol stream ended")),
     );
-    this.child.stdout.on("data", (chunk: Buffer) => this.consume(chunk));
-    this.child.stderr.on("error", () => undefined);
-    this.child.stderr.on("data", (chunk: Buffer) => {
-      // Logging must not retain arbitrary process output or block draining stderr.
+    output.on("data", (chunk: Buffer) => this.consume(chunk));
+    diagnostics?.on("error", () => undefined);
+    diagnostics?.on("data", (chunk: Buffer) => {
       this.stderrTail += chunk.toString("utf8");
       let newline: number;
       while ((newline = this.stderrTail.indexOf("\n")) >= 0) {
@@ -110,7 +85,12 @@ export class StdioRpc {
       }
     });
   }
-
+  get processAlive(): boolean {
+    return false;
+  }
+  get closed(): Promise<void> {
+    return this.exited;
+  }
   get pendingCount(): number {
     return this.pending.size;
   }
@@ -121,10 +101,15 @@ export class StdioRpc {
   async waitForExit(milliseconds: number): Promise<void> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      await Promise.race([this.exited, new Promise<void>(resolve => {
-        timer = setTimeout(resolve, milliseconds);
-      })]);
-    } finally { clearTimeout(timer); }
+      await Promise.race([
+        this.exited,
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, milliseconds);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   private diagnostic(message: string): void {
@@ -135,7 +120,7 @@ export class StdioRpc {
     }
   }
 
-  private fail(error: Error): void {
+  protected fail(error: Error): void {
     if (this.failure) return;
     this.failure = error;
     this.fragments = [];
@@ -169,7 +154,10 @@ export class StdioRpc {
         continue;
       }
       if (this.framePrefix.length < 1024)
-        this.framePrefix = Buffer.concat([this.framePrefix, part.subarray(0, 1024 - this.framePrefix.length)]);
+        this.framePrefix = Buffer.concat([
+          this.framePrefix,
+          part.subarray(0, 1024 - this.framePrefix.length),
+        ]);
       this.fragmentBytes += part.length;
       if (this.fragmentBytes > this.maxFrameBytes) {
         // Native responses put their id before result/error. Reject that one
@@ -204,17 +192,30 @@ export class StdioRpc {
   }
 
   private rejectOversizedReply(): boolean {
-    const match = /^\s*\{\s*(?:"jsonrpc"\s*:\s*"2\.0"\s*,\s*)?"id"\s*:\s*("(?:[^"\\]|\\.)*"|-?\d+)\s*,\s*"(?:result|error)"\s*:/.exec(this.framePrefix.toString("utf8"));
+    const match =
+      /^\s*\{\s*(?:"jsonrpc"\s*:\s*"2\.0"\s*,\s*)?"id"\s*:\s*("(?:[^"\\]|\\.)*"|-?\d+)\s*,\s*"(?:result|error)"\s*:/.exec(
+        this.framePrefix.toString("utf8"),
+      );
     if (!match) return false;
     let id: unknown;
-    try { id = JSON.parse(match[1]); } catch { return false; }
+    try {
+      id = JSON.parse(match[1]);
+    } catch {
+      return false;
+    }
     if (typeof id !== "string" && !Number.isSafeInteger(id)) return false;
     const key = JSON.stringify(id);
     const pending = this.pending.get(key);
     this.pending.delete(key);
     pending?.cleanup();
-    pending?.reject(new Error("DELIVERY_UNKNOWN: RPC frame exceeded byte limit; response rejected, native process retained"));
-    this.diagnostic("RPC response exceeded byte limit; rejected without stopping the native process");
+    pending?.reject(
+      new Error(
+        "DELIVERY_UNKNOWN: RPC frame exceeded byte limit; response rejected, native process retained",
+      ),
+    );
+    this.diagnostic(
+      "RPC response exceeded byte limit; rejected without stopping the native process",
+    );
     return true;
   }
 
@@ -305,7 +306,7 @@ export class StdioRpc {
         if (this.failure)
           throw new Error("NOT_SENT: RPC transport unavailable");
         await new Promise<void>((resolve, reject) => {
-          this.child.stdin.write(frame, (error) =>
+          this.input.write(frame, (error) =>
             error
               ? reject(new Error(`DELIVERY_UNKNOWN: ${error.message}`))
               : resolve(),
@@ -322,7 +323,11 @@ export class StdioRpc {
   request(
     method: string,
     params: Json,
-    options: { timeoutMs?: number; signal?: AbortSignal; beforeSend?: () => void } = {},
+    options: {
+      timeoutMs?: number;
+      signal?: AbortSignal;
+      beforeSend?: () => void;
+    } = {},
   ): Promise<Json> {
     if (this.failure)
       return Promise.reject(new Error("NOT_SENT: RPC transport unavailable"));
@@ -340,10 +345,20 @@ export class StdioRpc {
         reject(new Error(message));
       };
       const timer = setTimeout(
-        () => fail(options.beforeSend && !dispatched ? "NOT_SENT: RPC dispatch queue timeout" : "DELIVERY_UNKNOWN: RPC response timeout"),
+        () =>
+          fail(
+            options.beforeSend && !dispatched
+              ? "NOT_SENT: RPC dispatch queue timeout"
+              : "DELIVERY_UNKNOWN: RPC response timeout",
+          ),
         options.timeoutMs ?? 30_000,
       );
-      const aborted = () => fail(options.beforeSend && !dispatched ? "NOT_SENT: RPC request aborted before dispatch" : "DELIVERY_UNKNOWN: RPC response wait aborted");
+      const aborted = () =>
+        fail(
+          options.beforeSend && !dispatched
+            ? "NOT_SENT: RPC request aborted before dispatch"
+            : "DELIVERY_UNKNOWN: RPC response wait aborted",
+        );
       options.signal?.addEventListener("abort", aborted, { once: true });
       this.pending.set(key, {
         resolve,
@@ -358,9 +373,7 @@ export class StdioRpc {
         options.beforeSend?.();
         dispatched = true;
         return true;
-      }).catch(
-        (error) => fail(String(error.message ?? error)),
-      );
+      }).catch((error) => fail(String(error.message ?? error)));
     });
   }
 
@@ -368,8 +381,15 @@ export class StdioRpc {
     return this.write(params === undefined ? { method } : { method, params });
   }
 
-  respond(id: string | number, result: Json): Promise<void> {
-    return this.write({ id, result });
+  respond(
+    id: string | number,
+    result: Json,
+    beforeSend?: () => void,
+  ): Promise<void> {
+    return this.write({ id, result }, () => {
+      beforeSend?.();
+      return true;
+    });
   }
   respondError(
     id: string | number,
@@ -381,14 +401,63 @@ export class StdioRpc {
 
   async close(): Promise<void> {
     this.fail(new Error("DELIVERY_UNKNOWN: RPC transport closed"));
+    this.input.destroy();
+    this.output.destroy();
+    await this.exited;
+  }
+}
+
+/** Owned process transport, retained for ACP and explicitly injected protocol fixtures. */
+export class StdioRpc extends JsonLineRpc {
+  readonly child: ChildProcessWithoutNullStreams;
+  constructor(options: RpcOptions) {
+    if (
+      !options.command ||
+      /[\x00-\x1f]/.test(options.command) ||
+      options.args.some((s) => s.includes("\0"))
+    )
+      throw new Error("Invalid process command or arguments");
+    if (
+      options.cwd &&
+      (!isAbsolute(options.cwd) || /[\x00-\x1f]/.test(options.cwd))
+    )
+      throw new Error("Invalid process working directory");
+    const child = spawn(options.command, options.args, {
+      cwd: options.cwd,
+      env: options.env ?? process.env,
+      shell: false,
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
+    });
+    const exited = new Promise<void>((resolve) =>
+      child.once("close", () => resolve()),
+    );
+    super(options, child.stdin, child.stdout, exited, child.stderr);
+    this.child = child;
+    child.on("error", (error) =>
+      this.fail(
+        new Error(`DELIVERY_UNKNOWN: process failed: ${error.message}`),
+      ),
+    );
+    child.on("exit", (code, signal) =>
+      this.fail(
+        new Error(`DELIVERY_UNKNOWN: process exited (${signal ?? code})`),
+      ),
+    );
+  }
+  override get processAlive(): boolean {
+    return this.child.exitCode === null && this.child.signalCode === null;
+  }
+  async close(): Promise<void> {
+    this.fail(new Error("DELIVERY_UNKNOWN: RPC transport closed"));
     if (this.child.exitCode !== null || this.child.signalCode !== null)
-      return this.exited;
+      return this.closed;
     this.child.kill("SIGTERM");
     const timer = setTimeout(() => {
       this.child.kill("SIGKILL");
     }, 2_000);
     try {
-      await this.exited;
+      await this.closed;
     } finally {
       clearTimeout(timer);
     }

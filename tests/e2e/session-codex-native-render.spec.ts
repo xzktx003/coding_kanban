@@ -1,9 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
 import { installSessionUxFixture, seedSessionUx } from "./session-ux-fixture";
+import { liveStream } from "./session-sse-fixture";
 import { projectCodexChatValue } from "../../packages/shared/src/codex-chat-projection";
 
 const patch =
   "--- a/example.py\n+++ b/example.py\n@@ -115,3 +115,4 @@\n context\n-old = 1\n+new = 2\n+extra = 3\n tail\n@@ -307,1 +308,1 @@\n-old = 4\n+new = 5\n";
+const largePatch = `${patch}${"+large-diff-line\n".repeat(1800)}`;
 const png =
   "iVBORw0KGgoAAAANSUhEUgAAAHgAAABICAIAAACyfKYoAAABBklEQVR4nO3QoZGFMAAFwF/QFUEJiBSAREYiEEx0RBQ6miqvhyeidmYr2N/ffsW2vcXK3mPn/sbufcbG/sV+okWLFi1atGjRokWLFi1atOg10ccV244WK0ePnccbu48ZG8cXEy1atGjRokWLFi1atGjRokUviq5XbKstVmqPnfWN3XXGRv1iokWLFi1atGjRokWLFi1atOhF0c8V254WK0+Pnc8bu58ZG88XEy1atGjRokWLFi1atGjRokUvih5XbBstVkaPneON3WPGxvhiokWLFi1atGjRokWLFi1atOhF0fOKbbPFyuyxc76xe87YmF9MtGjRokWLFi1atGjRokWLFr0k+h8jd1cCNT+MqwAAAABJRU5ErkJggg==";
 function audioFixture() {
@@ -119,6 +121,7 @@ for (const width of [1440, 390])
           .first()
           .waitFor({ timeout: 60000 });
         await seedSessionUx(page);
+        const longDiff = largePatch;
         const events = [
           item("web", {
             type: "webSearch",
@@ -159,6 +162,17 @@ for (const width of [1440, 390])
               structuredContent: null,
             },
           }),
+          item("large-patch", {
+            type: "fileChange",
+            status: "completed",
+            changes: [
+              {
+                path: "/fixture/owner/large-output.ts",
+                kind: { type: "update", move_path: null },
+                diff: longDiff,
+              },
+            ],
+          }),
           item("compact", { type: "contextCompaction" }),
         ];
         await state(page, theme, events);
@@ -170,9 +184,14 @@ for (const width of [1440, 390])
           surface.getByText("上下文已压缩", { exact: true }),
         ).toBeVisible();
         expect(reads).toBe(0);
+        expect(
+          fixture.calls.filter(({ path }) =>
+            path.includes("/api/codex/thread/item-detail"),
+          ),
+        ).toEqual([]);
         await expect(
-          surface.locator("[data-transcript-details-unloaded]"),
-        ).toHaveCount(3);
+          surface.getByText("large-diff-line", { exact: false }),
+        ).toHaveCount(0);
         await expect(surface.locator("img, audio")).toHaveCount(0);
         await expect(
           surface.getByRole("link", { name: "资源文档" }),
@@ -192,13 +211,17 @@ for (const width of [1440, 390])
           projected.find((event) => event.params.item.id === "mcp").params.item,
         ).toMatchObject({
           result: null,
-          arguments: null,
+          arguments: { owner: "ux-0" },
           transcriptMetadataOnly: true,
         });
         expect(
           projected.find((event) => event.params.item.id === "image").params
             .item.result,
         ).toBeUndefined();
+        expect(
+          projected.find((event) => event.params.item.id === "large-patch")
+            .params.item.changes[0],
+        ).toMatchObject({ diff: "", transcriptMetadataOnly: true });
         await page.screenshot({
           path: info.outputPath(`semantic-metadata-${width}-${theme}.png`),
           fullPage: true,
@@ -272,8 +295,8 @@ for (const width of [1440, 390])
         // Event-driven chat reconciliation may finish while the explicit image
         // is opened; it must keep tool bodies unloaded and use chat projection.
         await expect(
-          surface.locator("[data-transcript-details-unloaded]"),
-        ).toHaveCount(3);
+          surface.getByText("large-diff-line", { exact: false }),
+        ).toHaveCount(0);
         await expect(surface.locator("img, audio")).toHaveCount(0);
         await expect(
           surface.getByRole("button", { name: "显示原始工具调用输出" }),
@@ -443,6 +466,10 @@ for (const width of [1440, 390])
         test.setTimeout(90000);
         const errors: string[] = [];
         page.on("pageerror", (error) => errors.push(error.message));
+        await page.context().grantPermissions([
+          "clipboard-read",
+          "clipboard-write",
+        ]);
         const fixture = await installSessionUxFixture(page);
         const historyReads = observeHistoryReads(page);
         await page.setViewportSize({ width, height: 1000 });
@@ -458,11 +485,16 @@ for (const width of [1440, 390])
             kind: { type: "update", move_path: null },
             diff: patch,
           },
+          {
+            path: "/fixture/项目/very-long-project-path-for-ui-regression/large-output.py",
+            kind: { type: "update", move_path: null },
+            diff: largePatch,
+          },
         ];
         await state(page, theme, [
           item("answer", {
             type: "agentMessage",
-            text: "原生正文使用 `index` 和 \\(x^2\\)。\n\n请保留输入区与会话窗口分离。\n\n```python\nanswer = 3\n```",
+            text: "原生正文使用 `index` 和 \\(x^2\\)。\n\n请保留输入区与会话窗口分离。\n\n| 类型 | 检查结果 |\n| --- | --- |\n| Markdown 表格 | 保留原生行列 |\n\n```python\nanswer = 3\n```",
             phase: "final_answer",
             memoryCitation: null,
           }),
@@ -486,9 +518,41 @@ for (const width of [1440, 390])
             },
           },
         ]);
+        const completedChanges = await page.evaluate(async () => {
+          const codexPath = "/src/session-mode/components/codex/stores/index.ts";
+          const logicPath = "/src/session-mode/components/codex/items/fileChangeLogic.ts";
+          const resolve = (path: string) =>
+            performance
+              .getEntriesByType("resource")
+              .findLast((entry) => new URL(entry.name).pathname === path)?.name ??
+            path;
+          const [{ useCodexStore }, { completedTurnChanges }] = await Promise.all([
+            import(resolve(codexPath)),
+            import(resolve(logicPath)),
+          ]);
+          const events = useCodexStore.getState().events["ux-0"];
+          const index = events.findIndex((event: any) => event.method === "turn/completed");
+          const event = events[index] as any;
+          return completedTurnChanges("ux-0", "native-turn", event.params.turn.items, {
+            events,
+            eventIndex: index,
+          }).changes.map((change: any) => ({
+            path: change.path,
+            diffLength: change.diff.length,
+            metadataOnly: change.transcriptMetadataOnly === true,
+          }));
+        });
+        expect(completedChanges).toContainEqual({
+          path: changes[1].path,
+          diffLength: 0,
+          metadataOnly: true,
+        });
         const surface = page.locator(".codex-presentation").first();
         const composer = page.locator(".session-codex-composer").first();
         await expect(surface.locator(".katex").first()).toBeVisible();
+        const markdownTable = surface.locator(".codex-markdown table").first();
+        await expect(markdownTable).toBeVisible();
+        await expect(markdownTable).toContainText("保留原生行列");
         const numberToken = surface
           .locator('[data-streamdown="code-block"] pre')
           .getByText("3", { exact: true });
@@ -514,23 +578,72 @@ for (const width of [1440, 390])
           '[data-codex-row="event-native-turn-patch"]',
         );
         await expect(
-          patchRow.getByRole("button", { name: "已编辑", exact: true }),
-        ).toBeDisabled();
-        await expect(
-          patchRow.locator("[data-transcript-details-unloaded]"),
+          patchRow.getByRole("button", { name: "编辑了文件", exact: true }),
         ).toBeVisible();
         await expect(patchRow.locator(".codex-inline-diff")).toHaveCount(0);
         await expect(
           patchRow.locator("[data-kind=add], [data-kind=remove]"),
         ).toHaveCount(0);
         const summary = page.locator(".codex-turn-diff-summary");
-        const filename = summary.locator(".codex-turn-diff-title-text");
-        await expect(filename).toBeVisible();
-        await expect(filename).toHaveText("已编辑 example.py");
+        const renderedChanges = await summary.evaluate((element) => {
+          const fiberKey = Object.keys(element).find((key) =>
+            key.startsWith("__reactFiber$"),
+          );
+          let fiber = fiberKey
+            ? (element as any)[fiberKey]
+            : null;
+          while (fiber && fiber.type?.name !== "ThreadFileChangesSummary")
+            fiber = fiber.return;
+          return fiber?.memoizedProps?.changes?.map((change: any) => ({
+            path: change.path,
+            diffLength: change.diff?.length ?? null,
+            metadataOnly: change.transcriptMetadataOnly === true,
+          })) ?? null;
+        });
+        expect(renderedChanges).toContainEqual({
+          path: changes[1].path,
+          diffLength: 0,
+          metadataOnly: true,
+        });
+        const shortRow = summary
+          .locator(".codex-turn-diff-file-row")
+          .filter({ hasText: "example.py" });
+        const largeFile = summary.getByRole("button", {
+          name: "查看文件 large-output.py",
+          exact: true,
+        });
+        await expect(shortRow).toBeVisible();
+        await expect(largeFile).toBeVisible();
+        await expect(summary.getByText("详情未加载", { exact: true })).toBeVisible();
         await expect(
-          summary.locator("[data-transcript-details-unloaded]"),
+          shortRow.locator("[data-transcript-details-unloaded]"),
+        ).toHaveCount(0);
+        await expect(shortRow.getByText("+3", { exact: true })).toBeVisible();
+        await expect(shortRow.getByText("-2", { exact: true })).toBeVisible();
+        await expect(
+          summary.getByRole("button", {
+            name: "预览 large-output.py Diff",
+            exact: true,
+          }),
+        ).toHaveCount(0);
+        await expect(summary.getByText("+0", { exact: true })).toHaveCount(0);
+        await expect(summary.getByText("-0", { exact: true })).toHaveCount(0);
+        await expect(
+          summary.getByText("large-diff-line", { exact: false }),
+        ).toHaveCount(0);
+        await shortRow.locator(".codex-turn-diff-file-path").hover();
+        await expect(page.locator('[data-slot="hover-card-content"]')).toBeVisible();
+        await expect(
+          page.locator(".codex-file-preview").getByText("extra = 3", { exact: true }),
         ).toBeVisible();
-        await filename.hover();
+        await page
+          .locator(".codex-file-preview")
+          .getByRole("button", { name: "Copy", exact: true })
+          .click();
+        await expect
+          .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+          .toContain("+extra = 3");
+        await page.mouse.move(0, 0);
         await expect(
           page.locator('[data-slot="hover-card-content"]'),
         ).toHaveCount(0);
@@ -539,15 +652,15 @@ for (const width of [1440, 390])
             name: "预览 example.py Diff",
             exact: true,
           }),
-        ).toHaveCount(0);
+        ).toBeVisible();
         await expect(
           summary.getByRole("button", { name: "Review", exact: true }),
         ).toHaveCount(0);
         await expect(
           summary.getByRole("button", { name: "审查", exact: true }),
         ).toHaveCount(0);
-        // Metadata keeps real source navigation while refusing unavailable diff
-        // previews, copied patches and invented addition/deletion counts.
+        // The short patch remains available to preview and copy; the long patch
+        // remains metadata-only until the explicit owner source read below.
         const sourceReads: Array<{ root: string; path: string }> = [];
         await page.route(
           "**/api/session/workspace-files/read",
@@ -565,9 +678,7 @@ for (const width of [1440, 390])
             });
           },
         );
-        await summary
-          .getByRole("button", { name: "查看文件 example.py", exact: true })
-          .click();
+        await largeFile.click();
         await expect
           // The dev entry uses StrictMode: its mount effect can repeat a
           // read-only request. Every request must still target the same owner.
@@ -577,7 +688,7 @@ for (const width of [1440, 390])
           .toEqual([
             JSON.stringify({
               root: "/fixture/项目/very-long-project-path-for-ui-regression",
-              path: changes[0].path,
+              path: changes[1].path,
             }),
           ]);
         const selected = await page.evaluate(async () => {
@@ -590,7 +701,7 @@ for (const width of [1440, 390])
           );
           return useEditorStore.getState().selectedFilePath;
         });
-        expect(selected).toBe(changes[0].path);
+        expect(selected).toBe(changes[1].path);
         await expect(patchRow.locator(".codex-inline-diff")).toHaveCount(0);
         expect(
           historyReads.every(
@@ -673,11 +784,21 @@ test("interleaved native streaming keeps one row and fills missing final text wi
   });
 });
 
+let activeNativeRenderStream:
+  | Awaited<ReturnType<typeof liveStream>>
+  | undefined;
+test.afterEach(async () => {
+  await activeNativeRenderStream?.close();
+  activeNativeRenderStream = undefined;
+});
+
 test("10000 interleaved events keep native rows bounded and the latest reply immediately visible", async ({
   page,
+  baseURL,
 }, info) => {
   test.setTimeout(90000);
   await installSessionUxFixture(page);
+  activeNativeRenderStream = await liveStream(page, baseURL!);
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/?mode=session", { waitUntil: "domcontentloaded" });
   await page
@@ -694,6 +815,29 @@ test("10000 interleaved events keep native rows bounded and the latest reply imm
     }),
   ]);
   await expect(page.getByText("预热正文", { exact: true })).toBeVisible();
+  await expect
+    .poll(async () => {
+      const connected = await page.evaluate(async () => {
+        const path = "/src/session-mode/lib/eventStream.ts";
+        const module = await import(
+          performance
+            .getEntriesByType("resource")
+            .findLast((entry) => new URL(entry.name).pathname === path)?.name ??
+            path
+        );
+        return module.isEventStreamConnected();
+      });
+      return {
+        connected,
+        opens: activeNativeRenderStream?.opens(),
+        connections: activeNativeRenderStream?.connections(),
+      };
+    })
+    .toEqual({ connected: true, opens: 1, connections: 1 });
+  await expect(
+    page.locator('.codex-presentation [data-codex-row="event-native-turn-warm"]'),
+  ).toBeVisible();
+  await expect(page.locator('[data-transcript-preparing="ux-0"]')).toHaveCount(0);
   const metrics = await page.evaluate(async () => {
     const path = "/src/session-mode/components/codex/stores/index.ts";
     const { useCodexStore } = await import(

@@ -2,6 +2,80 @@ import { afterEach, expect, it, vi } from "vitest";
 import { enqueueSessionRead, readWithDeadline } from "./sessionReadQueue";
 
 afterEach(() => vi.useRealTimers());
+it.each(["recent", "history"] as const)(
+  "reserves %s capacity for explicit reads while every background job still completes",
+  async (lane) => {
+    const started: string[] = [];
+    const releases: Array<() => void> = [];
+    const background = ["b0", "b1", "b2", "b3"].map((key) =>
+      enqueueSessionRead(
+        lane,
+        `reserve:${key}`,
+        () => {
+          started.push(key);
+          return new Promise<void>((resolve) => releases.push(resolve));
+        },
+        undefined,
+        "background",
+      ),
+    );
+    const explicit = enqueueSessionRead(
+      lane,
+      "reserve:visible",
+      async () => {
+        started.push("visible");
+      },
+      undefined,
+      "interactive",
+    );
+    try {
+      expect(started).toEqual(["b0", "visible"]);
+    } finally {
+      // Drain even on red so failed assertions do not leave a shared worker held.
+      for (let i = 0; i < 8; i++) {
+        releases.splice(0).forEach((release) => release());
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      await Promise.all([...background, explicit]);
+    }
+    expect(started).toContain("b3");
+  },
+);
+it("promotes a coalesced queued read without starting it twice", async () => {
+  const releases: Array<() => void> = [];
+  const start: string[] = [];
+  const job = (key: string) => () => {
+    start.push(key);
+    return new Promise<void>((resolve) => releases.push(resolve));
+  };
+  const reads = ["a", "b", "selected"].map((key) =>
+    enqueueSessionRead(
+      "recent",
+      `promotion:${key}`,
+      job(key),
+      undefined,
+      "background",
+    ),
+  );
+  const joined = enqueueSessionRead(
+    "recent",
+    "promotion:selected",
+    job("duplicate"),
+    undefined,
+    "interactive",
+  );
+  try {
+    expect(start).toEqual(["a", "selected"]);
+    await Promise.resolve();
+  } finally {
+    for (let i = 0; i < 4; i++) {
+      releases.splice(0).forEach((release) => release());
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    await Promise.all([...reads, joined]);
+  }
+  expect(start).not.toContain("duplicate");
+});
 it("reserves one receipt slot while preserving the six-read total budget", async () => {
   const started = { recent: 0, history: 0, status: 0 };
   const releases: Array<() => void> = [];

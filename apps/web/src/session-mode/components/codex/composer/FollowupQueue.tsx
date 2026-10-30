@@ -87,19 +87,15 @@ type QueueProps = {
   turnId: string | null;
   onSideChat?: (message: FollowupMessage) => void;
 };
-export function hasVisibleFollowupQueue(
-  threadId: string | null,
-  snapshot: ReturnType<typeof useFollowups>,
-) {
-  return (
-    !!threadId &&
-    (snapshot.state.items.some(
-      (m) => m.status !== "sent" && m.status !== "cancelled",
-    ) ||
-      !!snapshot.state.paused ||
-      !!snapshot.error)
-  );
-}
+import { hasVisibleFollowupQueue } from "./followupQueueState";
+import {
+  captureCodexOperationScope,
+  isCodexOperationScopeCurrent,
+} from "@session/services/codexOperationScope";
+import { useCodexStore } from "../stores/useCodexStore";
+import { useAgentSettingsStore } from "@session/stores/useAgentSettingsStore";
+import { useAcpStore } from "@session/stores/useAcpStore";
+export { hasVisibleFollowupQueue } from "./followupQueueState";
 export function FollowupQueue(props: QueueProps) {
   const snapshot = useFollowups(props.threadId);
   return <FollowupQueueContent {...props} snapshot={snapshot} />;
@@ -119,6 +115,7 @@ export function FollowupQueueContent({
   const railPresent = useComposerRailPresent();
   const mobile = useIsMobile();
   const { state } = snapshot;
+  const nativeAuthority = state.authority === "native";
   const access = useCodexAccessStore((s) =>
     threadId ? s.entries[threadId] : undefined,
   );
@@ -143,12 +140,24 @@ export function FollowupQueueContent({
       return () => cancelAnimationFrame(frame);
     }
   }, [editing]);
+  useEffect(() => {
+    setConfirm(null);
+    setEditing(null);
+    setExpanded(false);
+  }, [threadId]);
   const items = state.items.filter(
     (m) => m.status !== "sent" && m.status !== "cancelled",
   );
+  const needsMigration =
+    nativeAuthority &&
+    items.some((item) => item.authority === "legacy") &&
+    !items.some((item) => !!item.nativeQueuedSubmissionId);
+
   const change = async (action: FollowupAction) => {
     if (!threadId || changing.current || !railPresent) return;
-    const sends = ["resume", "retry", "steer"].includes(action.type);
+    const sends = ["resume", "retry", "steer", "migrate", "undo"].includes(
+      action.type,
+    );
     if (sends && accessBlock) return;
     if (action.type === "resume" && unresolved) return;
     changing.current = true;
@@ -172,16 +181,43 @@ export function FollowupQueueContent({
         result.undo.kind === action.type
       ) {
         const token = result.undo.token,
-          target = threadId;
+          target = threadId,
+          scope = captureCodexOperationScope(),
+          nativeDeletion = nativeAuthority && result.undo.kind === "delete";
         offerUndo(
           action.type === "delete" ? "已删除排队消息" : "已修改排队消息",
           async () => {
+            const current = () =>
+              isCodexOperationScopeCurrent(scope) &&
+              useCodexStore.getState().currentThreadId === target &&
+              useAgentSettingsStore.getState().selectedAgent === "codex" &&
+              !useAcpStore.getState().active;
+            if (nativeDeletion && !current())
+              throw new Error(
+                "请先打开原会话，并重新核对账号或运行服务后再恢复保存的消息",
+              );
             const latest = await followupService.load(target);
+            if (nativeDeletion) {
+              const access = await refreshCodexAccess(target),
+                reason = queueAccessReason(access);
+              if (reason) throw new Error(reason);
+              if (!current())
+                throw new Error("原会话或账号范围已变化，保存的消息尚未恢复");
+            }
             await followupService.change(target, latest.revision, {
               type: "undo",
               token,
+              ...(nativeDeletion ? { confirmExecution: true } : {}),
             });
           },
+          nativeDeletion
+            ? {
+                title: "恢复保存的排队消息？",
+                description:
+                  "使用原会话当前线程设置，将保存内容加入官方队列末尾；空闲时会立即执行。必要时会恢复原生会话，已有待发内容也可能开始执行。结果未知时不会自动补偿或重发。",
+                actionLabel: "确认加入队列并执行",
+              }
+            : undefined,
         );
       }
       setEditing(null);
@@ -203,7 +239,11 @@ export function FollowupQueueContent({
     railPresent &&
     !snapshot.error &&
     items.length > 1 &&
-    items.every((message) => message.status === "queued");
+    items.every(
+      (message) =>
+        message.status === "queued" &&
+        (!nativeAuthority || !!message.nativeQueuedSubmissionId),
+    );
   const queueStatus = state.paused ? (
     <div className="session-queue-status" role="status">
       <Pause size={14} />
@@ -236,10 +276,16 @@ export function FollowupQueueContent({
           variant="ghost"
           disabled={busy || !!resumeBlock}
           title={resumeBlock}
-          onClick={() => void change({ type: "resume" })}
+          onClick={() =>
+            needsMigration ? setExpanded(true) : void change({ type: "resume" })
+          }
         >
           <Play size={14} />
-          继续
+          {needsMigration
+            ? "处理旧队列"
+            : nativeAuthority && access?.access?.loaded === false
+              ? "恢复并继续"
+              : "继续"}
         </Button>
       )}
     </div>
@@ -351,31 +397,58 @@ export function FollowupQueueContent({
                 )}
             </div>
             <div className="session-queue-actions">
-              {m.status === "queued" && turnId && (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  aria-label="立即引导"
-                  aria-description="提交，但不中断模型运行"
-                  title="提交，但不中断模型运行"
-                  disabled={busy || !!accessBlock}
-                  onClick={() =>
-                    void change({
-                      type: "steer",
-                      id: m.id,
-                      expectedTurnId: turnId,
-                    })
-                  }
-                >
-                  {compactShelf ? (
-                    <ComposerRailIcon name="steer" />
-                  ) : (
-                    <CornerDownRight size={15} />
-                  )}
-                  引导
-                </Button>
-              )}
+              {m.status === "queued" &&
+                turnId &&
+                (!nativeAuthority || !!m.nativeQueuedSubmissionId) && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    aria-label="立即引导"
+                    aria-description="提交，但不中断模型运行"
+                    title="提交，但不中断模型运行"
+                    disabled={busy || !!accessBlock}
+                    onClick={() =>
+                      nativeAuthority
+                        ? setConfirm({
+                            type: "steer",
+                            id: m.id,
+                            expectedTurnId: turnId,
+                          })
+                        : void change({
+                            type: "steer",
+                            id: m.id,
+                            expectedTurnId: turnId,
+                          })
+                    }
+                  >
+                    {compactShelf ? (
+                      <ComposerRailIcon name="steer" />
+                    ) : (
+                      <CornerDownRight size={15} />
+                    )}
+                    引导
+                  </Button>
+                )}
+              {m.authority === "legacy" &&
+                ["queued", "failed"].includes(m.status) &&
+                !m.turnId && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    disabled={busy || !!accessBlock}
+                    onClick={() =>
+                      setConfirm({
+                        type: "migrate",
+                        id: m.id,
+                        confirmThreadSettings: true,
+                      })
+                    }
+                  >
+                    迁入官方队列
+                  </Button>
+                )}
               <Button
                 type="button"
                 size="icon"
@@ -422,27 +495,33 @@ export function FollowupQueueContent({
                       }
                     }}
                   >
-                    {(m.status === "failed" || m.status === "uncertain") && (
-                      <DropdownMenuItem
-                        disabled={busy || !!accessBlock}
-                        aria-label="尝试重新发送这条排队中的消息。如果重试一直失败，可编辑或删除它"
-                        title="尝试重新发送这条排队中的消息。如果重试一直失败，可编辑或删除它"
-                        onSelect={() =>
-                          m.status === "uncertain"
-                            ? setConfirm({
-                                type: "retry",
-                                id: m.id,
-                                confirmUncertain: true,
-                              })
-                            : void change({ type: "retry", id: m.id })
-                        }
-                      >
-                        重试
-                      </DropdownMenuItem>
-                    )}
+                    {(!nativeAuthority ||
+                      (m.authority === "native" &&
+                        !m.id.startsWith("review_") &&
+                        (m.id.startsWith("action_") || !m.receiptOnly))) &&
+                      (m.status === "failed" || m.status === "uncertain") && (
+                        <DropdownMenuItem
+                          disabled={busy || !!accessBlock}
+                          aria-label="尝试重新发送这条排队中的消息。如果重试一直失败，可编辑或删除它"
+                          title="尝试重新发送这条排队中的消息。如果重试一直失败，可编辑或删除它"
+                          onSelect={() =>
+                            nativeAuthority || m.status === "uncertain"
+                              ? setConfirm({
+                                  type: "retry",
+                                  id: m.id,
+                                  confirmUncertain: true,
+                                })
+                              : void change({ type: "retry", id: m.id })
+                          }
+                        >
+                          重试
+                        </DropdownMenuItem>
+                      )}
                     <DropdownMenuItem
                       disabled={
-                        m.status === "sending" || m.status === "uncertain"
+                        m.status === "sending" ||
+                        m.status === "uncertain" ||
+                        (nativeAuthority && !m.nativeQueuedSubmissionId)
                       }
                       onSelect={() => {
                         focusEditAfterClose.current = true;
@@ -494,10 +573,18 @@ export function FollowupQueueContent({
                       <DropdownMenuItem
                         disabled={busy || !!resumeBlock}
                         title={resumeBlock}
-                        onSelect={() => void change({ type: "resume" })}
+                        onSelect={() =>
+                          needsMigration
+                            ? setExpanded(true)
+                            : void change({ type: "resume" })
+                        }
                       >
                         <Play />
-                        继续
+                        {needsMigration
+                          ? "处理旧队列"
+                          : nativeAuthority && access?.access?.loaded === false
+                            ? "恢复并继续"
+                            : "继续"}
                       </DropdownMenuItem>
                     )}
                     <DropdownMenuSeparator />
@@ -589,30 +676,34 @@ export function FollowupQueueContent({
                     : "发送失败"}
                 {m.error && `：${m.error}`}
               </span>
-              {(m.status === "failed" || m.status === "uncertain") && (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  disabled={busy || !!accessBlock}
-                  aria-description="尝试重新发送这条排队中的消息。如果重试一直失败，可编辑或删除它"
-                  title={
-                    accessBlock ||
-                    "尝试重新发送这条排队中的消息。如果重试一直失败，可编辑或删除它"
-                  }
-                  onClick={() =>
-                    m.status === "uncertain"
-                      ? setConfirm({
-                          type: "retry",
-                          id: m.id,
-                          confirmUncertain: true,
-                        })
-                      : void change({ type: "retry", id: m.id })
-                  }
-                >
-                  重试
-                </Button>
-              )}
+              {(!nativeAuthority ||
+                (m.authority === "native" &&
+                  !m.id.startsWith("review_") &&
+                  (m.id.startsWith("action_") || !m.receiptOnly))) &&
+                (m.status === "failed" || m.status === "uncertain") && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    disabled={busy || !!accessBlock}
+                    aria-description="尝试重新发送这条排队中的消息。如果重试一直失败，可编辑或删除它"
+                    title={
+                      accessBlock ||
+                      "尝试重新发送这条排队中的消息。如果重试一直失败，可编辑或删除它"
+                    }
+                    onClick={() =>
+                      nativeAuthority || m.status === "uncertain"
+                        ? setConfirm({
+                            type: "retry",
+                            id: m.id,
+                            confirmUncertain: true,
+                          })
+                        : void change({ type: "retry", id: m.id })
+                    }
+                  >
+                    重试
+                  </Button>
+                )}
             </div>
           )}
         </QueueSortableItem>
@@ -630,7 +721,11 @@ export function FollowupQueueContent({
       {railPresent && expanded && !inlineDetails && (
         <ComposerSheet
           title={`待发送消息 · ${items.length}`}
-          description="按顺序发送；配置来自入队时的快照。"
+          description={
+            nativeAuthority
+              ? "官方队列按线程设置执行；旧队列保留原快照并等待明确迁移。"
+              : "按顺序发送；配置来自入队时的快照。"
+          }
           onClose={() => {
             setExpanded(false);
             setEditing(null);
@@ -679,16 +774,31 @@ export function FollowupQueueContent({
       >
         <DialogContent>
           <DialogTitle>
-            {confirm?.type === "clear"
-              ? "清空待发送队列？"
-              : confirm?.type === "retry"
-                ? "确认消息未送达？"
-                : "移除队列消息记录？"}
+            {confirm?.type === "undo"
+              ? "恢复保存的排队消息？"
+              : confirm?.type === "steer"
+                ? "将排队消息用于当前轮次？"
+                : confirm?.type === "retry" && nativeAuthority
+                  ? "恢复保存的消息？"
+                  : confirm?.type === "migrate"
+                    ? "迁入官方共享队列？"
+                    : confirm?.type === "clear"
+                      ? "清空待发送队列？"
+                      : confirm?.type === "retry"
+                        ? "确认消息未送达？"
+                        : "移除队列消息记录？"}
           </DialogTitle>
           <DialogDescription>
-            {confirm?.type === "clear"
-              ? "移除所有尚未发送的消息，当前任务继续运行。"
-              : "请先查看对话，确认消息是否已经被接收。重复发送可能再次执行同一任务。"}
+            {confirm?.type === "undo" ||
+            (confirm?.type === "retry" && nativeAuthority)
+              ? "使用当前线程设置，将保存内容加入官方队列末尾；空闲时会立即执行。必要时会恢复原生会话，已有待发内容也可能开始执行。请先检查对话与队列，确认原操作不会造成重复执行。结果未知时不会自动补偿或重发。"
+              : confirm?.type === "steer"
+                ? "先将这条消息移出官方队列，再引导上述当前轮次。其他客户端仍可能改变队列；任一步失败或结果未知都会停止并保留原内容，不会自动补偿或重发。"
+                : confirm?.type === "migrate"
+                  ? "这会将旧消息的模型与权限应用到当前线程，影响尚未开始的官方排队消息；内容随即可能开始执行。原消息与配置记录仍保留，未知回执不会重发。"
+                  : confirm?.type === "clear"
+                    ? "移除所有尚未发送的消息，当前任务继续运行。"
+                    : "请先查看对话，确认消息是否已经被接收。重复发送可能再次执行同一任务。"}
             {confirm?.type === "retry" && accessBlock && (
               <span className="session-queue-confirm-reason">
                 {accessBlock}
@@ -709,7 +819,16 @@ export function FollowupQueueContent({
               disabled={busy || (confirm?.type === "retry" && !!accessBlock)}
               onClick={() => confirm && void change(confirm)}
             >
-              {confirm?.type === "retry" ? "确认未送达并重试" : "确认移除"}
+              {confirm?.type === "undo" ||
+              (confirm?.type === "retry" && nativeAuthority)
+                ? "确认加入队列并执行"
+                : confirm?.type === "steer"
+                  ? "确认引导当前轮次"
+                  : confirm?.type === "migrate"
+                    ? "确认设置并迁入"
+                    : confirm?.type === "retry"
+                      ? "确认未送达并重试"
+                      : "确认移除"}
             </Button>
           </DialogFooter>
         </DialogContent>

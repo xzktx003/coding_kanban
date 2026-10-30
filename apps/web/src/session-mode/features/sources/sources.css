@@ -1,0 +1,67 @@
+.session-mode .codex-sources-panel {
+  padding: 24px;
+  gap: 12px;
+  width: min(440px, 100vw);
+}
+.session-mode .codex-sources-panel section {
+  border-top: 1px solid var(--border);
+  padding-block: 12px;
+}
+.session-mode .codex-sources-panel h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+.session-mode .codex-sources-panel h4,
+.session-mode .codex-sources-panel summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-block: 6px;
+}
+.session-mode .codex-sources-panel summary {
+  cursor: pointer;
+}
+.session-mode .codex-sources-panel h4 span,
+.session-mode .codex-sources-panel summary span {
+  margin-inline-start: auto;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.session-mode .codex-sources-panel li,
+.session-mode .codex-source-file,
+.session-mode .codex-source-mcp {
+  padding-block: 6px;
+  overflow-wrap: anywhere;
+}
+.session-mode .codex-source-file button,
+.session-mode .codex-source-mcp button {
+  text-align: start;
+  overflow-wrap: anywhere;
+  padding-block: 4px;
+}
+.session-mode .codex-source-file button:hover,
+.session-mode .codex-sources-panel a:hover {
+  text-decoration: underline;
+}
+.session-mode .codex-source-file small {
+  display: block;
+  color: var(--muted-foreground);
+}
+.session-mode .codex-sources-empty {
+  color: var(--muted-foreground);
+  font-size: 13px;
+}
+.session-mode .codex-source-preview {
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--muted);
+  font-size: 12px;
+}
+.session-mode .codex-source-preview pre {
+  max-height: 200px;
+  white-space: pre-wrap;
+  overflow: auto;
+}

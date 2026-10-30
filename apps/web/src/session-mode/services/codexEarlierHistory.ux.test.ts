@@ -7,8 +7,12 @@ const api = vi.hoisted(() => ({
   turnInterrupt: vi.fn(),
   turnStart: vi.fn(),
 }));
-vi.mock("./apiAdapt", () => api);
-import { cancelCodexHistoryRead, codexService } from "./codexService";
+vi.mock("./apiAdapt/codex", () => api);
+import {
+  cancelCodexHistoryRead,
+  codexService,
+  resetCodexRuntimeState,
+} from "./codexService";
 import { invalidateCodexOperationScope } from "./codexOperationScope";
 import { useSessionSyncStore } from "../stores/useSessionSyncStore";
 import { useCodexStore } from "../components/codex/stores/useCodexStore";
@@ -42,34 +46,50 @@ beforeEach(() => {
 
 it("a cancelled earlier read does not surface a failure on the paging control", async () => {
   const id = "earlier-cancelled";
-  api.threadRead.mockImplementationOnce(
-    () => new Promise(() => {}), // The transport never settles on its own.
-  );
+  let transport!: AbortSignal;
+  api.threadRead.mockImplementationOnce((_params, options) => {
+    transport = options.signal;
+    return new Promise(() => {}); // The transport never settles on its own.
+  });
   seedLoadedThread(id);
   useSessionSyncStore.setState({ cursors: { [id]: "before-50" } });
 
   const earlier = codexService.loadEarlierHistory(id);
-  await Promise.resolve();
+  await vi.waitFor(() => expect(api.threadRead).toHaveBeenCalledOnce());
   // The retention budget cancels in-flight reads of an observed thread.
   cancelCodexHistoryRead(id);
   await earlier;
 
   const state = useSessionSyncStore.getState();
+  expect(transport.aborted).toBe(true);
   expect(state.earlierLoading[id]).toBe(false);
   // A cancellation is not a user-visible paging failure: keeping the error set
   // blocks the scroll trigger forever and only shows "加载失败，可重试".
   expect(state.earlierErrors[id] ?? "").toBe("");
+  expect(state.cursors[id]).toBe("before-50");
+
+  api.threadRead.mockResolvedValueOnce({
+    thread: { id, turns: [] },
+    historyPage: { earlier: true, nextCursor: "older" },
+  });
+  await codexService.loadEarlierHistory(id);
+  expect(api.threadRead).toHaveBeenCalledTimes(2);
+  expect(useSessionSyncStore.getState().cursors[id]).toBe("older");
 });
 
-it("a failed earlier page keeps a readable reason and clears after a retry succeeds", async () => {
+it.each([
+  new Error("history unavailable"),
+  Object.assign(new Error("Read timed out"), { name: "TimeoutError" }),
+  new Error("This operation was aborted"),
+])("a failed earlier page (%s) keeps its reason and clears after a successful retry", async (failure) => {
   const id = "earlier-retry";
   seedLoadedThread(id);
   useSessionSyncStore.setState({ cursors: { [id]: "before-50" } });
-  api.threadRead.mockRejectedValueOnce(new Error("history unavailable"));
+  api.threadRead.mockRejectedValueOnce(failure);
 
   await codexService.loadEarlierHistory(id);
   expect(useSessionSyncStore.getState().earlierErrors[id]).toBe(
-    "history unavailable",
+    failure.message,
   );
 
   api.threadRead.mockResolvedValueOnce({
@@ -95,7 +115,7 @@ it("a runtime/account change during an earlier read is not reported as a paging 
   useSessionSyncStore.setState({ cursors: { [id]: "before-50" } });
 
   const earlier = codexService.loadEarlierHistory(id);
-  await Promise.resolve();
+  await vi.waitFor(() => expect(api.threadRead).toHaveBeenCalledOnce());
   // A reconnect or account notification revokes the snapshot mid-read.
   invalidateCodexOperationScope();
   finish({
@@ -109,6 +129,8 @@ it("a runtime/account change during an earlier read is not reported as a paging 
   // The reader will re-read the current page; a transient revocation must not
   // leave the retry banner latched and the scroll trigger disabled.
   expect(state.earlierErrors[id] ?? "").toBe("");
+  expect(state.cursors[id]).toBe("before-50");
+  expect(useCodexStore.getState().events[id]).toEqual([]);
 });
 
 it("a recovery-anchor page is still requested when a background read is already running", async () => {
@@ -159,21 +181,45 @@ it("a recovery-anchor page is still requested when a background read is already 
 it("a stale earlier read cannot clear a newer page's loading flag", async () => {
   const id = "earlier-stale";
   let finishFirst!: (value: unknown) => void;
+  let finishSecond!: (value: unknown) => void;
   api.threadRead.mockImplementationOnce(
     () =>
       new Promise((resolve) => {
         finishFirst = resolve;
       }),
   );
+  api.threadRead.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finishSecond = resolve;
+      }),
+  );
   seedLoadedThread(id);
   useSessionSyncStore.setState({ cursors: { [id]: "before-50" } });
 
   const first = codexService.loadEarlierHistory(id);
+  await vi.waitFor(() => expect(api.threadRead).toHaveBeenCalledOnce());
   expect(useSessionSyncStore.getState().earlierLoading[id]).toBe(true);
+  resetCodexRuntimeState();
+  const second = codexService.loadEarlierHistory(id);
+  await vi.waitFor(() => expect(api.threadRead).toHaveBeenCalledTimes(2));
+  await first;
+  expect(useSessionSyncStore.getState().earlierLoading[id]).toBe(true);
+  expect(useSessionSyncStore.getState().earlierErrors[id] ?? "").toBe("");
+
+  // Even an abort-ignoring old transport may resolve after its replacement.
   finishFirst({
+    thread: { id, turns: [] },
+    historyPage: { earlier: true, nextCursor: "stale-older" },
+  });
+  await Promise.resolve();
+  expect(useSessionSyncStore.getState().earlierLoading[id]).toBe(true);
+  expect(useSessionSyncStore.getState().cursors[id]).toBe("before-50");
+  finishSecond({
     thread: { id, turns: [] },
     historyPage: { earlier: true, nextCursor: "older" },
   });
-  await first;
+  await second;
   expect(useSessionSyncStore.getState().earlierLoading[id]).toBe(false);
+  expect(useSessionSyncStore.getState().cursors[id]).toBe("older");
 });

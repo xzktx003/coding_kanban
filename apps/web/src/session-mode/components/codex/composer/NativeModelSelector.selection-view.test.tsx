@@ -28,8 +28,8 @@ const api = vi.hoisted(() => ({
 }));
 
 // Real hook/cache, settings stores, Trigger and Radix; fixture catalog IO only.
-vi.mock("@session/services/apiAdapt", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@session/services/apiAdapt")>()),
+vi.mock("@session/services/apiAdapt/codex", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@session/services/apiAdapt/codex")>()),
   ...api,
 }));
 

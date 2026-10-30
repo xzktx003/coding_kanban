@@ -65,8 +65,10 @@ export class Ownership {
   private releaseIdleDescendants: boolean;
   private completedGoalWait: number;
   private goalMetadataWait: number;
+  private readonly sharedDaemon: boolean;
 
-  constructor(private readonly raw: Rpc, options: { now?: () => number; pause?: (milliseconds: number) => Promise<void>; releaseTimeoutMs?: number; releaseIdleDescendants?: boolean; completedGoalWaitMs?: number; goalMetadataWaitMs?: number } = {}) {
+  constructor(private readonly raw: Rpc, options: { now?: () => number; pause?: (milliseconds: number) => Promise<void>; releaseTimeoutMs?: number; releaseIdleDescendants?: boolean; completedGoalWaitMs?: number; goalMetadataWaitMs?: number; sharedDaemon?: boolean } = {}) {
+    this.sharedDaemon = options.sharedDaemon === true;
     this.now = options.now ?? (() => performance.now());
     this.pause = options.pause ?? sleep;
     this.releaseTimeout = options.releaseTimeoutMs ?? 8000;
@@ -236,14 +238,14 @@ export class Ownership {
     });
   }
 
-  async call(method: string, params: Json, options?: { signal?: AbortSignal }): Promise<Json> {
+  async call(method: string, params: Json, options?: { signal?: AbortSignal; beforeSend?: () => void }): Promise<Json> {
     const id = typeof object(params).threadId === "string" ? object(params).threadId as string : undefined;
     if (method === "thread/unsubscribe") {
       if (!id) throw new Error("threadId required");
       return this.release(id);
     }
     if (!mutations.has(method) || id === undefined) {
-      const result = await this.raw(method, params);
+      const result = await this.raw(method, params, options);
       const created = object(object(result).thread).id;
       if (["thread/start", "thread/fork"].includes(method) && typeof created === "string") {
         await this.locks.run(created, async () => {
@@ -282,14 +284,22 @@ export class Ownership {
       entry.generation++;
       this.touch(id);
       if (metadata) { const parent = parentThread(metadata); if (parent) this.touch(parent); }
-      if (!loaded) {
+      // Shared daemon metadata/settings/interrupt/archive operations must not wake a cold
+      // persisted queue as a side effect. Only explicit execution can acquire a cold thread.
+      if (!loaded && (!this.sharedDaemon || method === "turn/start" || method === "review/start")) {
+        const previousState = entry.state, previousReason = entry.reason;
         entry.state = "acquiring";
         try {
-          await this.raw("thread/resume", { threadId: id, config: { "features.default_mode_request_user_input": true } }, goalMutation ? { signal: goalSignal, beforeSend: () => {
-            if (goalSignal?.aborted || this.epoch !== inputEpoch) throw new Error("NOT_SENT: 目标操作已取消或运行实例已改变，未恢复线程");
+          await this.raw("thread/resume", this.sharedDaemon ? { threadId: id, excludeTurns: true } : { threadId: id, config: { "features.default_mode_request_user_input": true } }, (goalMutation || options?.beforeSend) ? { signal: goalSignal, beforeSend: () => {
+            options?.beforeSend?.();
+            if (goalSignal?.aborted || (inputEpoch !== undefined && this.epoch !== inputEpoch)) throw new Error("NOT_SENT: 目标操作已取消或运行实例已改变，未恢复线程");
           } } : undefined);
           entry.state = "owned"; entry.reason = "";
         } catch (error) {
+          if (message(error).startsWith("NOT_SENT:")) {
+            entry.state = previousState; entry.reason = previousReason;
+            throw error;
+          }
           entry.state = writerConflict(error) ? "external" : "unknown";
           entry.reason = writerConflict(error) ? "其他客户端正在使用，可查看历史；释放后可重试原消息" : message(error);
           throw new Error(writerConflict(error) ? `SESSION_OWNED_ELSEWHERE: ${entry.reason}` : `SESSION_ACQUIRE_FAILED: 尚未发送，恢复执行实例失败：${message(error)}`);
@@ -299,9 +309,10 @@ export class Ownership {
         throw new Error("SESSION_ACQUIRE_FAILED: 尚未发送，运行实例已改变，请重新核对会话");
       try {
         const dispatchRevision = this.threadRevisions.get(id) ?? 0;
-        const result = await this.raw(method, params, goalMutation ? { signal: goalSignal, beforeSend: () => {
+        const result = await this.raw(method, params, (goalMutation || options?.beforeSend) ? { signal: goalSignal, beforeSend: () => {
+          options?.beforeSend?.();
           if (goalSignal?.aborted) throw new Error("NOT_SENT: 目标操作已取消");
-          if (this.epoch !== inputEpoch) throw new Error("NOT_SENT: 目标操作的运行实例已改变");
+          if (inputEpoch !== undefined && this.epoch !== inputEpoch) throw new Error("NOT_SENT: 目标操作的运行实例已改变");
         } } : undefined);
         if (inputEpoch !== undefined && this.epoch !== inputEpoch)
           throw new Error("DELIVERY_UNKNOWN: 运行实例已改变，原操作回执已失效");

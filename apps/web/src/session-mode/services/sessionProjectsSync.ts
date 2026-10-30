@@ -1,4 +1,14 @@
-import { requestTimeout } from "../lib/requestTimeout";
+import {
+  beginConnectionCheck,
+  connectionCheckFailed,
+  connectionCheckSucceeded,
+  connectionFailureText,
+  readSharedSnapshot,
+  scheduleConnectionRetry,
+  SessionSyncError,
+  syncRetryDelay,
+  useSessionConnectionDiagnostics,
+} from "./sessionConnectionDiagnostics";
 import type { SharedProjects } from "@agent-orchestrator/shared";
 import { useWorkspaceStore } from "../stores/useWorkspaceStore";
 import {
@@ -18,6 +28,8 @@ export function startSessionProjectsSync(
   let timer: ReturnType<typeof setTimeout>;
   let controller: AbortController | undefined;
   let initialized = false;
+  let failures = 0;
+  let lastFailure: unknown;
   // Seed from the pre-sync cache once; server accepts it only if no collection exists.
   const seed = useWorkspaceStore.getState().projects;
   function schedule(delay = pollMs) {
@@ -26,14 +38,24 @@ export function startSessionProjectsSync(
       return;
     }
     clearTimeout(timer);
-    if (!stopped) timer = setTimeout(() => void sync(), delay);
+    if (!stopped) {
+      scheduleConnectionRetry("projects", delay);
+      timer = setTimeout(() => void sync(), delay);
+    }
   }
   async function sync() {
     if (stopped || busy) return;
     busy = true;
     requested = false;
     controller = new AbortController();
-    const deadline = requestTimeout(controller.signal, 10000);
+    let localPhase = true;
+    const pendingCount =
+      useWorkspaceStore.getState().pendingProjectOperations.length;
+    beginConnectionCheck(
+      "projects",
+      pendingCount ? "write" : "read",
+      pendingCount,
+    );
     try {
       useWorkspaceStore.getState().refreshProjectOperations();
       const state = useWorkspaceStore.getState();
@@ -49,27 +71,30 @@ export function startSessionProjectsSync(
         ? [{ seq: 1, action: operation.action }]
         : legacy;
       const post = !initialized || operations.length > 0;
-      const response = await fetcher("/api/session/projects", {
-        method: post ? "POST" : "GET",
-        cache: "no-store",
-        ...(post
-          ? {
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({
-                clientId: operation?.id
-                  ? `projectop_${operation.id}`
-                  : state.projectSyncClientId,
-                operations,
-                ...(!initialized ? { seed } : {}),
-              }),
-            }
-          : {}),
-        signal: deadline.signal,
-      });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const snapshot = (await response.json()) as SharedProjects & {
-        sequence?: number;
-      };
+      localPhase = false;
+      const snapshot = await readSharedSnapshot<
+        SharedProjects & { sequence?: number }
+      >(
+        "/api/session/projects",
+        {
+          method: post ? "POST" : "GET",
+          cache: "no-store",
+          ...(post
+            ? {
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({
+                  clientId: operation?.id
+                    ? `projectop_${operation.id}`
+                    : state.projectSyncClientId,
+                  operations,
+                  ...(!initialized ? { seed } : {}),
+                }),
+              }
+            : {}),
+        },
+        controller.signal,
+        fetcher,
+      );
       if (
         !Array.isArray(snapshot.projects) ||
         typeof snapshot.initialized !== "boolean" ||
@@ -78,8 +103,9 @@ export function startSessionProjectsSync(
           (!Number.isSafeInteger(snapshot.sequence) ||
             (operation?.id && snapshot.sequence !== 1)))
       )
-        throw new Error("Invalid response");
+        throw new SessionSyncError("response");
       if (stopped) return;
+      localPhase = true;
       initialized = true;
       const currentSnapshot = snapshot.revision >= latestProjectRevision();
       const fresh = useWorkspaceStore
@@ -91,20 +117,28 @@ export function startSessionProjectsSync(
             : undefined,
           operation?.id ? [operation.id] : [],
         );
-      if (!fresh) requested = true;
-    } catch {
-      if (!stopped)
+      if (!fresh) throw new SessionSyncError("stale");
+      failures = 0;
+      lastFailure = undefined;
+      connectionCheckSucceeded("projects");
+    } catch (error) {
+      if (!stopped) {
+        failures++;
+        lastFailure = error;
+        connectionCheckFailed("projects", error, localPhase);
         useWorkspaceStore.setState({
-          projectSyncError: "项目同步暂不可用，正在重试",
+          projectSyncError: connectionFailureText(
+            useSessionConnectionDiagnostics.getState().projects.failure,
+          ),
         });
+      }
     } finally {
-      deadline.dispose();
       busy = false;
       schedule(
         requested
           ? 0
           : useWorkspaceStore.getState().projectSyncError
-            ? 5000
+            ? syncRetryDelay(failures, lastFailure)
             : useWorkspaceStore.getState().pendingProjectOperations.length
               ? 50
               : pollMs,
@@ -122,6 +156,9 @@ export function startSessionProjectsSync(
     if (document.visibilityState !== "hidden") schedule(0);
   };
   const retry = () => schedule(0);
+  const scopedRetry = (event: Event) => {
+    if ((event as CustomEvent).detail?.channel === "projects") schedule(0);
+  };
   const storage = (event: StorageEvent) => {
     if (
       event.key?.startsWith(PROJECT_OPERATION_PREFIX) ||
@@ -131,6 +168,7 @@ export function startSessionProjectsSync(
   };
   window.addEventListener("online", wake);
   window.addEventListener("session-connection-retry", retry);
+  window.addEventListener("session-sync-retry", scopedRetry);
   window.addEventListener("storage", storage);
   document.addEventListener("visibilitychange", wake);
   // Let the mounted workspace finish restoring local selection before syncing membership.
@@ -142,6 +180,7 @@ export function startSessionProjectsSync(
     unsubscribe();
     window.removeEventListener("online", wake);
     window.removeEventListener("session-connection-retry", retry);
+    window.removeEventListener("session-sync-retry", scopedRetry);
     window.removeEventListener("storage", storage);
     document.removeEventListener("visibilitychange", wake);
   };

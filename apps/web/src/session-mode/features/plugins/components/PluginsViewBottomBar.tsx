@@ -1,6 +1,6 @@
 import { McpConfigScopeSelector } from '@session/components/cc/mcp/McpConfigScopeSelector';
 import { Button } from '@session/components/ui/button';
-import { ProjectSelector } from '@session/features/ProjectSelector';
+import { ProjectSelector } from '@session/features/ProjectSelector/ProjectSelector';
 import { cn } from '@session/lib/utils';
 import { useAgentSettingsStore } from '@session/stores';
 import { usePluginsViewContext } from '../hooks';

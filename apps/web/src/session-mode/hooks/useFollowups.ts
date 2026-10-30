@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { emptyFollowupThread } from "@agent-orchestrator/shared";
+import { emptyFollowupThread } from "@agent-orchestrator/shared/session-followups";
 import { followupService, useFollowupStore } from "../services/followupService";
 import {
   isAgentInteractionVisible,

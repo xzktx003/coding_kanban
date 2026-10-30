@@ -1,5 +1,9 @@
 import { expect, test } from "@playwright/test";
-import { chooseSessionLayout, installSessionUxFixture, seedSessionUx } from "./session-ux-fixture";
+import {
+  chooseSessionLayout,
+  installSessionUxFixture,
+  seedSessionUx,
+} from "./session-ux-fixture";
 
 test("Codex tabs control grid/list order, input destination, safe close and reload", async ({
   page,
@@ -51,9 +55,15 @@ test("Codex tabs control grid/list order, input destination, safe close and relo
   // A tab opened in another project synchronizes cwd and the shared composer.
   fixture.threads[3].cwd = "/fixture/second-project";
   await page.evaluate(async () => {
-    const { navigateToAgentSession } =
-      await import(performance.getEntriesByType("resource").findLast(entry =>
-        new URL(entry.name).pathname === "/src/session-mode/lib/agentNav.ts")?.name ?? "/src/session-mode/lib/agentNav.ts");
+    const { navigateToAgentSession } = await import(
+      performance
+        .getEntriesByType("resource")
+        .findLast(
+          (entry) =>
+            new URL(entry.name).pathname ===
+            "/src/session-mode/lib/agentNav.ts",
+        )?.name ?? "/src/session-mode/lib/agentNav.ts"
+    );
     navigateToAgentSession({
       agent: "codex",
       cwd: "/fixture/second-project",
@@ -61,9 +71,12 @@ test("Codex tabs control grid/list order, input destination, safe close and relo
     });
   });
   await expect(windows.last()).toHaveAttribute("data-selected", "true");
-  await page.locator('[data-session-card="ux-1"] .session-identity-title').click();
-  await expect(page.locator(".session-input-target")).toContainText(
-    "中文会话 1",
+  await page
+    .locator('[data-session-card="ux-1"] .session-identity-title')
+    .click();
+  await expect(page.locator(".session-codex-composer")).toHaveAttribute(
+    "data-owner-thread",
+    "ux-1",
   );
   await expect
     .poll(() =>
@@ -81,8 +94,9 @@ test("Codex tabs control grid/list order, input destination, safe close and relo
   await expect
     .poll(
       () =>
-        fixture.calls.filter((call) => call.path.endsWith("/followups/submit")).at(-1)
-          ?.body?.threadId,
+        fixture.calls
+          .filter((call) => call.path.endsWith("/followups/submit"))
+          .at(-1)?.body?.threadId,
     )
     .toBe("ux-1");
 
@@ -92,7 +106,13 @@ test("Codex tabs control grid/list order, input destination, safe close and relo
     .locator('[data-session-card="ux-1"]')
     .getByRole("button", { name: "关闭标签", exact: true })
     .click();
-  await expect.poll(() => windows.evaluateAll(els=>els.map(el=>el.getAttribute("data-session-card")))).toEqual(["ux-2", "ux-0", "ux-3"]);
+  await expect
+    .poll(() =>
+      windows.evaluateAll((els) =>
+        els.map((el) => el.getAttribute("data-session-card")),
+      ),
+    )
+    .toEqual(["ux-2", "ux-0", "ux-3"]);
   await expect(windows.last()).toHaveAttribute("data-selected", "true");
   expect(
     fixture.calls
@@ -107,13 +127,20 @@ test("Codex tabs control grid/list order, input destination, safe close and relo
     page.locator(".session-agent-view [data-card-root]"),
   ).toHaveCount(1);
   await page.reload({ waitUntil: "domcontentloaded" });
-  await expect.poll(() => windows.evaluateAll(els=>els.map(el=>el.getAttribute("data-session-card")))).toEqual(["ux-2", "ux-0", "ux-3"]);
+  await expect
+    .poll(() =>
+      windows.evaluateAll((els) =>
+        els.map((el) => el.getAttribute("data-session-card")),
+      ),
+    )
+    .toEqual(["ux-2", "ux-0", "ux-3"]);
   await expect(windows.last()).toHaveAttribute("data-selected", "true");
   await expect(
     page.getByRole("button", { name: "会话列表", exact: true }),
   ).toHaveAttribute("aria-pressed", "true");
-  await expect(page.locator(".session-input-target")).toContainText(
-    "中文会话 3",
+  await expect(page.locator(".session-codex-composer")).toHaveAttribute(
+    "data-owner-thread",
+    "ux-3",
   );
   await page.screenshot({ path: ".dev-runtime/session-tabs/list-desktop.png" });
   await chooseSessionLayout(page, "多会话网格");
@@ -165,9 +192,15 @@ test("many tabs scroll inside the header and legacy cards do not flood the new t
   ).toHaveCount(0);
   await seedSessionUx(page, 20);
   await page.evaluate(async () => {
-    const { navigateToAgentSession } =
-      await import(performance.getEntriesByType("resource").findLast(entry =>
-        new URL(entry.name).pathname === "/src/session-mode/lib/agentNav.ts")?.name ?? "/src/session-mode/lib/agentNav.ts");
+    const { navigateToAgentSession } = await import(
+      performance
+        .getEntriesByType("resource")
+        .findLast(
+          (entry) =>
+            new URL(entry.name).pathname ===
+            "/src/session-mode/lib/agentNav.ts",
+        )?.name ?? "/src/session-mode/lib/agentNav.ts"
+    );
     for (let i = 0; i < 20; i++)
       navigateToAgentSession({
         agent: "codex",

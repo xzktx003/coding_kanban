@@ -8,7 +8,8 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from '@session/components/ui/dropdown-menu';
-import { BrowserProjects, WorkspaceProjects } from '@session/features/ProjectSelector';
+import { BrowserProjects } from './BrowserProjects';
+import { WorkspaceProjects } from './WorkspaceProjects';
 import { isDesktopTauri } from '@session/hooks/runtime';
 import { cn } from '@session/lib/utils';
 import { codexService } from '@session/services/codexService';

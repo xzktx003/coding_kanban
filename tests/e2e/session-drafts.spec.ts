@@ -263,6 +263,16 @@ test("only the first message names a new session; a manual rename survives sends
 }) => {
   test.setTimeout(90000);
   await installSessionUxFixture(page, 2);
+  await page.route("**/api/session/lifecycle/rename", (route) => {
+    const body = route.request().postDataJSON();
+    return route.fulfill({
+      json: {
+        operationId: body.operationId,
+        threadId: body.threadId,
+        status: "accepted",
+      },
+    });
+  });
   await sharedTabs()(page);
   await ready(page);
   await seedSessionUx(page, 0);

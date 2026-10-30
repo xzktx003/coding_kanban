@@ -21,6 +21,7 @@ vi.mock("@session/hooks/use-mobile", () => ({
 }));
 vi.mock("@session/hooks/useActiveSessionProject", () => ({ useActiveSessionProject: () => ({ path: "/test", label: "test" }) }));
 vi.mock("@session/hooks/useEdgeSwipe", () => ({ useEdgeSwipe: () => {} }));
+vi.mock("./useWorkspaceGitStatus", () => ({ useWorkspaceGitStatus: () => {} }));
 vi.mock("@session/stores", async () => ({
   useLayoutStore: (await import("@session/stores/useLayoutStore"))
     .useLayoutStore,
@@ -50,8 +51,7 @@ vi.mock("@session/components/ui/resizable", () => ({
     },
   ),
 }));
-vi.mock("@session/components/layout", () => ({
-  AppSideBar: () => null,
+vi.mock("./RightPanel", () => ({
   RightPanel: ({ visible }: { visible: boolean }) => {
     useEffect(() => {
       state.mounts++;
@@ -102,9 +102,9 @@ beforeEach(() => {
     isRightPanelOpen: true,
   });
 });
-test("tool tree persists across mobile breakpoint and overlay hide/open", () => {
+test("tool tree persists across mobile breakpoint and overlay hide/open", async () => {
   const view = render(<AppLayout />);
-  const tree = screen.getByLabelText("持久工具树");
+  const tree = await screen.findByLabelText("持久工具树");
   state.mobile = true;
   view.rerender(<AppLayout />);
   act(() => useLayoutStore.setState({ isRightPanelOpen: true }));
@@ -116,14 +116,43 @@ test("tool tree persists across mobile breakpoint and overlay hide/open", () => 
   expect(state.mounts).toBe(1);
   expect(state.unmounts).toBe(0);
 });
-test("settings, plugins and insights hide tools without unmounting them", () => {
+test("every mobile tool overlay makes the retained conversation inert until it closes",async()=>{
+  state.mobile=true;
+  useLayoutStore.setState({isRightPanelOpen:false,isRightPanelFocused:false,openRightPanelTabs:["files"],activeRightPanelTab:"files"});
+  render(<AppLayout/>);
+  const input=await screen.findByLabelText("局部Agent草稿");
+  fireEvent.change(input,{target:{value:"保留后台会话草稿"}});
+  for(const tab of ["files","diff","terminal","vscode"] as const){
+    act(()=>useLayoutStore.setState({isRightPanelOpen:true,openRightPanelTabs:[tab],activeRightPanelTab:tab}));
+    expect(input.closest(".session-dock-main")?.hasAttribute("inert")).toBe(true);
+    expect(input.isConnected).toBe(true);
+    act(()=>useLayoutStore.getState().setRightPanelOpen(false));
+    expect(input.closest(".session-dock-main")?.hasAttribute("inert")).toBe(false);
+    expect((input as HTMLInputElement).value).toBe("保留后台会话草稿");
+  }
+  expect(state.agentUnmounts).toBe(0);
+});
+test("settings, plugins and insights hide tools without unmounting them", async () => {
   render(<AppLayout />);
-  const tree = screen.getByLabelText("持久工具树");
+  const tree = await screen.findByLabelText("持久工具树");
   for (const view of ["plugins", "insights", "settings", "agent"] as const) {
     act(() => useLayoutStore.getState().setView(view));
     expect(screen.getByLabelText("持久工具树")).toBe(tree);
     expect(tree.getAttribute("data-visible")).toBe(String(view === "agent"));
   }
+  expect(state.mounts).toBe(1);
+  expect(state.unmounts).toBe(0);
+});
+
+test("a tool tree is only acquired on first display and remains mounted after closing", async () => {
+  useLayoutStore.setState({ isRightPanelOpen: false });
+  render(<AppLayout />);
+  expect(screen.queryByLabelText("持久工具树")).toBeNull();
+  expect(state.mounts).toBe(0);
+  act(() => useLayoutStore.getState().setRightPanelOpen(true));
+  const tree = await screen.findByLabelText("持久工具树");
+  act(() => useLayoutStore.getState().setRightPanelOpen(false));
+  expect(screen.getByLabelText("持久工具树")).toBe(tree);
   expect(state.mounts).toBe(1);
   expect(state.unmounts).toBe(0);
 });

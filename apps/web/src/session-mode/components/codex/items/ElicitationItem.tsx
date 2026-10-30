@@ -282,8 +282,16 @@ export function ElicitationItem({
       return;
     if (event.key === "Escape") {
       event.preventDefault();
+      event.stopPropagation();
+      // An MCP form owns Escape only while focus is inside this request.
+      // The original component sends cancel and awaits its receipt; collapsing
+      // leaves the server waiting forever. Pending/unknown responses stay put.
+      if (
+        blocked || collapsed ||
+        !event.currentTarget.contains(event.currentTarget.ownerDocument.activeElement)
+      ) return;
       clearAdvance();
-      setCollapsed(request, true);
+      submitChoice("cancel");
       return;
     }
     if (blocked || collapsed || unsupported || event.repeat) return;

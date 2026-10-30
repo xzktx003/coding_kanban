@@ -19,8 +19,8 @@ vi.mock("@session/browser-dialog", () => ({
   open: vi.fn(),
 }));
 vi.mock("@session/components/codex/stores", () => ({
-  useCodexStore: (selector: (state: { currentThreadId: string }) => unknown) =>
-    selector({ currentThreadId: "owner" }),
+  useCodexStore: (selector: (state: { currentThreadId: string; threads: Array<{ id: string; cwd: string }> }) => unknown) =>
+    selector({ currentThreadId: "owner", threads: [{ id: "owner", cwd: "/project" }] }),
 }));
 vi.mock("@session/hooks/useThreadModelSettings", () => ({
   useThreadModelSettings: () => ({
@@ -70,7 +70,7 @@ it.each(["picker rejected", "附件大小不能超过 10 MB", "upload failed"])(
     render(
       <SelectFilesMenuItem onFilesSelected={selected} onAfterSelect={after} />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "文件和文件夹" }));
+    fireEvent.click(screen.getByRole("button", { name: "上传设备文件" }));
     await waitFor(() =>
       expect(notices.danger).toHaveBeenCalledExactlyOnceWith(
         "无法打开文件选择器",
@@ -91,7 +91,7 @@ it("keeps cancellation silent and only accepts successfully selected paths", asy
   render(
     <SelectFilesMenuItem onFilesSelected={selected} onAfterSelect={after} />,
   );
-  const button = screen.getByRole("button", { name: "文件和文件夹" });
+  const button = screen.getByRole("button", { name: "上传设备文件" });
   fireEvent.click(button);
   await waitFor(() => expect(open).toHaveBeenCalledTimes(1));
   expect(selected).not.toHaveBeenCalled();

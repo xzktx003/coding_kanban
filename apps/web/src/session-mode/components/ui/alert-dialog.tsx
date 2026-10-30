@@ -1,5 +1,5 @@
 import {
-  sessionPortalContainer,
+  useSessionPortalContainer,
   useSessionInteractionVisible,
   isSessionInteractionVisible,
 } from "@session/session-dom";
@@ -26,9 +26,10 @@ function AlertDialogTrigger({
 function AlertDialogPortal({
   ...props
 }: React.ComponentProps<typeof AlertDialogPrimitive.Portal>) {
+  const container = useSessionPortalContainer();
   return (
     <AlertDialogPrimitive.Portal
-      container={sessionPortalContainer()}
+      container={container}
       data-slot="alert-dialog-portal"
       {...props}
     />

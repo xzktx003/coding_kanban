@@ -20,7 +20,7 @@ beforeEach(() => {
 afterEach(() => clipboard.restore());
 async function copy() {
   fireEvent.contextMenu(await screen.findByRole("button", { name: /fixture row/ }), { clientX: 10, clientY: 10 });
-  fireEvent.click(await screen.findByText("Copy Id", { exact: true }));
+  fireEvent.click(await screen.findByText("复制会话 ID", { exact: true }));
 }
 it("copies only the captured thread ID over HTTP without opening or forking it", async () => {
   render(<ThreadList cwd="/fixture" />);

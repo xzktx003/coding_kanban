@@ -219,6 +219,35 @@ export class WorkspaceFiles {
       size: bytes.length,
     };
   }
+  /** One directory level only; both the path and every selectable child stay in the registered project. */
+  async list(root: string, path: string, limit = 500) {
+    const target = await this.target(root, path);
+    const directory = await opendir(target.path, { bufferSize: 32 });
+    const entries: Array<{ name: string; path: string; kind: "file" | "directory" }> = [];
+    let bytes = 0, truncated = false;
+    for await (const entry of directory) {
+      if ((!entry.isFile() && !entry.isDirectory()) || /[\\\x00-\x1f\x7f]/.test(entry.name) || entry.name === ".git") continue;
+      const cost = Buffer.byteLength(entry.name);
+      if (entries.length >= limit || bytes + cost > 24_000) { truncated = true; break; }
+      bytes += cost;
+      entries.push({ name: entry.name, path: join(target.path, entry.name), kind: entry.isDirectory() ? "directory" : "file" });
+    }
+    entries.sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === "directory" ? -1 : 1));
+    return { ...target, entries, truncated };
+  }
+  /** Explicit composer snapshot; selecting a folder never recursively reads or uploads its contents. */
+  async reference(root: string, path: string) {
+    const target = await this.target(root, path);
+    const info = await lstat(target.path);
+    if (info.isDirectory()) {
+      const directory = await this.list(target.root, target.path, 200);
+      const content = directory.entries.map((entry) => entry.name + (entry.kind === "directory" ? "/" : "")).join("\n") +
+        (directory.truncated ? "\n…（仅保留部分当前层级条目，未读取子目录）" : "");
+      return { ...target, kind: "directory" as const, content, version: hash(Buffer.from(content)), truncated: directory.truncated };
+    }
+    const file = await this.read(target.root, target.path, 180_000);
+    return { root: target.root, ...file, kind: "file" as const, truncated: false };
+  }
   async version(root: string, path: string) {
     const t = await this.target(root, path);
     const { bytes } = await this.bytes(t.path, 64 * 1024 * 1024);

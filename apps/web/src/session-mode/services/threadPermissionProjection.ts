@@ -2,7 +2,7 @@ import { MutationNotStartedError } from "./MutationNotStartedError";
 import type { ThreadModelSettings } from "../stores/useThreadModelStore";
 import type { TurnStartParams } from "@session/bindings/v2";
 
-export const PERMISSION_FIELDS = ["approvalPolicy", "approvalsReviewer", "sandbox", "sandboxPolicy", "webSearchRequest"] as const;
+export const PERMISSION_FIELDS = ["approvalPolicy", "approvalsReviewer", "sandbox", "sandboxPolicy", "webSearchRequest", "permissions"] as const;
 export type ThreadPermissionField = (typeof PERMISSION_FIELDS)[number];
 /** Setting provenance, never a lease granting input, writer or reviewer rights. */
 export type ThreadPermissionSources = Partial<Record<ThreadPermissionField, "local" | "native">>;
@@ -25,8 +25,11 @@ export function permissionSourcesFor(value: Partial<ThreadModelSettings> & { nat
 }
 
 /** Omitted fields inherit the native thread. Never send UNKNOWN display defaults. */
-export function threadPermissionParameters(settings: Readonly<ThreadModelSettings>): Pick<TurnStartParams, "approvalPolicy" | "approvalsReviewer" | "sandboxPolicy"> {
+export function threadPermissionParameters(settings: Readonly<ThreadModelSettings>): Pick<TurnStartParams, "approvalPolicy" | "approvalsReviewer" | "sandboxPolicy"> & { permissions?: string } {
   const sources = permissionSourcesFor(settings);
+  // Native forbids combining a named profile with an explicit sandbox policy.
+  // Older thread defaults must not silently override the selected profile.
+  if (sources.permissions && typeof settings.permissions === "string" && settings.permissions) return { permissions: settings.permissions };
   const result: Pick<TurnStartParams, "approvalPolicy" | "approvalsReviewer" | "sandboxPolicy"> = {};
   if (sources.approvalPolicy && settings.approvalPolicy !== undefined) result.approvalPolicy = structuredClone(settings.approvalPolicy);
   if (sources.approvalsReviewer && settings.approvalsReviewer !== undefined) result.approvalsReviewer = settings.approvalsReviewer;
@@ -46,5 +49,6 @@ export function threadPermissionParameters(settings: Readonly<ThreadModelSetting
 
 export function threadPermissionsKnown(settings: Readonly<ThreadModelSettings>): boolean {
   const s = permissionSourcesFor(settings);
+  if (s.permissions && typeof settings.permissions === "string" && settings.permissions) return true;
   return !!(s.approvalPolicy && s.approvalsReviewer && (s.sandbox || (s.sandboxPolicy && settings.sandboxPolicy)));
 }

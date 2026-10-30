@@ -17,6 +17,12 @@
 
 网关仅在匹配 `stopTurnId` 的明确停止操作时保留用户停止归因。外部事件或只读历史恢复发现 interrupted 时显示“当前响应已中断，队列已暂停；中断来源尚未确认，请检查后继续”。仍暂停队列，不自动重试、继续或清除草稿。前端将旧运行层的 `interrupted` 和旧“由于你中断…”字符串转成中性提示，兼容已保存的历史暂停状态。
 
+## SSE 离线与在线恢复
+
+共享聊天 EventSource 收到浏览器 `offline` 时关闭当前连接并显示 `reconnecting`，保留已处理的 SSE 序号和审批状态；`online` 时仅重建同一个 `view=chat` 流并从保留序号继续。若离线期间收到 runtime-restarted，则重置旧代次游标并等到 `online` 后从新代次开始。离线关闭本身不变更审批或草稿；online 后只接收原流回放与既有快照。网络恢复不会解除超预算暂停，也不 resume、重发输入或触发完整历史轮询。最后一个订阅者离开时移除网络状态监听。
+
+定向单测 `eventStream.test.ts` 12 项通过。显式真实 HTTP/Chromium 验收命令为 `SESSION_EVENTSTREAM_OFFLINE_LIVE_RUN=1 node --test scripts/session-eventstream-offline-live.test.mjs`；该夹具实际观测到 EventSource OPEN→离线 CLOSED、运行时 SSE subscriber 从基线 4 回到 4、online 创建第二条连接并以 `since=1` 收到事件及审批快照。默认脚本测试跳过此浏览器关卡；完整步骤与边界见本轮 debug 记录。
+
 ## 最小验证与激活
 
 - `packages/session-runtime/src/codex/ownership.test.ts`：主／子未完成轮次、精确完成、回执先于 start 通知及 completion 先于回执。
@@ -79,3 +85,8 @@
 - 在真实 LAN HTTPS 页面上使用真实 Vite WSS 运行 `session-mobile-reconnect` 和 `session-background-interruption`：8 项全部通过，无跳过。覆盖 393px／1280px 原位重连，错过更新／服务代次变化显示手动刷新，三次连续断线，后台／pagehide／刷新后的草稿和队列保留，以及零 Agent 写请求。浏览器 API／Agent 仍由隔离夹具截获；这不是物理 iPhone 或真实模型长任务验收。
 - 新运行层对实际 `REF_xh3_accu` 执行只读 `thread/list` 与 `thread/read`：目标为 paginated，历史 HTTP 200、11,611,853 bytes、100 turns／2,915 items，末轮 completed；未发送任务写入。该现场范围证明此会话刷新后历史可读，不表示超过既有读取预算的任意单条 legacy 消息都会被显示。
 - legacy 单个字符串在解析时超过既有 32 MiB 历史预算，会明确返回 413，仅拒绝该次读取并清理自有 reader；不会截断／静默丢正文，也不会杀掉共享 Agent。超预算 legacy 正文仍是可见的读取限制。
+
+
+## 开发依赖缓存的React过滤（2026-10-29）
+
+各Vite进程仍使用独立缓存身份。缓存位于.dev-runtime/vite-cache，React插件须同时排除该路径和原node_modules，避免已编译依赖重复Babel转换；不得排除整个.dev-runtime，隔离验收目录的应用源码仍需Fast Refresh。scripts/vite-react-cache.test.mjs执行实际插件过滤，tests/e2e/session-vite-optimizer.spec.mts验证真实LAN依赖响应及保留计数状态的源码HMR。文档连续性、代次检测和显式刷新要求不变，详见[会话体验验收](designs/session-mode-user-experience-acceptance-20261029.md)。

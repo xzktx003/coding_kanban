@@ -1,4 +1,4 @@
-import { CODEX_CHAT_PRIVATE_BODY_METHODS, projectCodexChatValue } from "@agent-orchestrator/shared";
+import { CODEX_CHAT_PRIVATE_BODY_METHODS, projectCodexChatValue } from "@agent-orchestrator/shared/codex-chat-projection";
 import type { Thread } from "@session/bindings/v2/Thread";
 import type { ServerNotification } from "@session/bindings";
 import type { ThreadItem } from "@session/bindings/v2/ThreadItem";

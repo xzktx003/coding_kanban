@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { appendDraft } from "@session/stores/useSessionDraftStore";
-import { validAgentMention } from "@agent-orchestrator/shared";
+import { validAgentMention } from "@agent-orchestrator/shared/session-subagents";
 import { useSubagentFamily } from "./hooks";
 import { subagentService } from "./service";
 import { mentionDrafts, useAgentMentionDrafts } from "./mentions";

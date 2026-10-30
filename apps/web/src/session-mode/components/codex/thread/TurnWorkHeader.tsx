@@ -53,7 +53,7 @@ export function TurnWorkHeader({
       : t(work.running ? "workingFor" : "workedFor", {
           time: formatTurnWorkTime(elapsed, i18n.language),
         });
-  if (work.running || !work.processKeys.size)
+  if (!work.processKeys.size)
     return (
       <div
         className="codex-turn-work-header"
@@ -75,10 +75,30 @@ export function TurnWorkHeader({
       type="button"
       className="codex-turn-work-header"
       data-turn-work={work.turnId}
+      data-running={work.running || undefined}
       aria-expanded={work.expanded}
       onClick={onToggle}
     >
-      <span>{label}</span>
+      <span role={work.running ? "status" : undefined}>
+        {label}
+        {work.running && retryNotice && (
+          <span className="text-yellow-600 dark:text-yellow-400">
+            {" "}
+            · {retryNotice}
+          </span>
+        )}
+      </span>
+      {work.running && (
+        <span className="codex-turn-work-disclosure">
+          {i18n.language.startsWith("zh")
+            ? work.expanded
+              ? "收起较早过程"
+              : "查看全部过程"
+            : work.expanded
+              ? "Show latest"
+              : "Show all activity"}
+        </span>
+      )}
       <ChevronRight
         aria-hidden="true"
         className={work.expanded ? "is-expanded" : ""}

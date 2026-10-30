@@ -202,6 +202,10 @@
   align-items: center;
   gap: 6px;
 }
+.session-mode .codex-image-limit-message {
+  min-width: 0;
+  text-align: center;
+}
 .session-mode .codex-native-divider-message > button {
   display: inline-flex;
   cursor: pointer;

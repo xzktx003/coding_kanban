@@ -33,3 +33,7 @@ view=chat + notLoaded 的窄查询（limit1、desc、无cursor、无额外字段
 `pnpm check` 通过；前端相关7文件127项单测、网关集成、activity流式限额／取消和运行层聊天投影回归通过。浏览器新增2项运行恢复用例通过，静默SSE恢复／异步提问5项通过；扩展回归中队列操作、不可见正文回收及真实HTTP/EventSource投影均通过。
 
 扩展浏览器运行仍有两项旧夹具断言未通过：composer菜单测试查找已改名的「添加附件与上下文」，权限测试预期全局完全访问但当前线程显示「权限待确认」。本轮未修改权限或composer组件，不将这两项计入通过；完整浏览器套件仍有未通过项。30分钟RSS长测按默认配置跳过，不计验收。
+
+## 2026-10-30 设备缓存与反向到达顺序
+
+设备IDB也会保留旧reader推断的interrupted。最新cache-only状态及工具先中性核对，不恢复执行能力；原生SSE/activity/turn-start ACK的内存proof绑定精确对象、轮次、账号/运行代次和API来源。proof先到会阻止旧缓存覆盖，缓存先到则在小只读核对后立即修正正文，真实旧中断保留。相同JSON中的核实状态不能被无变化优化吞掉；跨endpoint/token held历史与去重须锁存撤销。实现及未通过记录见[本轮专项](designs/session-mode-implementation-20261029/cached-execution-recovery.md)。

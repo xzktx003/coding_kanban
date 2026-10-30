@@ -1,3 +1,4 @@
+import { sessionWindowStorageName } from "@session/services/sessionWindowContext";
 import { v4 as randomUUID } from "uuid";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
@@ -223,7 +224,7 @@ export const useSessionSplitStore = create<State>()(
         }),
     }),
     {
-      name: "kanban.session.split-layout",
+      name: sessionWindowStorageName("kanban.session.split-layout"),
       version: 1,
       partialize: (s) => ({ tree: s.tree, activeGroupId: s.activeGroupId }),
     },

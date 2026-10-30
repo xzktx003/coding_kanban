@@ -12,6 +12,8 @@
 
 ## 后续修改必须保持的边界
 
+**2026-10-30 用户留存策略确认：** 全部关注会话的最近页预加载后，默认在既有资源预算内持续保温，可见正文优先；压力或超预算时回收后台正文。设备已存true/false不迁移，显式false继续约60秒不可见回收且不后台再热。休眠正文不能被迟到事件、历史回包或设备缓存填满；开启保温后的再热也须经过现有预算准入、冷却和精确只读reader，不扩大字节、并发或RPC预算。旧默认false阶段的自然回收记录保留为历史证据，不能替代新默认保温及压力回收验收。
+
 2026-10-20 React 诊断补充：仅清空时间线仍会先序列化大 props，产生 JS 堆未充分反映的原生分配；开发模式明确 React 的 `devtools.properties` 必须在原生 `measure` 调用之前剥离，保留计时／轨道及普通应用 API，不修改 React 复用参数。原生对照、适用边界和完整页面验收见 [React 性能记录](session-react-performance-memory.md)。
 
 2026-10-20 子 Agent 补充：独立 `subagents/snapshot`／`verify` 不经过通用聊天代理，必须自行在网关序列化前裁剪；不得把 `boundedSubagentThread` 的前端过滤当作传输保护。活跃轮次优先只读 `itemsView: notLoaded`，明确不支持时才回退；旧运行层返回完整 items 仍必须在浏览器前剥离。保留父子身份、权限和当前轮次，回归及证据见 [空闲轮询正文透传修复](session-subagent-memory.md)。此修复不自动关闭已有长期 RSS 红灯。
@@ -30,7 +32,7 @@
 | 过大 SSE 帧 | 当前单帧上限 16 MiB；网关发出命名事件 `session-projection-error` 后释放上游，浏览器暂停接收并显示原因；显式重试恢复连接与只读历史 | 静默丢弃审批；伪造 `seq: 0`；自动无限重连并回放同一巨帧；为恢复页面而停止 Agent |
 | 后台历史读取 | 首次加载、连接缺口、缺失回执、完成边界、手动/页面恢复触发补读；外部空闲会话由轻量状态列表的 `updatedAt` 变化触发 | 恢复“活动静默 5 秒 / 空闲 30 秒”完整历史轮询；把工具执行安静当作消息丢失；活动时间戳每次变化都重读正文 |
 | 完成恢复 | `active → idle/systemError` 即使旧 timing 仍为 `inProgress` 也要补读；读取中发生完成须合并排队一次后续读取；轻量快照持续 idle 与本地 inProgress 矛盾时，按轮次去重补读一次 | 为减少请求漏掉最终回复、未读状态或外部客户端保存的历史；读取中完成被直接忽略 |
-| 不可见正文生命周期 | 以实际可见的聊天正文组件计数；最后一个使用者离开 60 秒后释放可恢复正文、流式缓冲及派生视图缓存（5 秒扫描，繁忙浏览器可能延迟）；运行状态、审批、草稿及未读独立保留，重显只读恢复最近页 | 把“仍在关注列表”等同于一直需要正文；回收后让后台 delta/历史读取重新填满；恢复时沿用已释放的旧分页起点漏掉回复 |
+| 不可见正文生命周期 | 以实际可见聊天正文组件计数；默认在既有预算内保留关注最近页，可见优先、压力或超预算回收。显式false在最后使用者离开约60秒后释放可恢复正文、流式缓冲与派生缓存（5秒扫描，繁忙时可延迟）。回收后的再热须有预算、冷却和精确只读reader准入；运行状态、审批、草稿及未读独立保留，重显只读恢复最近页 | 把关注等同于无预算永久驻留；让迟到delta/历史/设备缓存直接重填休眠正文；绕过准入或沿用已释放的旧分页起点漏掉回复 |
 | 空闲同步 | 相同项目/标签快照返回原 Zustand 状态，不通知订阅者；真实变化、操作确认与错误恢复仍正常发布 | 每两秒生成新根状态，即使字段相同也通知整片 Markdown、卡片和导航重渲染 |
 | 开发性能时间线 | React 大属性在原生 measure 序列化之前剥离，时间线留存也须释放；开发专用、明确识别 React 的记录，普通应用 measure/mark 保留；同时测 renderer RSS | 只测 JS 堆；先序列化完整 React 属性再清空、长期保留 React User Timing 记录；清空所有应用计时或生产 API |
 | 完成提示音 | 单个活跃/关闭中的 AudioContext；每声结束断开节点，连续任务复用上下文，空闲 30 秒关闭；音频时间冻结时有墙钟释放兜底，HMR 释放旧实例 | 每次完成 new AudioContext 却只调用 oscillator.stop；仅测 JS 堆而忽略原生音频资源；自动播放阻止后无限积累挂起上下文 |
@@ -228,3 +230,35 @@ RSS 低点 469.8320→496.0898 MiB，增长 26.2578 MiB；heap 低点 55.2915→
 正文、事件顺序与引用均未变化时，compactor 必须返回原数组，governor 不得因新包装重复发布同内容；不可缩小的合法附件不能引发250ms自反馈循环。测试须覆盖真实压力分支中无输入的状态发布次数，不能靠放宽预算。
 
 Codex store 热更新须立即注册并复用同一个 store，更新 actions 而保留现有数据/订阅，不在模块作用域保存旧 state 快照；清空恢复缓存 Map 不能替代此保证。修改须运行 `useCodexStore.hmr.test.ts`、budget/governor 单测、`session-memory-feedback-loop.spec.ts` 与真实 Vite `session-store-hmr.spec.mts`，及原恢复/审批/空闲回收组。因果红绿、测量范围及原长期RSS未达标边界见[回收与HMR记录](session-memory-feedback-loop.md)。
+
+## 2026-10-30：浏览器网络离线时的共享 SSE 生命周期
+
+浏览器 `offline` 必须关闭共享原生 EventSource、标记 `reconnecting` 并保留序号；`online` 只能从该序号恢复原 `view=chat` 只读事件流。离线期间 runtime-restarted 仍须清旧序号并延迟连接到 online。离线处理本身不修改审批/草稿，不 resume、重发或扩大为历史轮询；online 后仅接收原流回放和既有快照。超预算 `paused` 状态不由 `online` 清除，最后一个 subscriber 退出时移除 offline/online listener。12 项 eventStream 单测通过；显式真实 HTTP/EventSource 短测观测到原生 readyState 1→2→1、服务器 EventHub 总订阅数基线4→5→4，重连 URL 按 `since=1` 回放离线间隙事件与双审批快照。默认脚本测试跳过浏览器关卡，完整证据与限制见 `session-interruption-safety.md`。
+
+## Claude/ACP实时投影与有界历史（2026-10-30）
+
+`view=chat`现在同时裁剪ACP工具rawInput/rawOutput/content/locations以及Claude tool_use输入/tool_result结果；字段至多64KiB，明确truncated并保留按需只读详情。普通助手终稿、权限/提问和事件序号不变。ACP持久sourceID和最近页快照边界用于读中合并，不能按相同文本猜测身份。元数据轻探测不读完整正文。单页2MiB与源安全边界、真实网络验证见[辅助历史](designs/session-mode-implementation-20261029/auxiliary-history.md)。
+
+本轮独立LAN HTTP→正式网关→原生EventSource短测通过：67,113,626 bytes源数据投影为180,218 bytes浏览器数据，最大事件11,256 bytes；19条连续序号、8个ACP源身份、两类审批和最终答复完整。没有据此声明堆/RSS长期稳定；原标准长测与自然回收门槛均保持。
+
+## 2026-10-30 HTTP JSON 字节消费与回执保护
+
+公共JSON响应经字节流/UTF-8解码，错误只消费一次；锁与临时正文在完成/失败时释放。不得恢复双clone错误读取，也不得将截断或读失败的409推断成明确拒绝。原网关/RPC/聊天预算与所有自然GC长测门槛保留；完整Chrome的负结果和精确headless的分配路径对照分别保存，后者不代表完整工作台RSS达标，见[响应消费与回执](designs/session-mode-implementation-20261029/json-response-memory.md)。
+
+## 2026-10-30 缓存执行确定性与连接来源
+
+最新cache-only中断的未核实标记为纯WeakSet；原生执行proof为以实际timing对象为弱键的有界元数据，不保存正文，也不将认证凭证或授权结果写盘。原生SSE/activity/ACK纠正须精确thread/turn且来源仍有效；相同JSON但确定性变化须通知显示，其他相同快照保持幂等。cache与既有native事件合并仍先执行8MiB显示预算；pending只触发现有小activity核对，不恢复完整历史轮询。跨endpoint/token held读取锁存撤销，dormant不得重填。详见[缓存与执行恢复](designs/session-mode-implementation-20261029/cached-execution-recovery.md)，原全部自然GC/RSS门槛保持。
+
+## 2026-10-30 完整调试观察器的固定预算验收入口
+
+新增显式 `session-native-http-memory.spec.mts`：实际 HTTP/API/原生 EventSource、全部 Network 回调及应用 pooled subscriber 连续序号均保留，只为唯一 CDP Network session 的调试器正文副本设置固定 4/1 MiB 预算。产品限额、原 30 delta/2 秒负载、90–300 秒/末 180 秒窗口及 64/256 MiB heap、128/768 MiB RSS 门槛不变；原 Playwright 长测与所有历史 RED 独立保留。默认跳过和 smoke 均不能计作三十分钟通过，完整方法与尚待最终冻结长测的边界见[原生 HTTP 验收](session-native-http-memory-acceptance.md)。
+
+## 2026-10-30：transcript 事件数回收与投影复用
+
+`compactCodexTranscript` 可在压缩后的字节估算已经低于原 low-water mark 时，仅按原事件顺序和原 active/protected turn 规则删除完整 turn 组，避免另建逐事件 bytes 数组；剩余字节仍按同一估算缓存重算。字节仍超目标时必须保留原分组估算、减量与文字收缩路径。每个可见事件在 hidden-body 检查时得到的 chat projection 复用于 compact，直接 compact 私有正文仍返回安全 cursor；不能跳过隐藏正文过滤、裁掉未知元数据或更改序号、审批/提问、reading window、active turn、恢复游标或8MiB/3000事件预算。回归需同时覆盖 count-only / byte-pressure、active与protected group、reading window / pending cursor、hidden private body、large unknown metadata与BigInt，并运行 `codexTranscriptMemoryBudget`、`sessionMemoryGovernor` 和 `sessionMemoryReadingProtection` 单测。纯函数 M08 对照结果不能代替原 500ms/<80行/<2000 DOM 浏览器关卡或长期RSS测量；这些原门槛保持。
+
+## 2026-10-30：超限快照的同步保护
+
+未主动展开历史的变更快照若超过原3000事件上限，memory governor 在该次发布中立即调用既有预算回收，取消先前的250ms debounce；运行标志阻止回收自身发布递归。仅检查变更数组的条数，不在每个token扫描完整正文。当前已固定的阅读窗口继续使用原延迟调度与阅读额度，普通流、5秒检查、字节/压力阈值和可恢复游标不变。活动轮次、审批及草稿保持独立，不能用同步保护替代分页或裁掉明确阅读的内容。
+
+性能测试必须以真实完整聊天行就绪作为预热条件，不能因 `CodexTranscriptPreparing` 显示相同预览文字就开始“暖渲染”计时。完整组件的冷加载另行记录；最新行500ms/行数/DOM限制及自然30分钟内存门槛均不变。

@@ -1,4 +1,4 @@
-import { BrowserDictationButton } from "@session/BrowserDictationButton";
+import { BrowserDictationButton, type BrowserDictationProps } from "@session/BrowserDictationButton";
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { Loader2, Mic, Square } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -22,9 +22,7 @@ import { useDictationStore } from '@session/stores/settings/useDictationStore';
 import { DictationPopoverContent } from './DictationPopoverContent';
 import { DownloadProgressRing } from './DownloadProgressRing';
 
-interface DictationButtonProps {
-  onTranscript: (text: string) => void;
-}
+type DictationButtonProps = BrowserDictationProps;
 
 const DOWNLOAD_POLL_INTERVAL_MS = 300;
 const DOWNLOAD_TIMEOUT_MS = 10 * 60 * 1000; // model files can be a few GB
@@ -39,7 +37,7 @@ function sleep(ms: number) {
  * listening -> tap again to stop and transcribe -> transcript is appended
  * to the composer via onTranscript.
  */
-export function DictationButton({ onTranscript }: DictationButtonProps) {
+export function DictationButton({ onTranscript, controlRef, onPhaseChange, disabled }: DictationButtonProps) {
   const [sessionState, setSessionState] = useState<DictationSessionState>('idle');
   const sessionStateRef = useRef(sessionState);
   sessionStateRef.current = sessionState;
@@ -238,7 +236,7 @@ export function DictationButton({ onTranscript }: DictationButtonProps) {
   }, [selectedModelId, isPreparingModel, isPickerOpen, modelStatus, showModelSelectionDialog]);
 
   if (!isDesktopTauri()) {
-    return <BrowserDictationButton onTranscript={onTranscript} />;
+    return <BrowserDictationButton onTranscript={onTranscript} controlRef={controlRef} onPhaseChange={onPhaseChange} disabled={disabled} />;
   }
 
   // Only "processing" (transcribing) blocks interaction; a download in
@@ -264,7 +262,7 @@ export function DictationButton({ onTranscript }: DictationButtonProps) {
           size="icon"
           type="button"
           onClick={handleClick}
-          disabled={isBusy}
+          disabled={isBusy || disabled}
           title={
             isPreparingModel
               ? `Downloading dictation model…${downloadPercent !== null ? ` ${Math.round(downloadPercent)}%` : ''}`

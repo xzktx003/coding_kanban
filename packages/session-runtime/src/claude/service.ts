@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import { basename, extname } from "node:path";
 import {
@@ -21,6 +21,7 @@ import { KeyedSerial } from "../core/serial.js";
 import { ClaudeConfig, absolutePath, validateMcpConfig } from "./config.js";
 import { ClaudeHistory, validateSessionId } from "./history.js";
 import { ClaudeUsage } from "./usage.js";
+import { ClaudeSessionIdentity } from "./session-identity.js";
 
 class Input implements AsyncIterableIterator<SDKUserMessage> {
   private pending?: SDKUserMessage;
@@ -74,12 +75,18 @@ interface Session {
   controller: AbortController;
   nativeId?: string;
   onStarted?: (id: string) => void;
+  historyRecoveryError?: string;
 }
 interface Pending {
   session: Session;
   turn: string;
   resolve: (decision: string) => void;
   cleanup: () => void;
+  tool: string;
+  target: "project" | "session";
+  input?: JsonObject;
+  inputBytes: number;
+  inputRevision: string;
 }
 /**
  * Session-file operations. These act on the session JSONL rather than a live
@@ -96,6 +103,14 @@ export interface ClaudeServiceOptions {
   queryFactory?: typeof query;
   fetcher?: typeof fetch;
   sessionOps?: Partial<ClaudeSessionOps>;
+  runtimeInstance?: string;
+}
+const PERMISSION_INPUT_BYTES = 8 * 1024 * 1024;
+const PERMISSION_TOTAL_BYTES = 16 * 1024 * 1024;
+const PERMISSION_PREVIEW_BYTES = 32 * 1024;
+function permissionInputIdentity(input: JsonObject) {
+  const encoded=JSON.stringify(input);
+  return { inputBytes:Buffer.byteLength(encoded),inputRevision:createHash("sha256").update(encoded).digest("hex") };
 }
 const MODES = new Set([
   "default",
@@ -115,25 +130,105 @@ export class ClaudeService {
   readonly usage: ClaudeUsage;
   private readonly sessions = new Map<string, Session>();
   private readonly pending = new Map<string, Pending>();
+  private pendingInputBytes = 0;
+  private readonly runtimeInstance: string;
+  private readonly identity: ClaudeSessionIdentity;
+  private readonly identityWrites=new Map<string,Promise<void>>();
+  private readonly deleting=new Set<string>();
+  private readonly requestAliases=new Map<string,string>();
   private readonly serial = new KeyedSerial();
   private readonly env: NodeJS.ProcessEnv;
   constructor(private readonly options: ClaudeServiceOptions) {
     this.env = options.env ?? process.env;
+    this.runtimeInstance = options.runtimeInstance ?? randomUUID();
     this.config = new ClaudeConfig(this.env);
+    this.identity = new ClaudeSessionIdentity(options.dataHome,this.config.claudeHome);
     this.history = new ClaudeHistory(options.dataHome, this.env);
     this.usage = new ClaudeUsage(this.config, options.fetcher);
   }
   get activeCount() {
     return [...this.sessions.values()].filter((s) => s.active).length;
   }
+  activitySnapshot() {
+    let connections = 0, activeTurns = 0;
+    for (const session of this.sessions.values()) {
+      if (session.closed) continue;
+      connections++;
+      if (session.active) activeTurns++;
+    }
+    return { connections, activeTurns, pendingRequests: this.pending.size };
+  }
   private get(id: string) {
     validateSessionId(id);
     const session =
-      this.sessions.get(id) ??
-      [...this.sessions.values()].find((s) => s.nativeId === id);
+      this.sessions.get(id) ?? this.sessions.get(this.requestAliases.get(id)??"") ??
+      [...this.sessions.values()].find((s) => s.nativeId === id || s.options.resume === id);
     if (!session || session.closed)
       throw new HttpError(404, "Client not found");
     return session;
+  }
+  private snapshotOwner(id: string, expectedInstance?: string, expectedCwd?: string) {
+    if (expectedInstance !== undefined && expectedInstance !== this.runtimeInstance)
+      throw new HttpError(409, "Claude runtime instance changed");
+    const session = this.get(id);
+    if (expectedCwd !== undefined && expectedCwd !== session.options.cwd)
+      throw new HttpError(409, "Claude session directory changed");
+    return session;
+  }
+  assertSessionScope(id: string, expectedInstance?: string, expectedCwd?: string) {
+    this.snapshotOwner(id, expectedInstance, expectedCwd);
+  }
+  /** Resolve only an already-observed SDK identity; this never opens a Query. */
+  async historySessionId(id: string) {
+    validateSessionId(id);
+    const session=this.sessions.get(id)??this.sessions.get(this.requestAliases.get(id)??"")??[...this.sessions.values()].find(s=>s.nativeId===id||s.options.resume===id);
+    return session?.nativeId??(typeof session?.options.resume==="string"?session.options.resume:await this.identity.resolve(id));
+  }
+  sessionSnapshot(id: string, expectedInstance?: string, expectedCwd?: string) {
+    const session = this.snapshotOwner(id, expectedInstance, expectedCwd);
+    const safeOptions: JsonObject = { permissionMode: session.mode };
+    for (const key of ["model", "effort", "fallbackModel", "maxTurns", "maxBudgetUsd", "maxThinkingTokens", "allowedTools", "disallowedTools"])
+      if (session.options[key] !== undefined) safeOptions[key] = session.options[key];
+    const optionsKnown = Buffer.byteLength(JSON.stringify(safeOptions)) <= 128 * 1024;
+    const permissions = [...this.pending].filter(([, p]) => p.session === session && p.turn === session.active?.token).map(([requestId, p]) => ({
+      requestId, sessionId: session.id, toolName: p.tool,
+      toolInput: p.input && p.inputBytes <= PERMISSION_PREVIEW_BYTES ? JSON.parse(JSON.stringify(p.input)) as JsonObject : {},
+      alwaysAllowTarget: p.target, toolInputTruncated: !p.input || p.inputBytes > PERMISSION_PREVIEW_BYTES,
+      inputAvailable: !!p.input, inputRevision: p.inputRevision, executionId: p.turn,
+      ...(!p.input ? { inputError: "审批参数超过安全预算，无法完整恢复；可拒绝此请求。" } : {}),
+    }));
+    const snapshot = { runtimeInstance: this.runtimeInstance, sessionId: id, eventSessionId: session.id,
+      nativeSessionId: session.nativeId ?? null, cwd: String(session.options.cwd), optionsKnown,
+      options: optionsKnown ? structuredClone(safeOptions) : {}, connected: !!session.query, running: !!session.active,
+      permissions, revision: this.options.hub.cursor,...(session.historyRecoveryError?{historyRecoveryError:session.historyRecoveryError}:{}) };
+    if (Buffer.byteLength(JSON.stringify(snapshot)) > 2 * 1024 * 1024)
+      throw new HttpError(413, "Claude pending-permission metadata exceeds the snapshot budget; live requests are retained");
+    return snapshot;
+  }
+  permissionDetail(id: string, requestId: string, expectedInstance: string, options: { offset: number; limit: number; expectedItemRevision?: string }) {
+    const session = this.snapshotOwner(id, expectedInstance);
+    const p = this.pending.get(requestId);
+    if (!p || p.session !== session || p.turn !== session.active?.token)
+      throw new HttpError(409, "Claude permission request expired");
+    if (!p.input) throw new HttpError(413, "Claude permission input is unavailable within the safe budget");
+    if (!Number.isInteger(options.offset) || options.offset < 0 || !Number.isInteger(options.limit) || options.limit < 128 || options.limit > 65536)
+      throw new HttpError(400, "Invalid permission detail range");
+    const text = JSON.stringify(p.input);
+    const revision = createHash("sha256").update(text).digest("hex");
+    if (revision !== p.inputRevision || (options.expectedItemRevision !== undefined && options.expectedItemRevision !== revision))
+      throw new HttpError(409, "Claude permission input revision changed");
+    if(options.offset>text.length || (options.offset>0 && /[\uDC00-\uDFFF]/.test(text[options.offset]??"") && /[\uD800-\uDBFF]/.test(text[options.offset-1]??"")))
+      throw new HttpError(400,"Invalid permission detail offset");
+    let low=options.offset,high=Math.min(text.length,options.offset+options.limit);
+    while(low<high){const mid=Math.ceil((low+high)/2);if(Buffer.byteLength(JSON.stringify(text.slice(options.offset,mid)))<=options.limit-256)low=mid;else high=mid-1;}
+    if(low<text.length&&/[\uD800-\uDBFF]/.test(text[low-1]??""))low--;
+    if(low===options.offset&&low<text.length)throw new HttpError(400,"Permission detail limit is too small");
+    return { text:text.slice(options.offset,low),nextOffset:low<text.length?low:null,itemRevision:revision,format:"json" as const };
+  }
+  private releasePermission(id: string) {
+    const pending = this.pending.get(id);
+    if (pending) { this.pendingInputBytes -= pending.inputBytes; this.pending.delete(id); }
+    return pending;
   }
   async newSession(options: JsonObject) {
     const id = randomUUID();
@@ -141,7 +236,9 @@ export class ClaudeService {
     return id;
   }
   async resume(id: string, options: JsonObject) {
-    await this.replace(id, { ...options, resume: options.resume ?? id });
+    validateOptions(options);
+    const resume=await this.historySessionId(String(options.resume??id));
+    await this.replace(id, { ...options, resume });
   }
   async connect(params: JsonObject) {
     const id = String(params.sessionId ?? params.session_id ?? "");
@@ -160,16 +257,20 @@ export class ClaudeService {
       throw new HttpError(400, "Claude cwd is not a directory");
     const mode = String(options.permissionMode ?? "default");
     if (!MODES.has(mode)) throw new HttpError(400, "Invalid permission mode");
-    await this.serial.run(id, async () => {
-      const previous = this.sessions.get(id);
+    const nativeTarget=String(options.resume??id);
+    await this.serial.run(nativeTarget, async () => {
+      const previous = this.sessions.get(id)??this.sessions.get(this.requestAliases.get(id)??"")??[...this.sessions.values()].find(s=>s.nativeId===nativeTarget||s.options.resume===nativeTarget||s.id===nativeTarget);
+      if(previous&&this.deleting.has(previous.id))throw new HttpError(409,"Claude session deletion is in progress");
       if (previous?.active)
         throw new HttpError(
           409,
           "A message is already running in this Claude session",
         );
-      if (previous) await this.dispose(previous);
-      this.sessions.set(id, {
-        id,
+      if (previous) { await this.dispose(previous);this.sessions.delete(previous.id); }
+      const canonical=previous?.id??id;
+      if(canonical!==id){this.requestAliases.set(id,canonical);if(this.requestAliases.size>1024)this.requestAliases.delete(this.requestAliases.keys().next().value!);}
+      this.sessions.set(canonical, {
+        id:canonical,
         options: structuredClone(options),
         mode,
         input: new Input(),
@@ -229,6 +330,7 @@ export class ClaudeService {
         if (p[key] !== undefined && p[key] !== null)
           (options as unknown as JsonObject)[key] = p[key];
       if (p.continueConversation === true) options.continue = true;
+      if (!p.resume && p.continueConversation !== true && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(session.id)) options.sessionId = session.id;
       if (this.env.SESSION_CLAUDE_BIN)
         options.pathToClaudeCodeExecutable = this.env.SESSION_CLAUDE_BIN;
       if (session.mode === "bypassPermissions")
@@ -272,6 +374,12 @@ export class ClaudeService {
       for await (const message of session.query!) {
         if (session.closed) break;
         if ("session_id" in message && message.session_id) {
+          const nativeId=message.session_id;
+          if(session.nativeId!==nativeId){
+            const write=(this.identityWrites.get(session.id)??Promise.resolve()).catch(()=>{}).then(()=>this.identity.remember(session.id,nativeId));
+            this.identityWrites.set(session.id,write);
+            void write.catch(()=>{session.historyRecoveryError="当前历史身份未能持久保存，重启前请保留原生会话 UUID。";}).finally(()=>{if(this.identityWrites.get(session.id)===write)this.identityWrites.delete(session.id);});
+          }
           session.nativeId = message.session_id;
           if (session.onStarted) {
             const started = session.onStarted;
@@ -360,6 +468,7 @@ export class ClaudeService {
     if (!Array.isArray(images) || images.length > 16)
       throw new HttpError(400, "Invalid image_paths");
     const session = this.get(id);
+    if(this.deleting.has(session.id))throw new HttpError(409,"Claude session deletion is in progress");
     if (session.active)
       throw new HttpError(
         409,
@@ -480,9 +589,12 @@ export class ClaudeService {
     if (!session.active || session.closed || signal.aborted)
       return output("deny", "Turn no longer active");
     const requestId = randomUUID();
+    // Do not retain a serialized copy across the waiting SDK hook.
+    const {inputBytes,inputRevision}=permissionInputIdentity(input);
+    const retainInput = inputBytes <= PERMISSION_INPUT_BYTES && this.pendingInputBytes + inputBytes <= PERMISSION_TOTAL_BYTES;
     const decision = await new Promise<string>((resolve) => {
       const abort = () => {
-        this.pending.delete(requestId);
+        this.releasePermission(requestId);
         resolve("deny");
       };
       signal.addEventListener("abort", abort, { once: true });
@@ -491,7 +603,10 @@ export class ClaudeService {
         turn: session.active!.token,
         resolve,
         cleanup: () => signal.removeEventListener("abort", abort),
+        tool, target: cwd ? "project" : "session", input: retainInput ? input : undefined,
+        inputBytes: retainInput ? inputBytes : 0, inputRevision,
       });
+      if (retainInput) this.pendingInputBytes += inputBytes;
       this.options.hub.publish("cc-permission-request", {
         requestId,
         sessionId: session.id,
@@ -507,7 +622,7 @@ export class ClaudeService {
       decision.startsWith("allow") ? "Allowed by user" : "Denied by user",
     );
   }
-  async resolvePermission(id: string, decision: string) {
+  async resolvePermission(id: string, decision: string, expected?: { runtimeInstance: string; sessionId: string; executionId?: string; inputRevision?: string }) {
     if (!["allow", "deny", "allow_always", "allow_project"].includes(decision))
       throw new HttpError(400, "Invalid permission decision");
     const pending = this.pending.get(id);
@@ -517,14 +632,23 @@ export class ClaudeService {
       pending.session.active?.token !== pending.turn
     )
       throw new HttpError(409, "Permission request not found or expired");
-    this.pending.delete(id);
+    if (expected) {
+      const session = this.snapshotOwner(expected.sessionId, expected.runtimeInstance);
+      if (session !== pending.session || (expected.executionId !== undefined && expected.executionId !== pending.turn) || (expected.inputRevision !== undefined && expected.inputRevision !== pending.inputRevision))
+        throw new HttpError(409, "Claude permission request ownership changed");
+    }
+    if (decision !== "deny" && !pending.input)
+      throw new HttpError(409, "Claude permission input is unavailable; reject this request instead");
+    if (decision !== "deny" && createHash("sha256").update(JSON.stringify(pending.input)).digest("hex") !== pending.inputRevision)
+      throw new HttpError(409,"Claude permission input revision changed");
+    this.releasePermission(id);
     pending.cleanup();
     pending.resolve(decision);
   }
   private cancelPermissions(session: Session) {
     for (const [id, p] of this.pending)
       if (p.session === session) {
-        this.pending.delete(id);
+        this.releasePermission(id);
         p.cleanup();
         p.resolve("deny");
       }
@@ -638,10 +762,16 @@ export class ClaudeService {
     });
   }
   async deleteSession(id: string) {
-    if (this.sessions.get(id)?.active)
+    const session=this.sessions.get(id)??this.sessions.get(this.requestAliases.get(id)??"")??[...this.sessions.values()].find(s=>s.nativeId===id||s.options.resume===id);
+    if (session?.active)
       throw new HttpError(409, "Cannot delete a running Claude session");
-    await this.history.delete(id);
-    if (this.sessions.has(id)) await this.disconnect(id);
+    const key=session?.id??id;
+    if(this.deleting.has(key))throw new HttpError(409,"Claude session deletion is in progress");
+    this.deleting.add(key);
+    try{
+      await this.history.delete(await this.historySessionId(id));
+      if (session&&!session.closed) await this.disconnect(session.id);
+    }finally{this.deleting.delete(key);}
   }
   async runAutomation(spec: {
     prompt: string;
@@ -677,6 +807,8 @@ export class ClaudeService {
       [...this.sessions.values()].map((session) => this.dispose(session)),
     );
     this.sessions.clear();
+    this.requestAliases.clear();
+    await Promise.allSettled(this.identityWrites.values());
   }
 }
 

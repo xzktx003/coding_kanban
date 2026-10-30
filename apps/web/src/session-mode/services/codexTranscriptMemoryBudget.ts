@@ -1,7 +1,7 @@
 import type { ServerNotification } from "@session/bindings";
 import type { ThreadItem } from "@session/bindings/v2/ThreadItem";
 import type { UserInput } from "@session/bindings/v2/UserInput";
-import { projectCodexChatValue } from "@agent-orchestrator/shared";
+import { projectCodexChatValue } from "@agent-orchestrator/shared/codex-chat-projection";
 import { withoutToolTranscriptEvent } from "./codexTranscriptVisibility";
 
 const estimateCache = new WeakMap<object, number>();
@@ -486,7 +486,7 @@ const compactVisibleEvent = (
   }
   if (event.method === "turn/completed" || event.method === "turn/started") {
     let changed = false;
-    const items = event.params.turn.items.map((item) => {
+    const items = (event.params.turn.items ?? []).map((item) => {
       const [next, compacted] = compactItem(item, limit, displayTextLimit);
       changed ||= compacted;
       return next;
@@ -573,6 +573,15 @@ const compactEvent = (
     }
     return [cursor, cursor !== event];
   }
+  return compactProjectedEvent(event, projected, limit, displayTextLimit);
+};
+
+const compactProjectedEvent = (
+  event: ServerNotification,
+  projected: ServerNotification,
+  limit: number,
+  displayTextLimit = DEFAULT_STREAM_TEXT_LIMIT,
+): [ServerNotification, boolean] => {
   const [next, changed] = compactVisibleEvent(
     projected,
     limit,
@@ -586,12 +595,6 @@ export function compactCodexEventPayload(
 ): ServerNotification {
   return compactEvent(event, DEFAULT_TOOL_TEXT_LIMIT)[0];
 }
-
-const isHiddenTranscriptEvent = (event: ServerNotification): boolean =>
-  HIDDEN_TRANSCRIPT_METHODS.has(event.method) ||
-  ((event.method === "item/started" || event.method === "item/completed") &&
-    event.params.item.type === "sleep") ||
-  withoutToolTranscriptEvent(event) === null;
 
 function getTurnId(event: ServerNotification): string | null {
   const params = event.params as { turnId?: unknown; turn?: { id?: unknown } };
@@ -754,19 +757,32 @@ export function compactCodexTranscript(
   let compactedPayloadCount = 0;
   const compactedPayloads = new WeakSet<object>();
   let hiddenEventCount = 0;
-  const visible = input.filter((event) => {
-    const keep = !isHiddenTranscriptEvent(event);
-    if (!keep) hiddenEventCount += 1;
-    return keep;
-  });
-  const compacted = visible.map((event) => {
-    const [next, changed] = compactEvent(event, toolTextLimit);
+  const compacted: ServerNotification[] = [];
+  for (const event of input) {
+    if (
+      HIDDEN_TRANSCRIPT_METHODS.has(event.method) ||
+      ((event.method === "item/started" || event.method === "item/completed") &&
+        event.params.item.type === "sleep")
+    ) {
+      hiddenEventCount += 1;
+      continue;
+    }
+    const projected = withoutToolTranscriptEvent(event);
+    if (projected === null) {
+      hiddenEventCount += 1;
+      continue;
+    }
+    const [next, changed] = compactProjectedEvent(
+      event,
+      projected,
+      toolTextLimit,
+    );
     if (changed) {
       compactedPayloadCount += 1;
       compactedPayloads.add(next);
     }
-    return next;
-  });
+    compacted.push(next);
+  }
   const maxBytes = Math.max(0, options.maxBytes);
   const maxEvents = Math.max(0, options.maxEvents);
   const targetBytes = Math.min(options.targetBytes ?? maxBytes, maxBytes);
@@ -791,26 +807,33 @@ export function compactCodexTranscript(
     (events.length ? getTurnId(events[events.length - 1]) : null);
   const protectedIds = new Set(options.protectedTurnIds ?? []);
   if (liveTurnId) protectedIds.add(liveTurnId);
-  const groups = new Map<string, number[]>();
-  const sizes = eventSizes(events);
+  // If bytes already satisfy the low watermark, whole-turn removal for the
+  // event watermark cannot increase the cached retained-size estimate. Keep
+  // the original byte accounting whenever bytes are still over target.
+  const countOnlyTrim = bytes <= targetBytes;
+  const groups = new Map<
+    string,
+    { indexes: number[]; estimatedBytes: number }
+  >();
   events.forEach((event, index) => {
     const turnId = getTurnId(event);
     if (!turnId || protectedIds.has(turnId)) return;
-    const indexes = groups.get(turnId);
-    if (indexes) indexes.push(index);
-    else groups.set(turnId, [index]);
+    const group = groups.get(turnId) ?? { indexes: [], estimatedBytes: 0 };
+    group.indexes.push(index);
+    if (!countOnlyTrim) group.estimatedBytes += estimateTranscriptBytes(event);
+    groups.set(turnId, group);
   });
 
   const remove = new Set<number>();
   let retainedBytes = bytes;
   let retainedEvents = events.length;
-  for (const indexes of groups.values()) {
-    for (const index of indexes) {
+  for (const group of groups.values()) {
+    for (const index of group.indexes) {
       if (remove.has(index)) continue;
       remove.add(index);
-      retainedBytes -= sizes[index];
       retainedEvents -= 1;
     }
+    if (!countOnlyTrim) retainedBytes -= group.estimatedBytes;
     if (retainedBytes <= targetBytes && retainedEvents <= targetEvents) {
       events = events.filter((_, index) => !remove.has(index));
       bytes = estimateTranscriptBytes(events);

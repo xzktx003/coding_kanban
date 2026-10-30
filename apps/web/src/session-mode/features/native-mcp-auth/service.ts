@@ -1,4 +1,4 @@
-import { mcpOAuthThreadIdSupported } from "@agent-orchestrator/shared";
+import { mcpOAuthThreadIdSupported } from "@agent-orchestrator/shared/codex-mcp-version";
 import { authHeaders, buildUrl } from "@session/hooks/runtime";
 import { openEventStream } from "@session/lib/eventStream";
 import { usePairingStore } from "@session/stores/usePairingStore";

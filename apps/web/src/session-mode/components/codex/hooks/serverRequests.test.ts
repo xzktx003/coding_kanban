@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
-vi.mock("@session/services", () => ({}));
+vi.mock("@session/services/apiAdapt/codex", () => ({}));
 import { useApprovalStore } from "../stores/useApprovalStore";
 import { useElicitationStore } from "../stores/useElicitationStore";
 import { usePermissionsStore } from "../stores/usePermissionsStore";

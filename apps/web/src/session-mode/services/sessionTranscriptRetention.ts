@@ -20,7 +20,16 @@ import {
   expiredCodexTranscripts,
   markCodexTranscriptDormant,
   forgetCodexTranscript,
+  codexTranscriptRetentionMetadata,
+  requestCodexTranscriptWarmRestore,
+  hasCodexTranscriptWarmReader,
 } from "./codexTranscriptActivity";
+import { estimateTranscriptBytes } from "./codexTranscriptMemoryBudget";
+import { hasTranscriptTrafficPressure } from "./sessionMemoryPressure";
+import { planWarmTranscriptRetention } from "./sessionWarmRetention";
+import { useSettingsStore } from "../stores/settings/useSettingsStore";
+import { collectProviderTranscriptCandidates,releaseProviderTranscript,warmProviderTranscript,isProviderTranscriptCandidate } from "./sessionProviderTranscriptRetention";
+import { useAcpStore } from "../stores/useAcpStore";
 import {
   cachedTranscriptBaselines,
   cachedTranscriptTimings,
@@ -41,8 +50,9 @@ function retentionReady() {
   return (
     tabs.sharedTabsInitialized ||
     tabs.pendingTabOperations.length > 0 ||
-    tabs.cards.some((card) => card.kind === "codex") ||
-    tabs.detachedCard?.kind === "codex" ||
+    tabs.cards.length > 0 ||
+    !!tabs.detachedCard ||
+    !!useAcpStore.getState().sessionId ||
     !!useCodexStore.getState().currentThreadId
   );
 }
@@ -176,7 +186,9 @@ export function pruneUnobservedCodexTranscripts() {
   }
 }
 
-function releaseInvisibleTranscripts() {
+export function releaseInvisibleTranscripts(
+  options: { pressure?: boolean } = {},
+) {
   if (!retentionReady()) return;
   for (const id of knownTranscriptIds()) {
     if (isObservedCodexThread(id)) trackCodexTranscript(id);
@@ -187,24 +199,66 @@ function releaseInvisibleTranscripts() {
   const state = useCodexStore.getState();
   const sync = useSessionSyncStore.getState();
   const receipts = Object.values(useCodexDeliveryStore.getState().entries);
-  for (const id of expiredCodexTranscripts()) {
+  const expired = new Set(expiredCodexTranscripts());
+  const candidates = [...trackedCodexTranscripts()].map((id) => {
+    const metadata = codexTranscriptRetentionMetadata(id)!;
     const threadReceipts = receipts.filter((e) => e.threadId === id);
     const confirmed = threadReceipts.length
       ? deliveredClientIds(state.events[id] ?? [])
       : new Set<string>();
     // Avoid cancelling useful reconciliation or discarding a not-yet-acknowledged send.
-    if (
+    const blocked = !!(
       state.historyLoadingMap[id] ||
       sync.checking[id] ||
       sync.earlierLoading[id] ||
+      (metadata.dormant && !hasCodexTranscriptWarmReader(id)) ||
       threadReceipts.some((e) => !confirmed.has(e.id))
-    )
-      continue;
+    );
     // Warm views keep their existing acknowledgement ordering. Before evicting
     // an offscreen body, reconcile receipts whose native client IDs are present.
-    if (confirmed.size) acknowledgeDeliveryEchoes(id, [...confirmed]);
-    markCodexTranscriptDormant(id);
+    if (expired.has(id) && confirmed.size)
+      acknowledgeDeliveryEchoes(id, [...confirmed]);
+    const events = state.events[id];
+    const baseline = cachedTranscriptBaselines.get(id);
+    const bytes =
+      estimateTranscriptBytes(events ?? []) +
+      (baseline && baseline !== events
+        ? estimateTranscriptBytes(baseline)
+        : 0) +
+      estimateTranscriptBytes(state.streamingAgentMessages?.[id]);
+    return { id, ...metadata, bytes, expired: expired.has(id), blocked };
+  });
+  const memory = (
+    performance as Performance & {
+      memory?: { usedJSHeapSize: number; jsHeapSizeLimit: number };
+    }
+  ).memory;
+  const pressure =
+    options.pressure ??
+    (hasTranscriptTrafficPressure() ||
+      !!(
+        memory &&
+        memory.jsHeapSizeLimit > 0 &&
+        memory.usedJSHeapSize / memory.jsHeapSizeLimit > 0.7
+      ));
+  const plan = planWarmTranscriptRetention([...candidates,...collectProviderTranscriptCandidates()], {
+    now: Date.now(),
+    pressure,
+    warm: useSettingsStore.getState().warmFollowedSessions,
+  });
+  for (const id of plan.evict) {
+    if(isProviderTranscriptCandidate(id)) {releaseProviderTranscript(id);continue;}
+    markCodexTranscriptDormant(
+      id,
+      candidates.find((entry) => entry.id === id)?.bytes,
+    );
     pruneThreadTranscript(id, true);
+  }
+  // Re-entry is read-only and only admitted below the low watermark after a
+  // cooldown. A release cannot immediately trigger its own background refill.
+  for (const id of plan.warm) {
+    if(isProviderTranscriptCandidate(id)) warmProviderTranscript(id);
+    else requestCodexTranscriptWarmRestore(id);
   }
 }
 

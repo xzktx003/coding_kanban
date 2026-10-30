@@ -5,11 +5,20 @@ import {
 import { applyProjectAction } from "../../packages/shared/src/session-projects";
 import type { Page } from "@playwright/test";
 import type { ThreadForkResponse } from "../../apps/web/src/session-mode/bindings/v2";
+import { createSessionManagementFixture } from "./session-management-fixture";
 
 export async function installSessionUxFixture(
   page: Page,
   count = 40,
-  options: { forkSettings?: Partial<Omit<ThreadForkResponse, "thread">> } = {},
+  options: {
+    forkSettings?: Partial<Omit<ThreadForkResponse, "thread">>;
+    /** Explicit fake-native inventory, independent of the UI thread list. */
+    nativeThreads?: () => Array<{
+      id: string;
+      turns?: any[];
+      [key: string]: unknown;
+    }>;
+  } = {},
 ) {
   // Vite loads more than 250 modules. Retain their actual HMR URLs so test-side
   // imports use the mounted stores instead of creating a second module instance.
@@ -43,6 +52,10 @@ export async function installSessionUxFixture(
   const tabSequences = new Map<string, number>(),
     projectSequences = new Map<string, number>();
   const followups = new Map<string, any>();
+  const operationContext = {
+    scopeToken: "ux-fixture-native-scope",
+    namespace: "ux-fixture-native-domain",
+  };
   let listError = false;
   let healthError = false;
   const makeThread = (id: string, name: string) => ({
@@ -60,6 +73,11 @@ export async function installSessionUxFixture(
   const threads = Array.from({ length: count }, (_, i) =>
     makeThread(`ux-${i}`, `中文会话 ${i} ${"长标题".repeat(6)}`),
   );
+  const management = await createSessionManagementFixture({
+    threads: () => [...threads, ...(options.nativeThreads?.() ?? [])],
+    context: operationContext,
+  });
+  page.once("close", () => void management.close());
   await page.routeWebSocket(/.*/, (ws) => ws.close());
   await page.route("**/api/**", async (route) => {
     const request = route.request(),
@@ -68,6 +86,35 @@ export async function installSessionUxFixture(
     if (request.method() !== "GET" && !path.endsWith("/model/list"))
       calls.push({ path, body });
     let json: any = {};
+    if (
+      path === "/api/session/management" ||
+      path === "/api/session/management/read-context"
+    ) {
+      const result = await management.handle({
+        method: request.method(),
+        url: request.url(),
+        ...(body === null ? {} : { body }),
+      });
+      await route.fulfill({
+        status: result.status,
+        contentType: "application/json",
+        body: result.body,
+      });
+      return;
+    }
+    if (path === "/api/session/followups/steer-receipts") {
+      await route.fulfill({ json: { data: [], nextCursor: null } });
+      return;
+    }
+    if (path === "/api/session/lifecycle/context") {
+      await route.fulfill({
+        status: request.method() === "GET" ? 200 : 405,
+        json: request.method() === "GET"
+          ? operationContext
+          : { error: "Fixture operation context is read-only" },
+      });
+      return;
+    }
     if (path === "/api/session/tabs" || path === "/api/session/projects") {
       const tabs = path.endsWith("/tabs"),
         sequences = tabs ? tabSequences : projectSequences;
@@ -92,6 +139,19 @@ export async function installSessionUxFixture(
     }
 
     if (path.startsWith("/api/session/followups")) {
+      if (
+        request.method() === "POST" &&
+        ["/submit", "/change", "/stop", "/review"].some((action) =>
+          path.endsWith(action),
+        ) &&
+        body?.expectedScope !== operationContext.scopeToken
+      ) {
+        await route.fulfill({
+          status: 409,
+          json: { error: "Fixture native operation scope changed" },
+        });
+        return;
+      }
       const threadId =
         body?.threadId ?? new URL(request.url()).searchParams.get("threadId");
       const state = followups.get(threadId) ?? {
@@ -508,8 +568,8 @@ export async function installSessionUxFixture(
   };
 }
 
-export async function seedSessionUx(page: Page, count = 1) {
-  await page.evaluate(async (count) => {
+export async function seedSessionUx(page: Page, count = 1, options: { sidebarOpen?: boolean } = {}) {
+  await page.evaluate(async ({ count, sidebarOpen }) => {
     const { useCodexStore } = await import(
       performance
         .getEntriesByType("resource")
@@ -584,7 +644,7 @@ export async function seedSessionUx(page: Page, count = 1) {
     useWorkspaceStore.setState({ projects: [cwd], cwd });
     useLayoutStore.setState({
       view: "agent",
-      isSidebarOpen: true,
+      isSidebarOpen: sidebarOpen,
       isRightPanelOpen: false,
     });
     useCodexStore.setState({
@@ -604,7 +664,7 @@ export async function seedSessionUx(page: Page, count = 1) {
       currentAgentCardId: null,
       cardsViewMode: "solo",
     });
-  }, count);
+  }, { count, sidebarOpen: options.sidebarOpen ?? true });
 }
 
 /** Compact single-group navigation keeps layout choices in the layout menu. */

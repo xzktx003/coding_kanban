@@ -54,7 +54,11 @@ export function parseFileReference(
     const rest = value.slice(7);
     if (!rest.startsWith("/") && !/^[a-z]:[\\/]/i.test(rest)) return null;
     value = rest.replace(/^\/([a-z]:[\\/])/i, "$1");
-  } else if (/^[a-z][a-z\d+.-]*:/i.test(value) && !/^[a-z]:[\\/]/i.test(value))
+  } else if (
+    /^[a-z][a-z\d+.-]*:/i.test(value) &&
+    !/^[a-z]:[\\/]/i.test(value) &&
+    !/^[^/\\:\s]+\.[^/\\:\s]+:\d+(?::\d+)?(?:-\d+)?$/.test(value)
+  )
     return null;
   const fragment = value.match(/#L(\d+)(?:C(\d+))?(?:-L?\d+(?:C\d+)?)?$/i);
   const suffix = fragment ? null : value.match(/:(\d+)(?::(\d+))?(?:-\d+)?$/);

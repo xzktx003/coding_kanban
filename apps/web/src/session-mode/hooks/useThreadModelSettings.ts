@@ -1,4 +1,5 @@
 import { threadPermissionsKnown } from "../services/threadPermissionProjection";
+import { rememberNonFullAccessMode } from "../services/nonFullAccessPreference";
 import { useCallback, useEffect } from "react";
 import type { ReasoningEffort, Personality } from "@session/bindings";
 import type { SandboxMode, ApprovalsReviewer } from "@session/bindings/v2";
@@ -72,8 +73,10 @@ export function useThreadModelSettings(threadId: string | null) {
   );
   const setAccessMode = useCallback(
     (sandbox: SandboxMode) => {
+      rememberNonFullAccessMode(sandbox);
       if (threadId)
         changeThreadModel(threadId, {
+          permissions: null,
           sandbox,
           sandboxPolicy: null,
           webSearchRequest: getThreadModelSettings(threadId).permissionSources?.webSearchRequest ? getThreadModelSettings(threadId).webSearchRequest : false,
@@ -83,6 +86,10 @@ export function useThreadModelSettings(threadId: string | null) {
     },
     [threadId],
   );
+  const setPermissions = useCallback((permissions: string | null) => {
+    if (threadId) changeThreadModel(threadId, { permissions, sandboxPolicy: null });
+    else useConfigStore.getState().setPermissions(permissions);
+  }, [threadId]);
   const setPersonality = useCallback(
     (personality: Personality | null) => {
       if (threadId) changeThreadModel(threadId, { personality });
@@ -126,6 +133,7 @@ export function useThreadModelSettings(threadId: string | null) {
     setReasoningEffort,
     setServiceTier,
     setAccessMode,
+    setPermissions,
     setPersonality,
     setCollaborationMode,
     setApprovalsReviewer,

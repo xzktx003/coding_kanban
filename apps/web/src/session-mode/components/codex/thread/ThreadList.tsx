@@ -68,6 +68,12 @@ import { gitRemoveWorktree } from "@session/services/apiAdapt/git";
 import { codexService } from "@session/services/codexService";
 import { useAgentCenterStore, useLayoutStore } from "@session/stores";
 import { usePinStore } from "@session/stores/usePinStore";
+import { setSharedSessionPin } from "@session/services/sessionManagementClient";
+import {
+  captureCodexOperationScope,
+  isCodexOperationScopeCurrent,
+} from "@session/services/codexOperationScope";
+import { recordAppAction } from "../composer/appActionHistory";
 import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
 import { formatThreadAge } from "@session/utils/formatThreadAge";
 import {
@@ -105,6 +111,7 @@ interface ThreadAction {
   icon?: LucideIcon;
   destructive?: boolean;
   separatorBefore?: boolean;
+  disabled?: boolean;
   onSelect: () => void;
 }
 
@@ -150,7 +157,8 @@ export const ThreadList = memo(function ThreadList({ cwd }: ThreadListProps) {
   const storeThreads = useCodexStore((state) => state.threads);
   const { sortKey } = useThreadListStore();
   const pinnedIds = usePinStore((s) => s.pinned);
-  const togglePin = usePinStore((s) => s.togglePin);
+  const pinWrites = useRef(new Set<string>());
+  const [pinRevision, setPinRevision] = useState(0);
   const modelProvider = useConfigStore((s) => s.modelProvider);
   const [response, setResponse] = useState<ThreadListResponse>(EMPTY_LIST);
   const [loading, setLoading] = useState(true);
@@ -227,6 +235,11 @@ export const ThreadList = memo(function ThreadList({ cwd }: ThreadListProps) {
       try {
         const res = await listThreads(params);
         if (cancelled) return;
+        for (const thread of res.data)
+          if (thread.name?.trim())
+            useSessionNameStore
+              .getState()
+              .initializeName("codex", thread.id, thread.name, "native");
         loadedRef.current = { cwd, count: res.data.length };
         setResponse(res);
       } catch (err) {
@@ -409,6 +422,11 @@ export const ThreadList = memo(function ThreadList({ cwd }: ThreadListProps) {
       };
       const res = await listThreads(params);
       if (request !== requestRef.current) return;
+      for (const thread of res.data)
+        if (thread.name?.trim())
+          useSessionNameStore
+            .getState()
+            .initializeName("codex", thread.id, thread.name, "native");
       setResponse((prev) => {
         const seen = new Set(prev.data.map((t) => t.id));
         const data = [...prev.data, ...res.data.filter((t) => !seen.has(t.id))];
@@ -498,41 +516,78 @@ export const ThreadList = memo(function ThreadList({ cwd }: ThreadListProps) {
   // Shared action list for the context menu.
   const threadActions = useCallback(
     (thread: Thread): ThreadAction[] => {
-      const isPinned = pinnedIds.some((p) => p.id === thread.id);
+      const isPinned = pinnedIds.some(
+        (p) => p.kind === "codex" && p.id === thread.id,
+      );
       return [
-        { label: "Rename", onSelect: () => openRenameDialog(thread) },
+        { label: "重命名", onSelect: () => openRenameDialog(thread) },
         {
-          label: isPinned ? "Unpin" : "Pin",
+          label: isPinned ? "取消置顶" : "置顶",
           icon: isPinned ? PinOff : Pin,
-          onSelect: () =>
-            togglePin({
+          disabled: pinWrites.current.has(thread.id),
+          onSelect: () => {
+            if (pinWrites.current.has(thread.id)) return;
+            const item = {
               kind: "codex",
               id: thread.id,
-              title: thread.name ?? thread.preview,
+              title: (thread.name || thread.preview || "Codex").slice(0, 512),
               cwd: thread.cwd || cwd,
-            }),
+            } as const;
+            const scope = captureCodexOperationScope();
+            pinWrites.current.add(thread.id);
+            setPinRevision((value) => value + 1);
+            void setSharedSessionPin(item, !isPinned)
+              .then((initial) => {
+                if (!isCodexOperationScopeCurrent(scope)) return;
+                let proof = initial;
+                recordAppAction({
+                  label: isPinned ? "取消置顶聊天" : "置顶聊天",
+                  current: () => isCodexOperationScopeCurrent(scope),
+                  undo: async () => {
+                    proof = await setSharedSessionPin(item, isPinned, proof);
+                  },
+                  redo: async () => {
+                    proof = await setSharedSessionPin(item, !isPinned, proof);
+                  },
+                });
+                toast({
+                  description: isPinned ? "已取消置顶聊天" : "已置顶聊天",
+                });
+              })
+              .catch((error) =>
+                toast({
+                  description:
+                    error instanceof Error ? error.message : String(error),
+                  variant: "destructive",
+                }),
+              )
+              .finally(() => {
+                pinWrites.current.delete(thread.id);
+                setPinRevision((value) => value + 1);
+              });
+          },
         },
         {
-          label: "Fork",
+          label: "分叉聊天",
           icon: GitFork,
           onSelect: () => void handleFork(thread.id),
         },
         {
-          label: "Archive",
+          label: "归档",
           icon: Archive,
           onSelect: () => void handleArchive(thread.id),
         },
         ...(thread.cwd.includes("/.codexia/worktrees/")
           ? [
               {
-                label: "Delete Worktree",
+                label: "删除工作树",
                 icon: FolderX,
                 onSelect: () => void handleDeleteWorktree(thread),
               },
             ]
           : []),
         {
-          label: "Delete",
+          label: "删除",
           destructive: true,
           onSelect: () => {
             setPendingDelete(thread);
@@ -540,7 +595,7 @@ export const ThreadList = memo(function ThreadList({ cwd }: ThreadListProps) {
           },
         },
         {
-          label: "Copy Id",
+          label: "复制会话 ID",
           separatorBefore: true,
           onSelect: () => copyThreadId(thread.id, copyScope),
         },
@@ -549,7 +604,7 @@ export const ThreadList = memo(function ThreadList({ cwd }: ThreadListProps) {
     [
       cwd,
       pinnedIds,
-      togglePin,
+      pinRevision,
       openRenameDialog,
       handleFork,
       handleArchive,
@@ -642,6 +697,7 @@ export const ThreadList = memo(function ThreadList({ cwd }: ThreadListProps) {
                                 action.destructive ? "destructive" : "default"
                               }
                               onSelect={action.onSelect}
+                              disabled={action.disabled}
                             >
                               {action.icon && (
                                 <action.icon className="size-3.5" />
@@ -661,6 +717,7 @@ export const ThreadList = memo(function ThreadList({ cwd }: ThreadListProps) {
                       <ContextMenuItem
                         variant={action.destructive ? "destructive" : "default"}
                         onSelect={action.onSelect}
+                        disabled={action.disabled}
                       >
                         {action.icon && (
                           <action.icon className="mr-2 h-4 w-4" />

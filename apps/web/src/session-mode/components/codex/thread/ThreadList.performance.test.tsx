@@ -146,7 +146,7 @@ test.each([
       screen.getByRole("button", { name: /Sidebar row 0 / }),
       { clientX: 10, clientY: 10 },
     );
-    fireEvent.click(await screen.findByText("Delete", { exact: true }));
+    fireEvent.click(await screen.findByText("删除", { exact: true }));
     expect(
       screen
         .getByRole("alertdialog")

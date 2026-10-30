@@ -6,6 +6,7 @@ import {
   isDesktopTauri,
   isTauri,
 } from "@session/hooks/runtime";
+import { readResponseJson } from "./readResponseJson";
 
 export type MarketplaceSkillItem = {
   name: string;
@@ -64,38 +65,33 @@ export type TerminalStartResponse = {
   shell: string;
 };
 
-async function extractErrorMessage(response: Response) {
-  try {
-    const payload = (await response.clone().json()) as {
-      error?: string;
-      message?: string;
-    };
-    if (typeof payload?.message === "string" && payload.message)
-      return payload.message;
-    if (payload?.error) {
-      return payload.error;
-    }
-  } catch {}
-  return `Request failed: ${response.status}`;
-}
 async function extractApiError(response: Response) {
+  let message = `Request failed: ${response.status}`;
   let code: string | undefined;
   let stage: SessionApiError["deliveryStage"];
   try {
-    const payload = await response.clone().json();
+    const payload = await readResponseJson<{
+      message?: unknown;
+      error?: unknown;
+      code?: unknown;
+      deliveryStage?: unknown;
+    }>(response);
+    if (typeof payload?.message === "string" && payload.message)
+      message = payload.message;
+    else if (typeof payload?.error === "string" && payload.error)
+      message = payload.error;
     if (typeof payload?.code === "string") code = payload.code;
     if (
       payload?.deliveryStage === "not-admitted" ||
       payload?.deliveryStage === "outcome-unknown"
     )
       stage = payload.deliveryStage;
-  } catch {}
-  return new SessionApiError(
-    await extractErrorMessage(response),
-    response.status,
-    code,
-    stage,
-  );
+  } catch {
+    // The status alone cannot prove that a mutation was rejected: a lost or
+    // truncated error body may have carried an outcome-unknown receipt.
+    stage = "outcome-unknown";
+  }
+  return new SessionApiError(message, response.status, code, stage);
 }
 
 export async function invokeTauri<T>(
@@ -169,7 +165,7 @@ export async function getJsonWithOptions<T>(
     return Promise.reject(error);
   }
 
-  return (await response.json()) as T;
+  return await readResponseJson<T>(response);
 }
 
 export async function postJson<T>(path: string, body?: unknown): Promise<T> {
@@ -179,11 +175,22 @@ export async function postJson<T>(path: string, body?: unknown): Promise<T> {
 export async function postJsonWithOptions<T>(
   path: string,
   body?: unknown,
-  options?: { suppressToast?: boolean; signal?: AbortSignal },
+  options?: {
+    suppressToast?: boolean;
+    signal?: AbortSignal;
+    readPriority?: "interactive" | "background";
+  },
 ): Promise<T> {
   const response = await fetch(buildUrl(path), {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders(),
+      ...(path === "/api/codex/thread/turns/list?view=chat" &&
+      options?.readPriority
+        ? { "x-session-read-priority": options.readPriority }
+        : {}),
+    },
     body: JSON.stringify(body ?? {}),
     signal: options?.signal,
   });
@@ -202,7 +209,7 @@ export async function postJsonWithOptions<T>(
     return Promise.reject(error);
   }
 
-  return (await response.json()) as T;
+  return await readResponseJson<T>(response);
 }
 
 export async function postNoContent(

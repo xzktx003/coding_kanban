@@ -643,6 +643,8 @@ test("native completion replies bypass terminal registry and preserve target acr
       ...binding,
       sessionId: "session-codex:native-thread",
       sessionModeThreadId: "native-thread",
+      sessionModeScope: "native-scope",
+      sessionModeNamespace: "native-namespace",
     },
     sessionMode: async (input) => {
       sent.push(input);
@@ -650,7 +652,7 @@ test("native completion replies bypass terminal registry and preserve target acr
   });
   assert.equal(await fixture.service.handle(validEvent), "delivered");
   assert.deepEqual(sent, [
-    { messageId: "om_reply", threadId: "native-thread", text: "继续运行测试" },
+    { messageId: "om_reply", threadId: "native-thread", text: "继续运行测试", nativeContext: { scope: "native-scope", namespace: "native-namespace" } },
   ]);
   assert.deepEqual(fixture.sessionLookups, []);
   assert.deepEqual(fixture.writes, []);
@@ -668,7 +670,7 @@ test("native completion replies bypass terminal registry and preserve target acr
 
 test("native reply failure is retryable and never falls back to a terminal", async () => {
   const fixture = createFixture({
-    resolvedBinding: { ...binding, sessionModeThreadId: "native-thread" },
+    resolvedBinding: { ...binding, sessionModeThreadId: "native-thread", sessionModeScope: "native-scope", sessionModeNamespace: "native-namespace" },
     sessionMode: async () => {
       throw new Error("offline");
     },
@@ -681,7 +683,7 @@ test("native reply failure is retryable and never falls back to a terminal", asy
 test("native image replies use the same target and download service", async () => {
   const sent: any[] = [];
   const fixture = createFixture({
-    resolvedBinding: { ...binding, sessionModeThreadId: "native-thread" },
+    resolvedBinding: { ...binding, sessionModeThreadId: "native-thread", sessionModeScope: "native-scope", sessionModeNamespace: "native-namespace" },
     sessionMode: async (input) => {
       sent.push(input);
     },

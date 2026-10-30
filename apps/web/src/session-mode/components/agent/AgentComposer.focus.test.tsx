@@ -16,10 +16,10 @@ vi.mock("@session/components/acp/AcpComposer", () => ({
 vi.mock("@session/components/cc/composer", () => ({
   Composer: () => <textarea aria-label="Claude composer" />,
 }));
-vi.mock("@session/components/codex/composer", () => ({
+vi.mock("@session/components/codex/composer/Composer", () => ({
   Composer: () => <div contentEditable />,
 }));
-vi.mock("../common", () => ({ WorkspaceSwitcher: () => null }));
+vi.mock("../common/WorkspaceSwitcher", () => ({ WorkspaceSwitcher: () => null }));
 vi.mock("../../hooks/useActiveSessionProject", () => ({
   useActiveSessionProject: () => ({ path: "/fixture", label: "fixture" }),
 }));

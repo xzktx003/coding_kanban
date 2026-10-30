@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { setup } from "./session-composer-v2-fixture";
+import { liveStream } from "./session-sse-fixture";
 import { FollowupRejected } from "../../apps/server/src/services/codex-followups";
 
 for (const viewport of [
@@ -78,7 +79,11 @@ for (const viewport of [
       await expect(
         dialog.getByText(original.text, { exact: true }),
       ).toBeVisible();
-      await expect(dialog.getByText(/会话被其他客户端占用/)).toBeVisible();
+      await expect(
+        dialog.getByRole("status").filter({
+          hasText: /^会话被其他客户端占用，消息已保留；释放后可重试原消息。$/,
+        }),
+      ).toBeVisible();
       await expect(
         dialog.getByRole("button", { name: "重试", exact: true }),
       ).toBeDisabled();
@@ -171,14 +176,21 @@ test("uncertain delivery requires confirmation before retry and ordinary pause c
 
 test("removing a failed item remains available during external ownership and never resends it", async ({
   page,
+  baseURL,
 }) => {
   let access = "external";
+  let stream: Awaited<ReturnType<typeof liveStream>> | undefined;
   const f = await setup(page, false, async () => {
+    stream = await liveStream(page, baseURL!);
     await page.route("**/api/session/api/codex/thread/access", (route) =>
       route.fulfill({ json: { state: access, reason: "", generation: 1 } }),
     );
   });
   try {
+    await expect.poll(() => stream?.connections() ?? 0).toBeGreaterThan(0);
+    await expect(
+      page.getByRole("button", { name: "重新核对", exact: true }),
+    ).toBeVisible();
     f.fail(new FollowupRejected("SESSION_OWNED_ELSEWHERE"));
     await f.queue.submit({
       id: "remove-failed",
@@ -216,5 +228,6 @@ test("removing a failed item remains available during external ownership and nev
     expect(f.errors).toEqual([]);
   } finally {
     await f.close();
+    await stream?.close();
   }
 });

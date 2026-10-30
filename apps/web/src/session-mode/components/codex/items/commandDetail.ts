@@ -1,6 +1,7 @@
 import { authHeaders, buildUrl } from "@session/hooks/runtime";
 import { openEventStream } from "@session/lib/eventStream";
 import { usePairingStore } from "@session/stores/usePairingStore";
+import type { ThreadItem } from "@session/bindings/v2";
 
 // This is an observed browser generation, never a server epoch or writer lease.
 export type CommandDetailTarget = {
@@ -20,6 +21,12 @@ export type CommandDetailItem = {
   durationMs: number | null;
   [field: string]: unknown;
 };
+export type McpDetailTarget = Omit<CommandDetailTarget, "expectedType"> & {
+  expectedType: "mcpToolCall";
+};
+export type McpDetailItem = Extract<ThreadItem, { type: "mcpToolCall" }>;
+type DetailTarget = CommandDetailTarget | McpDetailTarget;
+type DetailItem = CommandDetailItem | McpDetailItem;
 export type CommandDetailFailure = "busy" | "identity" | "incomplete";
 const record = (v: unknown): v is Record<string, unknown> =>
   !!v && typeof v === "object" && !Array.isArray(v);
@@ -30,10 +37,7 @@ const validId = (v: unknown): v is string =>
   !/[\u0000-\u001f\u007f-\u009f]/u.test(v);
 const finiteOrNull = (v: unknown) =>
   v === null || (typeof v === "number" && Number.isFinite(v));
-function validated(
-  value: unknown,
-  target: CommandDetailTarget,
-): CommandDetailItem {
+function validated(value: unknown, target: DetailTarget): DetailItem {
   if (
     !record(value) ||
     value.threadId !== target.threadId ||
@@ -43,6 +47,17 @@ function validated(
   )
     throw Error("incomplete");
   const i = value.item;
+  if (target.expectedType === "mcpToolCall") {
+    if (
+      i.id !== target.itemId ||
+      i.type !== "mcpToolCall" ||
+      typeof i.server !== "string" ||
+      typeof i.tool !== "string" ||
+      !["inProgress", "completed", "failed"].includes(String(i.status))
+    )
+      throw Error("incomplete");
+    return i as McpDetailItem;
+  }
   if (
     i.id !== target.itemId ||
     i.type !== target.expectedType ||
@@ -66,7 +81,7 @@ type Job = {
   consumers: Map<
     Owner,
     {
-      success: (item: CommandDetailItem) => void;
+      success: (item: DetailItem) => void;
       failure: (kind: CommandDetailFailure) => void;
     }
   >;
@@ -90,7 +105,15 @@ function watchSignals() {
     label: "explicit-command-detail",
     onResync: () => invalidate(),
     onEvent: (event) => {
-      if (event.event === "codex:disconnected") invalidate();
+      const payload = event.payload;
+      const method = record(payload) ? payload.method : undefined;
+      if (
+        event.event === "codex:disconnected" ||
+        event.event === "codex:initialized" ||
+        method === "account/updated" ||
+        method === "account/login/completed"
+      )
+        invalidate();
     },
   });
   const restart = () => invalidate();
@@ -119,10 +142,10 @@ function watchSignals() {
   };
 }
 /** Only live owners are coordinated. No completed body, promise, or serialized copy cache. */
-export function openCommandDetail(
-  target: CommandDetailTarget,
+function openSelectedItemDetail(
+  target: DetailTarget,
   callbacks: {
-    success: (item: CommandDetailItem) => void;
+    success: (item: DetailItem) => void;
     failure: (kind: CommandDetailFailure) => void;
     invalidate: () => void;
   },
@@ -131,7 +154,7 @@ export function openCommandDetail(
     !validId(target.threadId) ||
     !validId(target.turnId) ||
     !validId(target.itemId) ||
-    target.expectedType !== "commandExecution"
+    !["commandExecution", "mcpToolCall"].includes(target.expectedType)
   ) {
     callbacks.failure("identity");
     return () => {};
@@ -218,4 +241,33 @@ export function openCommandDetail(
     }
   })();
   return release;
+}
+
+export function openCommandDetail(
+  target: CommandDetailTarget,
+  callbacks: {
+    success: (item: CommandDetailItem) => void;
+    failure: (kind: CommandDetailFailure) => void;
+    invalidate: () => void;
+  },
+) {
+  return openSelectedItemDetail(target, {
+    ...callbacks,
+    success: (item) => callbacks.success(item as CommandDetailItem),
+  });
+}
+
+/** Reuses the same single, cancellable native reader; no result cache. */
+export function openMcpDetail(
+  target: McpDetailTarget,
+  callbacks: {
+    success: (item: McpDetailItem) => void;
+    failure: (kind: CommandDetailFailure) => void;
+    invalidate: () => void;
+  },
+) {
+  return openSelectedItemDetail(target, {
+    ...callbacks,
+    success: (item) => callbacks.success(item as McpDetailItem),
+  });
 }

@@ -28,13 +28,26 @@ pnpm dev:restart
 pnpm install --frozen-lockfile
 pnpm dev:restart
 pnpm session:status
+
+# 显式替换本仓库已确认归属的 session-runtime；官方共享 daemon 单独管理
+pnpm dev:restart --restart-runtime
 ```
 
 `dev:restart` 会编译 shared，并构建 `packages/session-runtime/src` 至 `dist`。没有存活会话服务时，默认使用当前 Node 可执行文件启动 `packages/session-runtime/dist/main.js`。随后保存可迁移的终端状态，重启本仓库 Node/Vite；前端固定绑定 `0.0.0.0`，使用指定端口，端口冲突不会静默换端口。HTTPS 默认开启。局域网会话界面依赖浏览器安全上下文（例如 `crypto.randomUUID`），应保留 HTTPS 并信任证书；`WEB_HTTPS=0` 仅适合终端模式或 localhost 调试，不作为局域网会话入口。
 
 看板的在线更新在用户确认 fast-forward 后会自动等待目标版本、运行 `pnpm install --frozen-lockfile`，再执行 `pnpm dev:restart`。用户无需另行安装依赖或再次确认重启；运行中的独立会话服务和 Agent 会复用（包括升级前的 legacy Rust 服务）。更新日志保存在 `.dev-runtime/online-update.log`。若页面没有恢复，先查看该日志，再按下方步骤手动运行依赖安装和重启命令。
 
-运行中的会话服务和 Agent 保持复用。重启后端不会重启独立运行层；前后端准备完毕但会话健康检查失败时，脚本返回非零状态并输出运行层日志路径。
+运行中的会话服务和 Agent 默认保持复用。重启后端不会重启独立运行层；前后端准备完毕但会话健康检查失败时，脚本返回非零状态并输出运行层日志路径。
+
+自动替换过期构建之前，同时核对Codex活动列表和健康响应中的`ownedAgents`标量元数据。任何Claude/ACP连接（包括初始化、待审批和未知投递）均保留，私有Codex活动轮次也保留；旧服务缺少完整计数时不能视为零，延后替换。共享daemon的Codex任务可跨看板运行层替换继续，但这不代表运行层自有Claude/ACP进程也独立存在。
+
+显式 `pnpm dev:restart --restart-runtime` 在归属PID和构建身份均核实时执行维护，按用户明确要求结束该运行层自有连接/私有任务；活动探测失败会明确报告“部分活动未知”，不称作空闲，也不因此阻挡已授权维护。归属不明、构建身份未知或健康不可读仍不替换。脚本只向已核实的运行层PID发信号，不向进程组或官方daemon发信号；新版`codexBackend: shared-daemon`表示官方Codex任务继续保留。独立CLI、其他工作树和原生宿主均不是清理目标。
+
+同一包目录和入口可能使用不同`SESSION_DATA_HOME`运行多个独立服务，不能把这些候选认定为“孤儿”。现在只读报告同入口候选，普通更新和显式维护均不自动向它们发信号；需要清理时另行核实实际数据域和进程创建身份。[替换保护验收](designs/session-mode-implementation-20261029/runtime-replacement.md)记录具体边界。
+
+新启动的默认运行层连接官方 `codex app-server daemon`，与连接同一执行域的 CLI 共享真实线程、任务、队列和审批，不再创建私有 `codex app-server`。默认控制路径由运行环境的 `CODEX_HOME` 决定；缺少默认服务时，`SESSION_CODEX_DAEMON_AUTO_START=1` 允许调用官方 `daemon start`，设为 `0` 则只附着。可选 `SESSION_CODEX_DAEMON_SOCKET` 必须是已存在且归属、权限核实通过的私有 Unix socket，显式配置不会自动启动另一个服务。看板不调用 daemon stop/restart/update，也不在失败时回退私有实例。
+
+`CODEX_PATH` 应指向部署选定的官方 CLI；本次隔离原生验收版本为0.165.0，不能据此推断任意旧版本均支持共享控制协议。升级 CLI 与替换看板运行层是不同的维护动作，既有私有运行层和未知队列不会被自动迁移。CLI 启动的已有任务需要显式“连接实时交互”才附着审批/轮次订阅，历史读取、后台预热和浏览器刷新不隐式resume。协议及实际双客户端验收见[官方共享服务](designs/session-mode-implementation-20261029/official-daemon.md)。
 
 ## 后端热更新的依赖保护
 
@@ -53,7 +66,8 @@ pnpm session:status
 | 命令 | 作用 |
 | --- | --- |
 | `pnpm dev:prepare` | 只编译 shared / 默认 TS 运行层，不重启服务 |
-| `pnpm dev:restart` | 准备完成后重启前后端，复用已有会话服务 |
+| `pnpm dev:restart` | 准备完成后重启前后端；仅过期构建替换已确认归属的运行层 |
+| `pnpm dev:restart --restart-runtime` | 同上，并重启当前或过期的本仓库运行层 |
 | `pnpm dev` | 相同构建准备后在当前终端启动前后端，默认 HTTP |
 | `pnpm session:build` | 先构建 shared，再编译 TS 会话运行层至 `dist` |
 | `pnpm session:status` | 检查会话健康、归属和实现；TS 比较全部 JS 构建指纹，legacy 比较可执行文件身份 |
@@ -165,3 +179,12 @@ code-server 在创建 extensionHost 前清除 NODE_OPTIONS。新宿主派生内�
 若会话／Codex 工作台显示「界面加载失败」，可展开「错误详情」复制最多1000字符的具体异常。错误边界只保留纯文本消息，不持有 Error／stack／组件正文，也不上传诊断。点击「重新加载界面」会显式重新加载当前文档：React.lazy 会缓存被拒绝的加载结果，只重置错误边界无法恢复这种模块失败。不会自动刷新、清理本地存储或调用任务 start/resume/steer/interrupt；界面恢复不代表已查明首次异常的根因。
 
 2026-10-28 现场检查：前后端与会话健康正常，新开页面、两个关注标签切换和刷新恢复均成功，未复现用户旧页面的首次错误。恢复缺陷用单测先红后绿和手机375／桌面1440浏览器的首次模块503注入单独验收。测试用独立 fixture，不向真实任务投递指令；本机联调入口为配置中的局域网 HTTPS `https://10.30.0.28:8484/?mode=session`，无运行层重启。
+
+
+### 开发脚本source map与局域网首屏
+
+Vite serve启用 `scripts/vite-external-sourcemaps.mjs`：已有transform map仍保留在Vite自身module graph，浏览器脚本引用同源`.map`，只有调试需要时读取；没有另建map正文缓存。未转换资源的fallback map继续使用原处理。生产构建不应用此插件。
+
+当前契约显式固定安装的Vite **7.3.1**，更新Vite后须先验证真实`.js`/`.map`、`?import`与时间戳query、ETag 304、HEAD、HMR后map/source内容，以及文档连续性和React性能留存保护，再更新版本门。命令：`node --test scripts/vite-external-sourcemaps.test.mjs scripts/vite-document-continuity.test.mjs scripts/vite-react-cache.test.mjs`。不兼容版本/缺少module graph明确失败，不恢复自动整页刷新。减少传输量不能代替三页真实输入的两秒验收。
+
+本期最小验证入口补齐 shared 的源码契约测试，并在 server/runtime 的 test glob 显式包含顶层 `src/*.test.ts`，防止 shell 不展开递归模式时漏掉只读适配通道测试。serve-only UI 基础组件直接使用已声明的 Radix tooltip/separator 包，保留实际组件语义而避免冷加载整个聚合入口；`scripts/vite-radix-imports.test.mjs`核对冷图、Tooltip函数身份与Separator标记。

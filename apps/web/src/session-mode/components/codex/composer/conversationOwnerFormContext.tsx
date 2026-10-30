@@ -22,6 +22,7 @@ import {
   useConversationFormDrafts,
 } from "./conversationFormDrafts";
 export type ConversationFormKind =
+  | "rename"
   | "archive"
   | "delete"
   | "notes"

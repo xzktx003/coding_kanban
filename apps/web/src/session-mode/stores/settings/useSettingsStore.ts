@@ -1,8 +1,8 @@
-import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { create } from "zustand";
+import { persist } from "zustand/middleware";
 
-export type TaskDetail = 'steps' | 'stepsWithCommand' | 'stepsWithOutput';
-export type TaskCompleteBeepMode = 'never' | 'unfocused' | 'always';
+export type TaskDetail = "steps" | "stepsWithCommand" | "stepsWithOutput";
+export type TaskCompleteBeepMode = "never" | "unfocused" | "always";
 
 // --- Agents config ---
 // UI caps: max_threads ≤ 12, max_depth ≤ 4 (mirrors CodexMonitor product limits).
@@ -32,6 +32,9 @@ export interface SettingState extends AgentsSettings {
   setPreventSleepDuringTasks: (enabled: boolean) => void;
   showReasoning: boolean;
   setShowReasoning: (enabled: boolean) => void;
+  /** Device display policy only; never synchronized as native execution config. */
+  warmFollowedSessions: boolean;
+  setWarmFollowedSessions: (enabled: boolean) => void;
   enabledQuoteCategories: string[];
   setEnabledQuoteCategories: (categories: string[]) => void;
   customStunServers: string[];
@@ -41,17 +44,17 @@ export interface SettingState extends AgentsSettings {
 }
 
 const DEFAULT_HIDDEN_NAMES = [
-  'node_modules',
-  'DS_Store',
-  '.git',
-  '__pycache__',
-  '.venv',
-  '.vscode',
-  '.idea',
-  '.pytest_cache',
-  '.mypy_cache',
-  '.eggs',
-  'target',
+  "node_modules",
+  "DS_Store",
+  ".git",
+  "__pycache__",
+  ".venv",
+  ".vscode",
+  ".idea",
+  ".pytest_cache",
+  ".mypy_cache",
+  ".eggs",
+  "target",
 ];
 
 export const useSettingsStore = create<SettingState>()(
@@ -59,42 +62,67 @@ export const useSettingsStore = create<SettingState>()(
     (set) => ({
       hiddenNames: DEFAULT_HIDDEN_NAMES,
       showExplorer: true,
-      taskDetail: 'steps',
+      taskDetail: "steps",
       setHiddenNames: (hiddenNames: string[]) => set({ hiddenNames }),
       addHiddenName: (name: string) =>
         set((state) =>
-          state.hiddenNames.includes(name) ? state : { hiddenNames: [...state.hiddenNames, name] }
+          state.hiddenNames.includes(name)
+            ? state
+            : { hiddenNames: [...state.hiddenNames, name] },
         ),
       removeHiddenName: (name: string) =>
-        set((state) => ({ hiddenNames: state.hiddenNames.filter((item) => item !== name) })),
+        set((state) => ({
+          hiddenNames: state.hiddenNames.filter((item) => item !== name),
+        })),
       resetHiddenNames: () => set({ hiddenNames: DEFAULT_HIDDEN_NAMES }),
       setTaskDetail: (taskDetail: TaskDetail) => set({ taskDetail }),
       autoCommitGitWorktree: true,
-      enableTaskCompleteBeep: 'always',
+      enableTaskCompleteBeep: "always",
       preventSleepDuringTasks: true,
       showReasoning: true,
-      enabledQuoteCategories: ['economics', 'interest', 'life', 'management', 'programming'],
-      setAutoCommitGitWorktree: (enabled: boolean) => set({ autoCommitGitWorktree: enabled }),
+      // Approved Q5/Q8: keep recent followed pages warm within the shared budget.
+      // An explicitly stored false retains the original sixty-second fallback.
+      warmFollowedSessions: true,
+      enabledQuoteCategories: [
+        "economics",
+        "interest",
+        "life",
+        "management",
+        "programming",
+      ],
+      setAutoCommitGitWorktree: (enabled: boolean) =>
+        set({ autoCommitGitWorktree: enabled }),
       setEnableTaskCompleteBeep: (mode: TaskCompleteBeepMode) =>
         set({ enableTaskCompleteBeep: mode }),
-      setPreventSleepDuringTasks: (enabled: boolean) => set({ preventSleepDuringTasks: enabled }),
+      setPreventSleepDuringTasks: (enabled: boolean) =>
+        set({ preventSleepDuringTasks: enabled }),
       setShowReasoning: (enabled: boolean) => set({ showReasoning: enabled }),
+      setWarmFollowedSessions: (enabled: boolean) =>
+        set({ warmFollowedSessions: enabled }),
       setEnabledQuoteCategories: (categories: string[]) =>
         set({ enabledQuoteCategories: categories }),
       customStunServers: [],
-      setCustomStunServers: (servers: string[]) => set({ customStunServers: servers }),
+      setCustomStunServers: (servers: string[]) =>
+        set({ customStunServers: servers }),
       p2pAutoStart: false,
       setP2pAutoStart: (enabled: boolean) => set({ p2pAutoStart: enabled }),
       // Agents defaults: max_threads=6 (upstream Codex default), max_depth=1 (product default)
       agentsMaxThreads: 6,
       agentsMaxDepth: 1,
       setAgentsMaxThreads: (value: number) =>
-        set({ agentsMaxThreads: Math.min(Math.max(1, value), AGENTS_MAX_THREADS_CAP) }),
+        set({
+          agentsMaxThreads: Math.min(
+            Math.max(1, value),
+            AGENTS_MAX_THREADS_CAP,
+          ),
+        }),
       setAgentsMaxDepth: (value: number) =>
-        set({ agentsMaxDepth: Math.min(Math.max(1, value), AGENTS_MAX_DEPTH_CAP) }),
+        set({
+          agentsMaxDepth: Math.min(Math.max(1, value), AGENTS_MAX_DEPTH_CAP),
+        }),
     }),
     {
-      name: 'kanban.session.settings-storage',
+      name: "kanban.session.settings-storage",
       version: 13,
       migrate: (persistedState: any) => {
         if (persistedState) {
@@ -105,6 +133,6 @@ export const useSettingsStore = create<SettingState>()(
         }
         return persistedState;
       },
-    }
-  )
+    },
+  ),
 );

@@ -117,3 +117,4 @@ it("a native child with no parent metadata does not bypass a null capability", a
   expect(api.post).not.toHaveBeenCalled();
   expect(useSubagentStore.getState().nodes).toEqual({});
 });
+vi.mock("./nativeOperationContext", () => ({ readNativeOperationContext: vi.fn(async () => ({ scopeToken: "fixture-runtime-scope", namespace: "fixture-history" })) }));

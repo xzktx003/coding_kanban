@@ -5,7 +5,7 @@ import {
   type SubagentThread,
   type SubagentSnapshot,
   type SubagentStopResult,
-} from "@agent-orchestrator/shared";
+} from "@agent-orchestrator/shared/session-subagents";
 import type { ServerNotification } from "@session/bindings";
 import {
   boundedSubagentThread,

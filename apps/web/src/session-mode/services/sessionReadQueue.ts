@@ -1,18 +1,29 @@
 type Lane = "recent" | "history" | "status";
+export type SessionReadPriority = "interactive" | "background";
 type Job = {
   key: string;
   run: () => Promise<unknown>;
   resolve: (value: unknown) => void;
   reject: (error: unknown) => void;
   dispose?: () => void;
+  priority: SessionReadPriority;
 };
-const lanes: Record<Lane, { active: number; limit: number; jobs: Job[] }> = {
+const lanes: Record<
+  Lane,
+  {
+    active: number;
+    background: number;
+    burst: number;
+    limit: number;
+    jobs: Job[];
+  }
+> = {
   // Reserve one of the former four recent-read slots for lightweight queue
   // receipts. A valid 120s history read must not consume their entire 5s budget.
   // Total admission remains six, with no additional transcript concurrency.
-  recent: { active: 0, limit: 3, jobs: [] },
-  history: { active: 0, limit: 2, jobs: [] },
-  status: { active: 0, limit: 1, jobs: [] },
+  recent: { active: 0, background: 0, burst: 0, limit: 3, jobs: [] },
+  history: { active: 0, background: 0, burst: 0, limit: 2, jobs: [] },
+  status: { active: 0, background: 0, burst: 0, limit: 1, jobs: [] },
 };
 const pending = new Map<string, { promise: Promise<unknown>; job: Job }>();
 
@@ -22,11 +33,15 @@ export function enqueueSessionRead<T>(
   key: string,
   run: () => Promise<T>,
   signal?: AbortSignal,
+  priority: SessionReadPriority = "interactive",
 ): Promise<T> {
   if (signal?.aborted) return Promise.reject(signal.reason);
   const identity = `${lane}:${key}`;
   const existing = pending.get(identity);
-  if (existing) return existing.promise as Promise<T>;
+  if (existing) {
+    if (priority === "interactive") promoteSessionRead(lane, key);
+    return existing.promise as Promise<T>;
+  }
   let job!: Job;
   const promise = new Promise<T>((resolve, reject) => {
     job = {
@@ -34,6 +49,7 @@ export function enqueueSessionRead<T>(
       run,
       resolve: resolve as Job["resolve"],
       reject,
+      priority,
     };
     lanes[lane].jobs.push(job);
   });
@@ -57,10 +73,36 @@ export function enqueueSessionRead<T>(
   pump(lane);
   return promise;
 }
+/** Promotion changes only an owned queued read, never cancels other consumers. */
+export function promoteSessionRead(lane: Lane, key: string) {
+  const job = pending.get(`${lane}:${key}`)?.job;
+  if (job) {
+    job.priority = "interactive";
+    pump(lane);
+  }
+}
 function pump(lane: Lane) {
   const state = lanes[lane];
   while (state.active < state.limit && state.jobs.length) {
-    const job = state.jobs.shift()!;
+    const foreground = state.jobs.findIndex(
+      (job) => job.priority === "interactive",
+    );
+    // Leave capacity in each transcript lane for explicit reads. The recent
+    // lane retains two slots for overlapping old/new foreground selections.
+    // After three foreground admissions a waiting background job gets a turn.
+    const background =
+      lane !== "status" && state.background >= 1
+        ? -1
+        : state.jobs.findIndex((job) => job.priority === "background");
+    const index =
+      background >= 0 && (foreground < 0 || state.burst >= 3)
+        ? background
+        : foreground;
+    if (index < 0) break;
+    const [job] = state.jobs.splice(index, 1);
+    const wasBackground = job.priority === "background";
+    state.burst = wasBackground ? 0 : Math.min(3, state.burst + 1);
+    if (wasBackground) state.background++;
     state.active++;
     let result: Promise<unknown>;
     try {
@@ -74,6 +116,7 @@ function pump(lane: Lane) {
         job.dispose?.();
         if (pending.get(job.key)?.job === job) pending.delete(job.key);
         state.active--;
+        if (wasBackground) state.background--;
         pump(lane);
       });
   }

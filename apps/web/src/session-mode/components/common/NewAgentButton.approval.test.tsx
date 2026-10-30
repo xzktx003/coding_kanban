@@ -1,19 +1,29 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 import { NewAgentButton } from "./NewAgentButton";
 import { useAcpStore } from "@session/stores/useAcpStore";
 import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
 import { useLayoutStore } from "@session/stores";
-
+import { buildUrl } from "@session/hooks/runtime";
+import { useAcpRuntimeOwnersStore } from "@session/services/acpRuntimeOwners";
 const api = vi.hoisted(() => ({
-  cancel: vi.fn().mockResolvedValue(undefined),
-  newSession: vi.fn().mockResolvedValue({ sessionId: "new-fixture-session" }),
-  stop: vi.fn().mockResolvedValue(undefined),
+  cancel: vi.fn(),
+  newSession: vi.fn(),
+  start: vi.fn(),
+  stop: vi.fn(),
 }));
 vi.mock("@session/services/apiAdapt/acp", () => ({
   acpCancel: api.cancel,
   acpNewSession: api.newSession,
+  acpStart: api.start,
   acpStop: api.stop,
+  acpReadConnectionSnapshot: vi.fn(),
 }));
 vi.mock("@session/components/codex/hooks", () => ({
   useNewThread: () => ({ handleNewThread: vi.fn() }),
@@ -24,115 +34,109 @@ vi.mock("@session/hooks/useCCSessionManager", () => ({
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
-
+const created = () => ({
+  connectionId: "new-connection",
+  runtimeInstance: "runtime",
+  sessionId: "s1",
+  historySessionId: "source-new",
+  session: { sessionId: "s1", historySessionId: "source-new" },
+  initialize: { agentInfo: { title: "fixture" } },
+  sessionError: null,
+});
 beforeEach(() => {
   vi.clearAllMocks();
+  api.start.mockResolvedValue(created());
+  api.newSession.mockResolvedValue({
+    sessionId: "new-session",
+    historySessionId: "source-new",
+  });
+  api.stop.mockResolvedValue(undefined);
   useLayoutStore.setState({ view: "agent" });
   useWorkspaceStore.setState({ cwd: "/fixture/project" });
+  useAcpStore.getState().reset();
+  useAcpRuntimeOwnersStore.setState({ owners: {} });
   useAcpStore.setState({
     active: true,
-    agentId: "fixture-agent",
+    agentId: "fixture",
     connectionId: "fixture-connection",
-    sessionId: "running-fixture-session",
+    runtimeInstance: "runtime",
+    connectionEndpoint: buildUrl("/api/acp/connection-snapshot"),
+    sessionId: "s1",
+    historySessionId: "source-old",
+    sessionCwd: "/fixture/project",
     running: true,
   });
 });
-
-// Task interruption requires a deliberate user action.
-test("new ACP chat does not cancel a running task before explicit confirmation", async () => {
-  useLayoutStore.setState({ view: "agent" });
-  useWorkspaceStore.setState({ cwd: "/fixture/project" });
-  useAcpStore.setState({
-    active: true,
-    agentId: "fixture-agent",
-    connectionId: "fixture-connection",
-    sessionId: "running-fixture-session",
-    running: true,
-  });
-  render(<NewAgentButton />);
-  await act(async () =>
-    fireEvent.click(screen.getByRole("button", { name: /newChat/ })),
-  );
-  expect(api.cancel).not.toHaveBeenCalled();
-  expect(api.newSession).not.toHaveBeenCalled();
-  expect(api.stop).not.toHaveBeenCalled();
-  expect(useAcpStore.getState().sessionId).toBe("running-fixture-session");
-  expect(useAcpStore.getState().running).toBe(true);
-});
-
-test("cancel preserves the running ACP chat", async () => {
+test("new ACP chat opens an independent connection without an interruption dialog or stopping the original task", async () => {
   render(<NewAgentButton />);
   fireEvent.click(screen.getByRole("button", { name: /newChat/ }));
-  await act(async () =>
-    fireEvent.click(screen.getByRole("button", { name: "取消" })),
+  await waitFor(() =>
+    expect(api.start).toHaveBeenCalledExactlyOnceWith(
+      "fixture",
+      "/fixture/project",
+    ),
+  );
+  await waitFor(() =>
+    expect(useAcpStore.getState().connectionId).toBe("new-connection"),
   );
   expect(api.cancel).not.toHaveBeenCalled();
+  expect(api.stop).not.toHaveBeenCalled();
   expect(api.newSession).not.toHaveBeenCalled();
-  expect(useAcpStore.getState().sessionId).toBe("running-fixture-session");
   expect(screen.queryByRole("dialog")).toBeNull();
+  expect(Object.values(useAcpRuntimeOwnersStore.getState().owners)).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        connectionId: "fixture-connection",
+        running: true,
+      }),
+    ]),
+  );
 });
-
-test("confirmation interrupts the owned task and starts the new session", async () => {
+test("failed new connection preserves the running target and never restarts it", async () => {
+  api.start.mockRejectedValueOnce(new Error("fixture start failed"));
   render(<NewAgentButton />);
   fireEvent.click(screen.getByRole("button", { name: /newChat/ }));
-  await act(async () =>
-    fireEvent.click(screen.getByRole("button", { name: "中断并新建" })),
+  await waitFor(() => expect(api.start).toHaveBeenCalledOnce());
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: /newChat/ }).hasAttribute("disabled"),
+    ).toBe(false),
   );
-  expect(api.cancel).toHaveBeenCalledExactlyOnceWith(
-    "fixture-connection",
-    "running-fixture-session",
-  );
-  expect(api.newSession).toHaveBeenCalledExactlyOnceWith(
-    "fixture-connection",
-    "/fixture/project",
-  );
-  expect(api.stop).not.toHaveBeenCalled();
-  expect(useAcpStore.getState().sessionId).toBe("new-fixture-session");
-  expect(useAcpStore.getState().running).toBe(false);
-});
-
-test("confirmation for an old task does not interrupt a newly selected session", async () => {
-  render(<NewAgentButton />);
-  fireEvent.click(screen.getByRole("button", { name: /newChat/ }));
-  act(() => useAcpStore.setState({ sessionId: "another-session" }));
-  await act(async () =>
-    fireEvent.click(screen.getByRole("button", { name: "中断并新建" })),
-  );
+  expect(useAcpStore.getState()).toMatchObject({
+    connectionId: "fixture-connection",
+    sessionId: "s1",
+    running: true,
+  });
   expect(api.cancel).not.toHaveBeenCalled();
-  expect(api.newSession).not.toHaveBeenCalled();
-  expect(useAcpStore.getState().sessionId).toBe("another-session");
-});
-
-test("interruption failure preserves the running task without creating or restarting", async () => {
-  api.cancel.mockRejectedValueOnce(new Error("fixture interruption failure"));
-  render(<NewAgentButton />);
-  fireEvent.click(screen.getByRole("button", { name: /newChat/ }));
-  await act(async () =>
-    fireEvent.click(screen.getByRole("button", { name: "中断并新建" })),
-  );
-  expect(api.cancel).toHaveBeenCalledOnce();
-  expect(api.newSession).not.toHaveBeenCalled();
   expect(api.stop).not.toHaveBeenCalled();
-  expect(useAcpStore.getState().running).toBe(true);
-  expect(useAcpStore.getState().sessionId).toBe("running-fixture-session");
+  expect(api.newSession).not.toHaveBeenCalled();
 });
-
-test("repeated new-chat clicks cannot create duplicate native sessions", async () => {
-  useAcpStore.setState({ running: false });
-  let resolve!: (session: { sessionId: string }) => void;
-  api.newSession.mockReturnValueOnce(
-    new Promise((done) => {
-      resolve = done;
-    }),
-  );
+test("repeated new chat clicks coalesce into one connection and keep the current task while waiting", async () => {
+  let resolve!: (value: ReturnType<typeof created>) => void;
+  api.start.mockReturnValueOnce(new Promise((done) => (resolve = done)));
   render(<NewAgentButton />);
   const button = screen.getByRole("button", { name: /newChat/ });
   fireEvent.click(button);
   fireEvent.click(button);
-  await act(async () => {});
-  expect(api.newSession).toHaveBeenCalledOnce();
+  await waitFor(() => expect(api.start).toHaveBeenCalledOnce());
   expect(button.hasAttribute("disabled")).toBe(true);
-  await act(async () => resolve({ sessionId: "one-new-session" }));
-  expect(api.newSession).toHaveBeenCalledOnce();
+  expect(useAcpStore.getState().running).toBe(true);
+  await act(async () => resolve(created()));
+  expect(api.start).toHaveBeenCalledOnce();
   expect(button.hasAttribute("disabled")).toBe(false);
+  expect(api.cancel).not.toHaveBeenCalled();
+});
+test("idle new chat reuses its verified process without stopping or asking to interrupt", async () => {
+  useAcpStore.setState({ running: false });
+  render(<NewAgentButton />);
+  fireEvent.click(screen.getByRole("button", { name: /newChat/ }));
+  await waitFor(() =>
+    expect(api.newSession).toHaveBeenCalledExactlyOnceWith(
+      "fixture-connection",
+      "/fixture/project",
+    ),
+  );
+  expect(api.start).not.toHaveBeenCalled();
+  expect(api.cancel).not.toHaveBeenCalled();
+  expect(screen.queryByRole("dialog")).toBeNull();
 });

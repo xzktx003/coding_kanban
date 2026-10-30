@@ -1,6 +1,9 @@
 import { beforeEach, expect, it, vi } from "vitest";
 const api = vi.hoisted(() => ({ listThreads: vi.fn() }));
 vi.mock("./apiAdapt", () => api);
+vi.mock("./apiAdapt/codex", () => api);
+vi.mock("./apiAdapt/git", () => api);
+vi.mock("./apiAdapt/skills", () => api);
 import { codexService, resetCodexRuntimeState } from "./codexService";
 import { useCodexStore } from "../components/codex/stores/useCodexStore";
 

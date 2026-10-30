@@ -12,7 +12,7 @@ import {
   listModels,
   listOtherModels,
   listProviderPresets,
-} from "@session/services/apiAdapt";
+} from "@session/services/apiAdapt/codex";
 import { useModelSettingsStore } from "@session/stores/settings";
 
 type ModelCacheStore = {

@@ -66,10 +66,11 @@ window.__fire=(kind)=>{const before={...states[kind]};if(kind==='recent')states.
     await writeFile(
       join(root, "main.ts"),
       `
-import * as cache from './cache';import * as recent from './recent';import './locale';
+import * as cache from './cache';import * as recent from './recent';import {initializeSessionI18n} from './locale';
+void initializeSessionI18n();
 function fill(m){const p=window.__hmrProbe;const text=new TextDecoder().decode(new Uint8Array(4*1024*1024).fill(65+p.updates.cache));m.cachedTranscriptBaselines.set('fixture',[{method:'item/agentMessage/delta',params:{threadId:'fixture',delta:text}}]);m.cachedTranscriptTimings.set('fixture',{turnId:'turn',status:'inProgress',startedAtMs:123,durationMs:null});p.owners.push(new WeakRef(m));p.maps.push(new WeakRef(m.cachedTranscriptBaselines));p.timings.push(new WeakRef(m.cachedTranscriptTimings));window.__currentCache=m;}
 fill(cache);window.__recent=recent;
-if(import.meta.hot){import.meta.hot.accept('./cache',m=>{window.__hmrProbe.updates.cache++;fill(m)});import.meta.hot.accept('./recent',m=>{window.__hmrProbe.updates.recent++;window.__recent=m});import.meta.hot.accept('./locale',()=>{window.__hmrProbe.updates.locale++});}
+if(import.meta.hot){import.meta.hot.accept('./cache',m=>{window.__hmrProbe.updates.cache++;fill(m)});import.meta.hot.accept('./recent',m=>{window.__hmrProbe.updates.recent++;window.__recent=m});import.meta.hot.accept('./locale',m=>{void m.initializeSessionI18n();window.__hmrProbe.updates.locale++});}
 `,
     );
     await writeFile(

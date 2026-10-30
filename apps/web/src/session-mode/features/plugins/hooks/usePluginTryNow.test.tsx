@@ -33,6 +33,7 @@ vi.mock("../hooks", () => ({
 vi.mock("./useExternalUrl", () => ({
   useExternalUrl: () => ({ openExternalUrl: vi.fn() }),
 }));
+vi.mock("@session/lib/eventStream",()=>({openEventStream:()=>()=>{}}));
 vi.mock("@session/services/codexService", () => ({
   codexService: { setCurrentThread: vi.fn(async () => {}) },
 }));

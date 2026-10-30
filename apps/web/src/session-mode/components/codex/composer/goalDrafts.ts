@@ -1,3 +1,4 @@
+import { sessionWindowId, sessionWindowStorageName } from "@session/services/sessionWindowContext";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { useCallback } from "react";
@@ -9,7 +10,7 @@ type GoalDraftState = {
 };
 export const useGoalDraftStore = create<GoalDraftState>()(
   persist<GoalDraftState>(() => ({ owners: {}, legacyMigrated: false }), {
-    name: "kanban.session.codex-goal-drafts",
+    name: sessionWindowStorageName("kanban.session.codex-goal-drafts"),
     version: 1,
     migrate: (saved) => {
       const old = saved as {
@@ -73,7 +74,7 @@ export const goalDrafts = {
   /** A live legacy flag can be attributed once, only to the captured active draft. */
   migrateLegacy: (owner: string, enabled: boolean) => {
     const state = useGoalDraftStore.getState();
-    if (state.legacyMigrated) return;
+    if (sessionWindowId() || state.legacyMigrated) return;
     useGoalDraftStore.setState({
       legacyMigrated: true,
       owners:

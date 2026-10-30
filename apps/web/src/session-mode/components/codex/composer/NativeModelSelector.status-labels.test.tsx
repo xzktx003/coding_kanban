@@ -38,8 +38,8 @@ const api = vi.hoisted(() => ({
 
 // Preserve the real API module, useModels.load, cache and all setting setters.
 // There is no mocked readiness/permission/settings return or native connection.
-vi.mock("@session/services/apiAdapt", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@session/services/apiAdapt")>()),
+vi.mock("@session/services/apiAdapt/codex", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@session/services/apiAdapt/codex")>()),
   ...api,
 }));
 

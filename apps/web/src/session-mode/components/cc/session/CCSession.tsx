@@ -1,28 +1,33 @@
+import { useProviderTranscriptVisibility } from "@session/hooks/useProviderTranscriptVisibility";
+import {
+  providerTranscriptKey,
+  useProviderTranscriptStore,
+} from "@session/services/sessionProviderTranscriptState";
+import { ProviderTranscriptControls } from "@session/components/agent/ProviderTranscriptControls";
 import { useSessionReadReceipt } from "@session/hooks/useSessionReadReceipt";
-import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { CCMessage } from "@session/components/cc/session/messages";
 import { PermissionRequestCard } from "@session/components/cc/session/messages/PermissionRequestCard";
-import {
-  ccGetSessionMessages,
-  ccResumeSession,
-} from "@session/services/apiAdapt/cc";
 import { useCCStore } from "@session/stores/cc";
 import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
 import { useCCPermissionListener, useCCSessionListener } from "../hooks";
-import type { PermissionRequestMessage } from "../types/messages";
+import type {
+  CCMessage as CCMessageData,
+  PermissionRequestMessage,
+} from "../types/messages";
 import type { PermissionDecision } from "../types/permission";
-import { fromSdkMessages } from "../utils/fromSdkMessages";
 import { refreshClaudeHistory } from "@session/services/followedSessionAuxSync";
-import {
-  getReadingPosition,
-  saveReadingPosition,
-} from "@session/services/sessionTranscriptCache";
+import { useClaudeConnectionStore } from "@session/services/claudeConnectionIdentity";
+import { VirtualTranscriptList } from "@session/components/agent/VirtualTranscriptList";
 import { CCScrollControls } from "./CCScrollControls";
 import { buildMessageGroups, CCExploredMessageGroup } from "./messages/group";
 import { buildInlineErrorsMap } from "./messages/inlineErrors";
 import { buildToolResultsMap } from "./messages/toolResults";
 import { ClaudeCardProvider } from "../presentation/CardContext";
 import { Spinner } from "../presentation/Spinner";
+
+const EMPTY_MESSAGES: CCMessageData[] = [];
 
 interface CCSessionProps {
   /** When provided, renders in embedded (grid-card) mode for this specific session. */
@@ -39,41 +44,69 @@ export default function CCSession({
   disableListener = false,
 }: CCSessionProps = {}) {
   const isEmbedded = !!sessionId;
+  const recoveryError=useClaudeConnectionStore(s=>s.errors[sessionId??useCCStore.getState().activeSessionId??""]);
 
+  const activeSessionId = useCCStore((s) =>
+    sessionId ? null : s.activeSessionId,
+  );
+  const messages = useCCStore((s) =>
+    sessionId
+      ? (s.sessionMessagesMap[sessionId] ?? EMPTY_MESSAGES)
+      : s.messages,
+  );
+  const isLoading = useCCStore((s) =>
+    sessionId ? (s.sessionLoadingMap[sessionId] ?? false) : s.isLoading,
+  );
+  const permissionMode = useCCStore((s) => s.options.permissionMode);
   const {
-    activeSessionId,
-    activeSessionIds,
-    addActiveSessionId,
-    messages: globalMessages,
-    sessionMessagesMap,
-    sessionLoadingMap,
-    isLoading: globalIsLoading,
     setLoading,
     setConnected,
     clearMessages,
-    options,
     updateMessage,
     updateSessionMessage,
-    addMessageToSession,
-    setSessionLoading,
-  } = useCCStore();
-  const { cwd } = useWorkspaceStore();
-  // Drives the spinner glyph color, as data-permission-mode does officially.
-  const permissionMode = options.permissionMode;
-
-  // In embedded mode use per-session data; otherwise use the global active-session data.
-  const messages = sessionId
-    ? (sessionMessagesMap[sessionId] ?? [])
-    : globalMessages;
-  const isLoading = sessionId
-    ? (sessionLoadingMap[sessionId] ?? false)
-    : globalIsLoading;
+  } = useCCStore(
+    useShallow((s) => ({
+      setLoading: s.setLoading,
+      setConnected: s.setConnected,
+      clearMessages: s.clearMessages,
+      updateMessage: s.updateMessage,
+      updateSessionMessage: s.updateSessionMessage,
+    })),
+  );
+  const cwd = useWorkspaceStore((s) => s.cwd);
+  const openedSessionId = sessionId ?? activeSessionId;
+  const transcriptOwner = openedSessionId
+    ? providerTranscriptKey("cc", openedSessionId)
+    : null;
+  const restoreTranscript = useCallback(
+    () =>
+      openedSessionId
+        ? refreshClaudeHistory(openedSessionId)
+        : Promise.resolve(),
+    [openedSessionId],
+  );
+  const loadEarlierTranscript = useCallback(() => {
+    const cursor =
+      transcriptOwner &&
+      useProviderTranscriptStore.getState().entries[transcriptOwner]
+        ?.nextCursor;
+    return openedSessionId && cursor
+      ? refreshClaudeHistory(openedSessionId, undefined, "interactive", cursor)
+      : Promise.resolve();
+  }, [openedSessionId, transcriptOwner]);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const latestRef = useRef<HTMLDivElement>(null);
+  const transcriptVisible = useProviderTranscriptVisibility(
+    transcriptOwner,
+    "cc",
+    openedSessionId,
+    scrollContainerRef,
+    messages.length > 0,
+    restoreTranscript,
+  );
   useSessionReadReceipt("cc", sessionId ?? activeSessionId, latestRef);
   const shouldAutoScrollRef = useRef(true);
-  const isProgrammaticScrollRef = useRef(false);
 
   // Reset transient UI state when directory changes (standalone mode only).
   useEffect(() => {
@@ -90,102 +123,6 @@ export default function CCSession({
     isEmbedded,
   ]);
 
-  // Load JSONL history for the active session (always, independent of resume).
-  // Review-first: spawning the agent is gated behind an explicit Resume button
-  // (rendered below) so peeking at history doesn't pay the agent-spawn cost.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: this effect runs once per activeSessionId to load history and resume; it must not re-run on other value changes
-  useEffect(() => {
-    if (isEmbedded) return;
-    if (!activeSessionId || sessionMessagesMap[activeSessionId]?.length) return;
-    const sid = activeSessionId;
-    const sessionCwd = cwd;
-    if (!sessionCwd?.trim()) return;
-    void (async () => {
-      try {
-        await refreshClaudeHistory(sid);
-      } catch (err) {
-        console.error("[CCSession] Failed to load/resume session", {
-          sessionId: sid,
-          err,
-        });
-      }
-    })();
-  }, [activeSessionId, isEmbedded]);
-
-  const openedSessionId = sessionId ?? activeSessionId;
-  const reading = useRef(getReadingPosition(`cc:${openedSessionId}`));
-
-  // Track user scroll intent.
-  useEffect(() => {
-    const el = scrollContainerRef.current;
-    if (!el) return;
-    const onScroll = () => {
-      if (isProgrammaticScrollRef.current) return;
-      shouldAutoScrollRef.current =
-        el.scrollHeight - el.scrollTop - el.clientHeight <= 4;
-      const anchor = [
-        ...el.querySelectorAll<HTMLElement>("[data-cc-message]"),
-      ].find(
-        (node) =>
-          node.getBoundingClientRect().bottom > el.getBoundingClientRect().top,
-      );
-      reading.current = {
-        atBottom: shouldAutoScrollRef.current,
-        anchor: anchor?.dataset.ccMessage,
-        offset: anchor
-          ? el.getBoundingClientRect().top - anchor.getBoundingClientRect().top
-          : 0,
-        scrollTop: el.scrollTop,
-      };
-      saveReadingPosition(`cc:${openedSessionId}`, reading.current);
-    };
-    el.addEventListener("scroll", onScroll, { passive: true });
-    return () => el.removeEventListener("scroll", onScroll);
-  }, [openedSessionId]);
-
-  // Opening another conversation resets the reading position before paint.
-  useLayoutEffect(() => {
-    reading.current = getReadingPosition(`cc:${openedSessionId}`);
-    shouldAutoScrollRef.current = reading.current?.atBottom ?? true;
-    isProgrammaticScrollRef.current = false;
-    const el = scrollContainerRef.current;
-    if (el)
-      el.scrollTo({
-        top: shouldAutoScrollRef.current
-          ? el.scrollHeight
-          : (reading.current?.scrollTop ?? 0),
-        behavior: "auto",
-      });
-  }, [openedSessionId]);
-  useLayoutEffect(() => {
-    const el = scrollContainerRef.current;
-    if (!el || shouldAutoScrollRef.current || !reading.current?.anchor) return;
-    const anchor = [
-      ...el.querySelectorAll<HTMLElement>("[data-cc-message]"),
-    ].find((node) => node.dataset.ccMessage === reading.current?.anchor);
-    if (anchor)
-      el.scrollTop +=
-        anchor.getBoundingClientRect().top -
-        el.getBoundingClientRect().top +
-        reading.current.offset;
-  }, [messages, openedSessionId]);
-
-  // Instant scrolling also handles asynchronously loaded history on mobile.
-  useEffect(() => {
-    if (!shouldAutoScrollRef.current) return;
-    const el = scrollContainerRef.current;
-    if (!el) return;
-    isProgrammaticScrollRef.current = true;
-    el.scrollTo({ top: el.scrollHeight, behavior: "auto" });
-    const frame = requestAnimationFrame(() => {
-      isProgrammaticScrollRef.current = false;
-    });
-    return () => {
-      cancelAnimationFrame(frame);
-      isProgrammaticScrollRef.current = false;
-    };
-  }, [messages, isLoading, openedSessionId]);
-
   const inlineErrorsMap = useMemo(
     () => buildInlineErrorsMap(messages),
     [messages],
@@ -199,6 +136,14 @@ export default function CCSession({
   );
 
   const messageGroups = useMemo(() => buildMessageGroups(messages), [messages]);
+  const groupKey = useCallback(
+    (group: (typeof messageGroups)[number]) => {
+      const index =
+        group.kind === "explored" ? group.msgIndices[0] : group.msgIdx;
+      return String((messages[index] as { uuid?: string }).uuid ?? index);
+    },
+    [messages],
+  );
 
   const pendingPermissionIdx = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -212,17 +157,12 @@ export default function CCSession({
     requestId: string,
     decision: PermissionDecision,
   ) => {
-    const { ccResolvePermission } = await import("@session/services");
+    const { resolveClaudePermission } = await import("@session/services/resolveClaudePermission");
     try {
-      await ccResolvePermission(requestId, decision);
-      const patch: Partial<PermissionRequestMessage> = { resolved: decision };
-      if (isEmbedded && sessionId) {
-        updateSessionMessage(sessionId, pendingPermissionIdx, patch);
-      } else {
-        updateMessage(pendingPermissionIdx, patch);
-      }
+      await resolveClaudePermission(requestId, decision);
     } catch (err) {
       console.error("Failed to resolve permission:", err);
+      throw err;
     }
   };
 
@@ -231,80 +171,99 @@ export default function CCSession({
 
   return (
     <ClaudeCardProvider cwd={cwd}>
-    <div className="flex flex-col h-full min-h-0 w-full max-w-4xl mx-auto">
-      {/* Scrollable content area */}
-      <div className="flex-1 min-h-0 overflow-hidden relative">
-        <div
-          ref={scrollContainerRef}
-          className="h-full overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:display-none"
-        >
-          <div className="thread-surface flex flex-col gap-2 p-4">
-            {/* Message list */}
-            {messageGroups.map((group) => (
-              <div
-                key={
-                  (
-                    messages[
-                      group.kind === "explored"
+      <div
+        className="flex flex-col h-full min-h-0 w-full max-w-4xl mx-auto"
+        data-provider-transcript-owner={transcriptOwner ?? undefined}
+        data-provider-transcript-visible={transcriptVisible}
+      >
+        {recoveryError&&<p role="status" className="mx-3 mb-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs text-muted-foreground">{recoveryError}</p>}
+        <ProviderTranscriptControls
+          owner={transcriptOwner}
+          onEarlier={loadEarlierTranscript}
+          onRetry={restoreTranscript}
+        />
+        {/* Scrollable content area */}
+        <div className="flex-1 min-h-0 overflow-hidden relative">
+          <div
+            ref={scrollContainerRef}
+            className="h-full overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:display-none"
+          >
+            <div className="thread-surface flex flex-col gap-2 p-4">
+              {/* Message list */}
+              <VirtualTranscriptList
+                owner={`cc:${openedSessionId}`}
+                items={messageGroups}
+                getKey={groupKey}
+                scrollRef={scrollContainerRef}
+                followingRef={shouldAutoScrollRef}
+                renderRow={(group) => (
+                  <div
+                    key={
+                      (
+                        messages[
+                          group.kind === "explored"
+                            ? group.msgIndices[0]
+                            : group.msgIdx
+                        ] as { uuid?: string }
+                      ).uuid ??
+                      (group.kind === "explored"
                         ? group.msgIndices[0]
-                        : group.msgIdx
-                    ] as { uuid?: string }
-                  ).uuid ??
-                  (group.kind === "explored"
-                    ? group.msgIndices[0]
-                    : group.msgIdx)
-                }
-                data-cc-message={
-                  (
-                    messages[
-                      group.kind === "explored"
-                        ? group.msgIndices[0]
-                        : group.msgIdx
-                    ] as { uuid?: string }
-                  ).uuid
-                }
-              >
-                {group.kind === "explored" ? (
-                  <CCExploredMessageGroup
-                    key={`explored-${group.msgIndices[0]}`}
-                    msgIndices={group.msgIndices}
-                    messages={messages}
-                    inlineErrorsMap={inlineErrorsMap}
-                  />
-                ) : (
-                  <CCMessage
-                    key={group.msgIdx}
-                    message={messages[group.msgIdx]}
-                    index={group.msgIdx}
-                    inlineErrors={inlineErrorsMap[group.msgIdx]}
-                    toolResults={toolResultsMap[group.msgIdx]}
-                  />
+                        : group.msgIdx)
+                    }
+                    data-cc-message={
+                      (
+                        messages[
+                          group.kind === "explored"
+                            ? group.msgIndices[0]
+                            : group.msgIdx
+                        ] as { uuid?: string }
+                      ).uuid
+                    }
+                  >
+                    {group.kind === "explored" ? (
+                      <CCExploredMessageGroup
+                        key={`explored-${group.msgIndices[0]}`}
+                        msgIndices={group.msgIndices}
+                        messages={messages}
+                        inlineErrorsMap={inlineErrorsMap}
+                      />
+                    ) : (
+                      <CCMessage
+                        key={group.msgIdx}
+                        message={messages[group.msgIdx]}
+                        index={group.msgIdx}
+                        inlineErrors={inlineErrorsMap[group.msgIdx]}
+                        toolResults={toolResultsMap[group.msgIdx]}
+                        detailVisible={transcriptVisible}
+                      />
+                    )}
+                  </div>
                 )}
-              </div>
-            ))}
+              />
 
-            <div ref={latestRef} data-session-latest style={{ height: 1 }} />
-            {/* Running indicator: the official glyph cycle and verb. */}
-            {isLoading && (
-              <div className="claude-presentation">
-                <Spinner permissionMode={permissionMode} />
-              </div>
-            )}
+              <div ref={latestRef} data-session-latest style={{ height: 1 }} />
+              {/* Running indicator: the official glyph cycle and verb. */}
+              {isLoading && (
+                <div className="claude-presentation">
+                  <Spinner permissionMode={permissionMode} />
+                </div>
+              )}
+            </div>
           </div>
+
+          {!isEmbedded && messages.length > 0 && (
+            <CCScrollControls scrollContainerRef={scrollContainerRef} />
+          )}
         </div>
 
-        {!isEmbedded && messages.length > 0 && (
-          <CCScrollControls scrollContainerRef={scrollContainerRef} />
+        {pendingPermissionIdx !== -1 && (
+          <PermissionRequestCard
+            msg={messages[pendingPermissionIdx] as PermissionRequestMessage}
+            onResolve={handleResolvePermission}
+            active={transcriptVisible}
+          />
         )}
       </div>
-
-      {pendingPermissionIdx !== -1 && (
-        <PermissionRequestCard
-          msg={messages[pendingPermissionIdx] as PermissionRequestMessage}
-          onResolve={handleResolvePermission}
-        />
-      )}
-    </div>
     </ClaudeCardProvider>
   );
 }

@@ -9,11 +9,43 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./session-tabs": {
+      "types": "./dist/session-tabs.d.ts",
+      "default": "./dist/session-tabs.js"
+    },
+    "./session-projects": {
+      "types": "./dist/session-projects.d.ts",
+      "default": "./dist/session-projects.js"
+    },
+    "./session-followups": {
+      "types": "./dist/session-followups.d.ts",
+      "default": "./dist/session-followups.js"
+    },
+    "./session-subagents": {
+      "types": "./dist/session-subagents.d.ts",
+      "default": "./dist/session-subagents.js"
+    },
+    "./composer-context": {
+      "types": "./dist/composer-context.d.ts",
+      "default": "./dist/composer-context.js"
+    },
+    "./codex-chat-projection": {
+      "types": "./dist/codex-chat-projection.d.ts",
+      "default": "./dist/codex-chat-projection.js"
+    },
+    "./codex-mcp-auth": {
+      "types": "./dist/codex-mcp-auth.d.ts",
+      "default": "./dist/codex-mcp-auth.js"
+    },
+    "./codex-mcp-version": {
+      "types": "./dist/codex-mcp-version.d.ts",
+      "default": "./dist/codex-mcp-version.js"
     }
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "echo 'No tests yet for shared'",
+    "test": "pnpm --filter @agent-orchestrator/session-runtime exec tsx --test --test-concurrency=4 ../shared/src/*.test.ts",
     "format": "prettier --write 'src/**/*.ts'"
   },
   "devDependencies": {

@@ -1,7 +1,14 @@
 import { toast } from "sonner";
+import { useMemo } from "react";
+import { codexRuntimeState } from "@session/utils/codexRuntimeState";
 import { archiveThread, deleteThread } from "@session/services/apiAdapt/codex";
 import { gitCommit, gitPush } from "@session/services/apiAdapt/git";
 import { codexService } from "@session/services/codexService";
+import { renameSession } from "@session/services/sessionNames";
+import {
+  SESSION_NAME_LIMIT,
+  useSessionNameStore,
+} from "@session/stores/useSessionNameStore";
 import { useAgentCenterStore } from "@session/stores/useAgentCenterStore";
 import { useSessionDraftStore } from "@session/stores/useSessionDraftStore";
 import { useCodexStore } from "../stores/useCodexStore";
@@ -22,10 +29,7 @@ import {
   type ConversationOwnerForm,
 } from "./conversationOwnerFormContext";
 import { useConversationFormDrafts } from "./conversationFormDrafts";
-import {
-  archiveUndoNotice,
-  captureArchivedThread,
-} from "./archiveThreadUndo";
+import { archiveUndoNotice, captureArchivedThread } from "./archiveThreadUndo";
 export function ConversationOwnerForms({
   form,
   onClose,
@@ -57,20 +61,36 @@ function OwnerFormContent({
   const owner = useConversationOwnerForm()!,
     { target, kind } = form,
     [notes, setNotes] = useConversationFormField("notes");
+  const initialName = useMemo(
+    () =>
+      useSessionNameStore.getState().names[`codex:${target.threadId}`] ??
+      useCodexStore
+        .getState()
+        .threads.find((thread) => thread.id === target.threadId)?.name ??
+      target.title,
+    [target.id, target.threadId, target.title],
+  );
+  const [rename, setRename] = useConversationFormField("rename", initialName);
   const report = (error: unknown) =>
     toast.error(error instanceof Error ? error.message : String(error));
-  const lifecycle = (remove: boolean) =>
-    void owner
+  const capturedTurn = useMemo(
+    () => codexRuntimeState(useCodexStore.getState(), target.threadId).turnId,
+    [target.id, target.threadId],
+  );
+  const lifecycle = (remove: boolean, stop = false) => {
+    const snapshot = remove ? null : captureArchivedThread(target.threadId);
+    return void owner
       .run(
         () =>
           remove
             ? deleteThread(target.threadId)
-            : archiveThread(target.threadId),
+            : stop
+              ? archiveThread(target.threadId, {
+                  mode: "stop",
+                  ...(capturedTurn ? { expectedTurnId: capturedTurn } : {}),
+                })
+              : archiveThread(target.threadId),
         () => {
-          // Snapshot before removal so an undo restores the same row in place.
-          const snapshot = remove
-            ? null
-            : captureArchivedThread(target.threadId);
           useAgentCenterStore
             .getState()
             .removeCard({ kind: "codex", id: target.threadId });
@@ -94,6 +114,40 @@ function OwnerFormContent({
         },
       )
       .catch(report);
+  };
+  if (kind === "rename")
+    return (
+      <ComposerSheet
+        title="重命名"
+        description="重命名当前聊天"
+        onClose={close}
+      >
+        <OwnerFormSummary />
+        <label className="space-y-2 block">
+          会话名称
+          <input
+            className="session-command-search"
+            aria-label="会话名称"
+            autoFocus
+            maxLength={SESSION_NAME_LIMIT}
+            value={rename}
+            disabled={owner.pending}
+            onChange={(event) => setRename(event.target.value)}
+          />
+        </label>
+        <button
+          type="button"
+          disabled={owner.pending || !rename.trim()}
+          onClick={() =>
+            void owner
+              .run(() => renameSession("codex", target.threadId, rename), close)
+              .catch(report)
+          }
+        >
+          保存名称
+        </button>
+      </ComposerSheet>
+    );
   if (kind === "archive" || kind === "delete")
     return (
       <ComposerSheet
@@ -106,7 +160,7 @@ function OwnerFormContent({
         <OwnerFormSummary />
         <p>
           {kind === "archive"
-            ? "将归档此聊天，并从关注列表移出。Agent 不会被停止。"
+            ? "普通归档仅适用于空闲且没有待发内容的聊天。停止并归档会暂停本会话的自动推进，保留队列、Goal 和草稿；结果未确认时不会继续归档。"
             : "这将永久删除该任务及其子智能体任务。此操作无法撤销。"}
         </p>
         <button type="button" disabled={owner.pending} onClick={close}>
@@ -119,6 +173,15 @@ function OwnerFormContent({
         >
           {kind === "archive" ? "确认归档" : "删除"}
         </button>
+        {kind === "archive" && (
+          <button
+            type="button"
+            disabled={owner.pending}
+            onClick={() => lifecycle(false, true)}
+          >
+            停止并归档
+          </button>
+        )}
       </ComposerSheet>
     );
   if (kind === "notes")

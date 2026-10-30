@@ -74,6 +74,7 @@ const stopReports = feedbackUploads.subscribe(() => {
     stopEvents = openEventStream({
       agents: ["codex"],
       label: "feedback-upload",
+      onResync: () => feedbackUploads.clear(),
       onEvent: (event) => {
         const payload = event.payload;
         const method =

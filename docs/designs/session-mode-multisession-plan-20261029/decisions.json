@@ -1,0 +1,64 @@
+{
+  "date": "2026-10-29",
+  "source": "Explicit Q1-Q14 replies and implementation authorization in this conversation",
+  "status": "approved; implementation and strict acceptance in progress",
+  "decisions": [
+    {
+      "question": "Q1",
+      "decision": "All applicable non-IDE, non-cloud-task capabilities are mandatory in this delivery; implementation batches do not defer scope."
+    },
+    {
+      "question": "Q2",
+      "decision": "Latest commentary/current activity by default, with access to the entire process."
+    },
+    {
+      "question": "Q3",
+      "decision": "Shared navigation/drafts/history/recovery/performance covers Codex, Claude and ACP; preserve provider-specific semantics."
+    },
+    {
+      "question": "Q4",
+      "decision": "Keep existing model calls, login, MCP/plugins, feedback and dictation client capabilities; exclude cloud tasks/workspaces and server implementation."
+    },
+    {
+      "question": "Q5/Q8",
+      "decision": "Warm recent pages for all followed conversations when resources permit; focused before visible before background; reclaim under resource pressure; older history on demand."
+    },
+    {
+      "question": "Q6",
+      "decision": "Tab closure only removes following; ordinary archive and explicit stop-and-archive are distinct."
+    },
+    {
+      "question": "Q9",
+      "decision": "Stop-and-archive pauses queue and active Goal, stops the exact current turn, preserves content/drafts and requires explicit continuation after recovery; unknown receipts reconciled first; no additional family stop."
+    },
+    {
+      "question": "Q7",
+      "decision": "Pins and read/unread sync across devices; selection/layout/reading position/unsent drafts remain local; preload does not mark read."
+    },
+    {
+      "question": "Q10",
+      "decision": "Normal LAN: 30 followed, 4 visible desktop panes, 3 browser pages; navigation/exact target/composer p95 <=2s with at least30 samples and maximum reported; uncached/slow history separately measured;50/100 stress without product count limit."
+    },
+    {
+      "question": "Q11",
+      "decision": "Share the same live official service and real task interaction with CLI; sharing only history files is insufficient."
+    },
+    {
+      "question": "Q12",
+      "decision": "Kanban may run official daemon start on demand, with no private app-server fallback or automatic shared-daemon restart/update/stop."
+    },
+    {
+      "question": "Q13",
+      "decision": "This delivery shares Kanban and CLI; VS Code startup adaptation is out of scope."
+    },
+    {
+      "question": "Q14",
+      "decision": "Use the official queue and thread settings; warn about changes affecting queued messages and explicitly migrate legacy frozen settings."
+    }
+  ],
+  "implementation_started": true,
+  "accepted_extra_targets": [
+    "warm-switch p95 <=300ms",
+    "input-to-two-frames p95 <=100ms"
+  ]
+}

@@ -7,7 +7,7 @@ import { ACCOUNT_RESPONSE, RUNTIME_INSTANCE, createRuntimePreflightFixture } fro
 import { createFeedbackEventStream } from "./fixtures/session-feedback-event-stream.mts";
 const { installSessionUxFixture, seedSessionUx } = createRequire(import.meta.url)("./session-ux-fixture") as typeof import("./session-ux-fixture");
 
-// Candidate only: no component mount, production open-state setter or native/reference import.
+// Natural entry only: no component mount, production open-state setter or native/reference import.
 const SELF = "tests/e2e/session-codex-feedback-entry.spec.mts";
 const CWD = "/fixture/项目/very-long-project-path-for-ui-regression";
 const MAIN = ".session-codex-composer";
@@ -48,6 +48,8 @@ const inputs = [
   "packages/session-runtime/src/core/events.ts",
   "packages/session-runtime/src/core/json.ts",
   "tests/e2e/fixtures/session-feedback-preflight-runtime.mts",
+  "tests/e2e/fixtures/session-feedback-preflight-runtime-core.mts",
+  "tests/e2e/fixtures/session-feedback-preflight-runtime-worker.mts",
   "tests/e2e/fixtures/session-feedback-event-stream.mts",
   SELF,
 ];
@@ -332,10 +334,13 @@ for (const width of [1440, 390]) {
           await record("entry-immediate");
           await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
           await record("entry-2raf");
-          await page.waitForTimeout(200);
+          // The closed form is intentionally loaded on this gesture. Wait for
+          // the actual production form, retaining immediate/2raf captures so
+          // this functional check cannot masquerade as a startup timing pass.
+          await page.locator('.codex-native-feedback[role="dialog"]').waitFor({ state: "visible", timeout: 10_000 });
           await record("entry-settled");
           await screenshot("entry-settled.png");
-          // Do not wait for a missing dialog and lose the baseline evidence to a locator timeout.
+          // Immediate and two-frame evidence is preserved even if the bounded form wait fails.
         } catch (error) { failure = String(error); }
         finally {
           if (reader) await record("final-before-assert").catch((error) => captureErrors.push(String(error)));
@@ -378,10 +383,12 @@ for (const width of [1440, 390]) {
         expect(denied).toEqual([]);
         expect(api.filter((request) => request.path.endsWith("/feedback/upload"))).toEqual([]);
         expect(events?.overflow).toBe(false);
-        expect(runtimeCleanup, "In-process runtime cleanup must be recorded").not.toBeNull();
+        expect(runtimeCleanup, "Owned runtime fixture cleanup must be recorded").not.toBeNull();
         expect(runtimeCleanup!.errors).toEqual([]);
         expect(runtimeCleanup!.closed).toBe(true);
         expect(runtimeCleanup!.listening).toBe(false);
+        expect(runtimeCleanup!.fixtureProcess.pid).toBeGreaterThan(0);
+        expect(runtimeCleanup!.fixtureProcess.exited).toBe(true);
         expect(runtimeCleanup!.forbidden).toEqual([]);
         expect(runtimeCleanup!.ownershipIds).toEqual([]);
         expect(streamBeforeCleanup).not.toBeNull(); expect(streamCleanup).not.toBeNull();

@@ -4,6 +4,11 @@ import { join } from "node:path";
 
 const instanceKey = Symbol.for("coding-kanban.web-dev-cache-instance");
 
+/** Optimized dependencies are already compiled, even outside node_modules. */
+export function webDevReactOptions() {
+  return { exclude: [/\/node_modules\//, /\/\.dev-runtime\/vite-cache\//] };
+}
+
 /** The config module is evaluated again on reload; the Vite process stays alive. */
 export function webDevCacheInstanceId() {
   globalThis[instanceKey] ??=

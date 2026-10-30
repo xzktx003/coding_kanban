@@ -3,12 +3,19 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
 } from "react";
 import { MessageSquare } from "lucide-react";
 import { requestTimeout } from "./lib/requestTimeout";
+import {
+  beginConnectionCheck,
+  connectionCheckFailed,
+  connectionCheckSucceeded,
+  SessionSyncError,
+} from "./services/sessionConnectionDiagnostics";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { OfflineWorkspace } from "./components/common/OfflineWorkspace";
 import { useCCStore } from "./stores/cc/ccStore";
@@ -17,8 +24,13 @@ import { useWorkspaceStore } from "./stores/useWorkspaceStore";
 import { useCodexStore } from "./components/codex/stores/useCodexStore";
 import { SessionTopNavigation } from "./components/layout/SessionTopNavigation";
 import type { WorkbenchMode } from "../lib/workbench-mode";
-import { loadSessionApp, preloadSessionApp } from "./sessionWorkbenchLoader";
+import { preloadSessionApp } from "./sessionWorkbenchLoader";
+import { SessionAppBody } from "./SessionAppBody";
+import { prepareRestoredInputTarget } from "./services/restoredInputTarget";
+import { prepareSavedAcpConnection } from "./services/acpConnectionRecoveryPointer";
+import { hasSessionWindowRoute } from "./services/sessionWindowContext";
 import "./session-theme.css";
+import "./session-typography.css";
 import "./session-interactions.css";
 import "./session-split-drag.css";
 import "./session-composer.css";
@@ -27,8 +39,8 @@ import "./session-navigation.css";
 import "./session-selection.css";
 import "./session-composer-compact.css";
 
-const SessionAppBody = lazy(loadSessionApp);
 const SessionWorkbenchEffects = lazy(() => import("./SessionWorkbenchEffects"));
+const SessionWindowGate = lazy(() => import("./components/common/SessionWindowGate"));
 
 type ConnectionStatus = "checking" | "ready" | "offline";
 
@@ -81,10 +93,6 @@ function SessionWorkbenchContent({
       state.pendingTabOperations.length > 0 ||
       state.cards.length > 0,
   );
-  const tabsSyncError = useAgentCenterStore((state) => state.tabSyncError);
-  const projectsSyncError = useWorkspaceStore(
-    (state) => state.projectSyncError,
-  );
   const hasCachedCodex = useCodexStore((state) =>
     Object.keys(state.events).some((id) => !!state.historyLoadedMap[id]),
   );
@@ -106,6 +114,11 @@ function SessionWorkbenchContent({
     preloadSessionApp();
   }, []);
 
+  useLayoutEffect(() => {
+    if (!active || (!hasSessionWindowRoute() && prepareSavedAcpConnection())) return;
+    return prepareRestoredInputTarget();
+  }, [active]);
+
   // These services own the active session lifecycle. Importing this module
   // during idle preloading must not start history/SSE work.
   useEffect(() => {
@@ -117,8 +130,9 @@ function SessionWorkbenchContent({
       import("./services/sessionMemoryGovernor"),
       import("./services/sessionTabsSync"),
       import("./services/sessionProjectsSync"),
+      import("./services/sessionManagementClient"),
     ])
-      .then(([cache, retention, memory, tabs, projects]) => {
+      .then(([cache, retention, memory, tabs, projects, management]) => {
         if (disposed) return;
         stops = [
           cache.startSessionTranscriptCache(),
@@ -126,6 +140,7 @@ function SessionWorkbenchContent({
           memory.startSessionMemoryGovernor(),
           tabs.startSessionTabsSync(),
           projects.startSessionProjectsSync(),
+          management.startSessionManagementSync(),
         ];
       })
       .catch((error: unknown) => {
@@ -171,12 +186,13 @@ function SessionWorkbenchContent({
     let tries = 0;
     async function check() {
       const deadline = requestTimeout(controller.signal, 5000);
+      beginConnectionCheck("health");
       try {
         const response = await fetch("/api/session/health", {
           cache: "no-store",
           signal: deadline.signal,
         });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (!response.ok) throw new SessionSyncError("http", response.status);
         const body = await response.json();
         if (controller.signal.aborted) return;
         if (body.status !== "ok") throw new Error("not ready");
@@ -186,15 +202,17 @@ function SessionWorkbenchContent({
           instance.current = body.instance;
         }
         tries = 0;
+        connectionCheckSucceeded("health");
         setConnectionError(null);
         setLoaded(true);
         setStatus("ready");
         timer = setTimeout(check, 10_000);
       } catch (error) {
         if (controller.signal.aborted) return;
+        connectionCheckFailed("health", error);
         setConnectionError(
-          error instanceof Error && /^HTTP \d{3}$/.test(error.message)
-            ? `服务返回 ${error.message}`
+          error instanceof SessionSyncError && error.status
+            ? `服务返回 HTTP ${error.status}`
             : error instanceof Error && error.name === "TimeoutError"
               ? "连接检测请求超时（5 秒）"
               : error instanceof TypeError
@@ -251,12 +269,6 @@ function SessionWorkbenchContent({
               <button onClick={retry}>立即重试</button>
             </SessionNotice>
           )}
-          {(tabsSyncError || projectsSyncError) && (
-            <SessionNotice title="同步待重试" role="status">
-              <span>修改已保存在本机，连接恢复后自动同步。</span>
-              <button onClick={retry}>立即同步</button>
-            </SessionNotice>
-          )}
         </div>
       </div>
       <div className="session-content">
@@ -310,7 +322,9 @@ export default function SessionWorkbench(
 ) {
   return (
     <ThemeProvider>
-      <SessionWorkbenchContent {...props} />
+      {hasSessionWindowRoute() ? <Suspense fallback={<div className="session-connection-state" role="status" data-session-window-gate>正在核对新窗口会话…</div>}>
+        <SessionWindowGate><SessionWorkbenchContent {...props} /></SessionWindowGate>
+      </Suspense> : <SessionWorkbenchContent {...props} />}
     </ThemeProvider>
   );
 }

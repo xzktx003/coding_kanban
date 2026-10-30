@@ -8,6 +8,17 @@ import {
   estimateTransientBytes,
 } from "./codexTranscriptMemoryBudget";
 
+it("keeps a metadata-only turn-start notification without requiring an items array", () => {
+  const event = {
+    method: "turn/started",
+    params: {
+      threadId: "metadata-only",
+      turn: { id: "turn", status: "inProgress" },
+    },
+  } as ServerNotification;
+  expect(compactCodexEventPayload(event)).toBe(event);
+});
+
 const privateBodyMethods = [
   "command/exec/outputDelta",
   "process/outputDelta",
@@ -465,6 +476,78 @@ describe("codex transcript memory budget", () => {
     expect(retainedTurns).toContain("anchor");
     expect(retainedTurns).not.toContain("old");
     expect(retainedTurns).toContain("live");
+  });
+
+  it("count-trims only whole unprotected turns after the byte target is met", () => {
+    const exactCounter = 9_007_199_254_740_995n;
+    const largeMetadata = "opaque metadata ".repeat(4096);
+    const protectedEvent = {
+      method: "item/completed",
+      params: {
+        threadId: "thread",
+        turnId: "anchor",
+        completedAtMs: 1,
+        item: {
+          type: "agentMessage",
+          id: "anchor-answer",
+          text: "keep protected answer",
+          phase: "final_answer",
+          memoryCitation: null,
+        },
+        futureMetadata: { largeMetadata, exactCounter },
+      },
+    } as ServerNotification;
+    const activeDelta = {
+      method: "item/agentMessage/delta",
+      params: {
+        threadId: "thread",
+        turnId: "active",
+        itemId: "active-answer",
+        delta: "still streaming",
+      },
+    } as ServerNotification;
+    const hiddenBody = {
+      method: "command/exec/outputDelta",
+      params: {
+        threadId: "thread",
+        turnId: "old-hidden",
+        processId: "private-process",
+        stream: "stdout",
+        deltaBase64: "cHJpdmF0ZSBvdXRwdXQ=",
+        capReached: false,
+      },
+    } as ServerNotification;
+    const events = [
+      user("old-1"),
+      hiddenBody,
+      protectedEvent,
+      user("old-2"),
+      agent("old-3"),
+      activeDelta,
+    ];
+    expect(estimateTranscriptBytes(events)).toBeLessThanOrEqual(1024 * 1024);
+
+    const result = compactCodexTranscript(events, {
+      maxBytes: 1024 * 1024,
+      targetBytes: 1024 * 1024,
+      maxEvents: 4,
+      targetEvents: 2,
+      activeTurnId: "active",
+      protectedTurnIds: new Set(["anchor"]),
+    });
+
+    expect(result.events).toEqual([protectedEvent, activeDelta]);
+    expect(result.events[0]).toBe(protectedEvent);
+    expect(result.events[1]).toBe(activeDelta);
+    expect((result.events[0].params as any).futureMetadata).toEqual({
+      largeMetadata,
+      exactCounter,
+    });
+    expect(result.hiddenEventCount).toBe(1);
+    expect(result.trimmedEventCount).toBe(4);
+    expect(result.compactedPayloadCount).toBe(0);
+    expect(result.estimatedBytes).toBeLessThanOrEqual(1024 * 1024);
+    expect(result.oldestTurnId).toBe("anchor");
   });
 
   it("bounds an oversized active turn by keeping user text and newest assistant", () => {

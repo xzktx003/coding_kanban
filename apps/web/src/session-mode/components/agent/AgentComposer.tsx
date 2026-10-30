@@ -3,14 +3,12 @@ import { QuestionComposer } from "@session/features/async-questions/QuestionComp
 import { useAgentInteractionVisible } from "@session/session-dom";
 import { useCCStore } from "@session/stores/cc";
 import { synchronizeBuiltinInputTarget } from "@session/services/builtinInputNavigation";
-import { useEffect } from "react";
-import { AcpComposer } from "@session/components/acp/AcpComposer";
-import { Composer as CCComposer } from "@session/components/cc/composer";
-import { Composer as CodexComposer } from "@session/components/codex/composer";
+import { lazy, Suspense, useEffect } from "react";
+import { Composer as CodexComposer } from "@session/components/codex/composer/Composer";
 import { useAgentCenterStore } from "@session/stores";
 import { useAcpStore } from "@session/stores/useAcpStore";
 import { useAgentSettingsStore } from "@session/stores/useAgentSettingsStore";
-import { WorkspaceSwitcher } from "../common";
+import { WorkspaceSwitcher } from "../common/WorkspaceSwitcher";
 import { selectedAgentCard } from "@session/stores/useAgentCenterStore";
 import { useSessionName } from "@session/stores/useSessionNameStore";
 import { useCodexStore } from "@session/components/codex/stores";
@@ -19,6 +17,17 @@ import {
   matchesNativeCodexTarget,
   useNativeCodexTargetStore,
 } from "../../../codex-mode/native-codex-target";
+
+const AcpComposer = lazy(() =>
+  import("@session/components/acp/AcpComposer").then((module) => ({
+    default: module.AcpComposer,
+  })),
+);
+const CCComposer = lazy(() =>
+  import("@session/components/cc/composer").then((module) => ({
+    default: module.Composer,
+  })),
+);
 
 const focusCCInput = () =>
   window.dispatchEvent(new Event("cc-input-focus-request"));
@@ -118,25 +127,36 @@ export function AgentComposer() {
     <div className="flex flex-col session-composer-target-container">
       {/* Input area */}
       <div className="shrink-0">
-        {acpActive ? (
-          <AcpComposer targetLabel={targetLabel} />
-        ) : mismatchedTarget ? (
-          <div role="status" className="p-3 text-sm text-muted-foreground">
-            正在同步会话输入目标…
-          </div>
-        ) : effectiveAgent === "cc" ? (
-          <CCComposer targetLabel={targetLabel} />
-        ) : currentThreadId ? (
-          <QuestionComposer
-            compact
-            key={currentThreadId}
-            threadId={currentThreadId}
-          >
+        <Suspense
+          fallback={
+            <div
+              role="status"
+              className="min-h-20 p-3 text-sm text-muted-foreground"
+            >
+              正在准备输入区…
+            </div>
+          }
+        >
+          {acpActive ? (
+            <AcpComposer targetLabel={targetLabel} />
+          ) : mismatchedTarget ? (
+            <div role="status" className="p-3 text-sm text-muted-foreground">
+              正在同步会话输入目标…
+            </div>
+          ) : effectiveAgent === "cc" ? (
+            <CCComposer targetLabel={targetLabel} />
+          ) : currentThreadId ? (
+            <QuestionComposer
+              compact
+              key={currentThreadId}
+              threadId={currentThreadId}
+            >
+              <CodexComposer targetLabel={targetLabel} />
+            </QuestionComposer>
+          ) : (
             <CodexComposer targetLabel={targetLabel} />
-          </QuestionComposer>
-        ) : (
-          <CodexComposer targetLabel={targetLabel} />
-        )}
+          )}
+        </Suspense>
       </div>
       {!currentAgentCardId && <WorkspaceSwitcher />}
     </div>

@@ -1,3 +1,4 @@
+import { sessionWindowStorageName } from "@session/services/sessionWindowContext";
 import { requestSessionNavigation } from "../services/sessionNavigationGuard";
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
@@ -162,7 +163,7 @@ export const useLayoutStore = create<LayoutStore>()(
       setHasSeenBotTab: (hasSeenBotTab) => set({ hasSeenBotTab }),
     }),
     {
-      name: 'kanban.session.layout-storage',
+      name: sessionWindowStorageName("kanban.session.layout-storage"),
       version: 8,
       partialize: (state) => ({
         isSidebarOpen: state.isSidebarOpen,

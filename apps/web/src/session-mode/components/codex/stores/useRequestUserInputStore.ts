@@ -2,7 +2,7 @@ import { deliverRpc, rpcRequestContext } from "./rpcLifecycle";
 import { create } from "zustand";
 import type { RequestId } from "@session/bindings";
 import type { ToolRequestUserInputResponse } from "@session/bindings/v2";
-import { respondToRequestUserInput } from "@session/services";
+import { respondToRequestUserInput } from "@session/services/apiAdapt/codex";
 
 // Older app-server versions omit flags/descriptions. Keep that compatibility,
 // including isSecret and nullable options from the generated protocol.

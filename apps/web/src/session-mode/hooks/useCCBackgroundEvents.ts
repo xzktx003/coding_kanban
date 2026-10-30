@@ -1,4 +1,5 @@
 import { useSessionAttentionStore } from "../stores/useSessionAttentionStore";
+import { claudeSessionMatchesEvent,noteClaudeEvent } from "../services/claudeConnectionIdentity";
 import { useEffect } from "react";
 import { toast } from "sonner";
 import { openEventStream, type EventEnvelope } from "../lib/eventStream";
@@ -25,16 +26,19 @@ export function handleCCBackgroundEvent(event: EventEnvelope) {
   const message = permission
     ? ({ type: "permission_request", ...permission } as CCMessage)
     : (event.payload as CCMessage);
-  const id =
+  const eventId =
     permission?.sessionId ?? (message as { session_id?: string }).session_id;
-  if (!id) return;
+  if (!eventId) return;
   const store = useCCStore.getState();
+  const targets=[...new Set([...(store.activeSessionId?[store.activeSessionId]:[]),...Object.keys(store.sessionLoadingMap),...Object.keys(store.sessionMessagesMap)])].filter(id=>claudeSessionMatchesEvent(id,eventId));
+  for(const id of targets){
+  noteClaudeEvent(id);
   if (
     id !== store.activeSessionId &&
     !(id in store.sessionLoadingMap) &&
     !(id in store.sessionMessagesMap)
   )
-    return;
+    continue;
   store.addMessageToSession(id, message);
   if (message.type === "result" && !message.is_error)
     useSessionAttentionStore
@@ -65,6 +69,7 @@ export function handleCCBackgroundEvent(event: EventEnvelope) {
     void notifyDesktop("Claude 任务已完成", undefined, () =>
       toast.success("Claude 任务已完成"),
     );
+  }
 }
 export function useCCBackgroundEvents() {
   useEffect(() => {

@@ -10,7 +10,7 @@ import {
 } from "@floating-ui/dom";
 import { useQueueItemDragging } from "./QueueReorder";
 import { fileSrc } from "@session/hooks/runtime";
-import { CodexMarkdown } from "../presentation/CodexMarkdown";
+import { DeferredCodexMarkdown } from "../presentation/DeferredCodexMarkdown";
 import {
   useAgentInteractionVisible,
   sessionPortalContainer,
@@ -263,7 +263,7 @@ export function QueueMessagePreview({
               data-queue-preview-clamp
               className="session-queue-preview-clamp"
             >
-              <CodexMarkdown
+              <DeferredCodexMarkdown
                 value={summary}
                 threadId={threadId}
                 headingAsText

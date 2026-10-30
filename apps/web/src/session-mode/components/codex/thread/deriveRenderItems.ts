@@ -1,10 +1,8 @@
 import type { ServerNotification } from "@session/bindings";
 import { isTranscriptMetadataOnly } from "../presentation/transcriptMetadata";
-import type {
-  CommandAction,
-  ThreadItem,
-  TurnStatus,
-} from "@session/bindings/v2";
+import { isCachedTurnExecutionUnverified } from "@session/services/cachedTurnExecutionView";
+import type { RenderTermination } from "../presentation/renderTermination";
+import type { CommandAction, ThreadItem } from "@session/bindings/v2";
 
 export type CommandActionSource = {
   commandItemId: string;
@@ -16,7 +14,7 @@ export type CommandActionSource = {
   durationMs?: number | null;
   startedAtMs?: number | null;
   exitCode?: number | null;
-  termination?: TurnStatus;
+  termination?: RenderTermination;
   transcriptMetadataOnly?: boolean;
 };
 
@@ -88,7 +86,7 @@ export function deriveRenderItems(events: ServerNotification[]): RenderItem[] {
   const finishTurn = (
     threadId: string,
     turnId: string,
-    status: TurnStatus,
+    status: RenderTermination,
     finalItems: ThreadItem[] = [],
   ) => {
     const snapshots = new Map(
@@ -113,7 +111,7 @@ export function deriveRenderItems(events: ServerNotification[]): RenderItem[] {
         (source.status === "inProgress" || !source.status)
       )
         source.termination = status;
-      finalized.add(key);
+      if (status !== "unverified") finalized.add(key);
     }
   };
 
@@ -220,7 +218,9 @@ export function deriveRenderItems(events: ServerNotification[]): RenderItem[] {
         finishTurn(
           event.params.threadId,
           event.params.turn.id,
-          event.params.turn.status,
+          isCachedTurnExecutionUnverified(event)
+            ? "unverified"
+            : event.params.turn.status,
           event.params.turn.items,
         );
       flushCmdBuffer(true);

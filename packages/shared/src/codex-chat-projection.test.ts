@@ -2,6 +2,17 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { projectCodexChatValue } from "./codex-chat-projection.ts";
 
+test("generated image quota failure keeps only exact native small metadata and drops all result bytes", () => {
+  const item = { type: "imageGeneration", id: "quota", status: "failed", result: "x".repeat(4 * 1024 * 1024), failure: { type: "usageLimitExceeded", limitId: "image_gen", resetsAt: 1_900_000_000, private: "drop" } };
+  const projected = projectCodexChatValue(item) as any;
+  assert.deepEqual(projected.failure, { type: "usageLimitExceeded", limitId: "image_gen", resetsAt: 1_900_000_000 });
+  assert.equal(projected.result, undefined);
+  assert.ok(JSON.stringify(projected).length < 512);
+  assert.equal(projectCodexChatValue(projected), projected);
+  for (const failure of [{ type: "failed", limitId: "image_gen", resetsAt: null }, { type: "usageLimitExceeded", limitId: "tokens", resetsAt: null }, { type: "usageLimitExceeded", limitId: "image_gen", resetsAt: "tomorrow" }])
+    assert.equal((projectCodexChatValue({ ...item, failure }) as any).failure, undefined);
+});
+
 test("MCP projection keeps bounded public arguments and drops the result body", () => {
   const projected = projectCodexChatValue({
     type: "mcpToolCall",
@@ -15,6 +26,18 @@ test("MCP projection keeps bounded public arguments and drops the result body", 
   assert.equal(projected.arguments.nested, undefined);
   assert.equal(projected.result, null);
   assert.equal(projectCodexChatValue(projected), projected);
+});
+test("MCP App projection retains only a bounded exact resource URI, never HTML or resource content", () => {
+  const item = { type: "mcpToolCall", id: "widget", server: "local", tool: "show", appContext: { connectorId: "local", appName: "Example", resourceUri: "ui://example/view", private: "secret" }, result: { content: "private HTML" } };
+  const projected = projectCodexChatValue(item) as any;
+  assert.equal(projected.appContext.resourceUri, "ui://example/view");
+  assert.equal(projected.appContext.private, undefined);
+  assert.equal(projected.result, null);
+  assert.equal(projectCodexChatValue(projected), projected);
+  const legacy = projectCodexChatValue({ type: "mcpToolCall", mcpAppResourceUri: "ui://legacy/view" }) as any;
+  assert.equal(legacy.mcpAppResourceUri, "ui://legacy/view");
+  for (const uri of ["ui://" + "x".repeat(5000), "javascript:alert(1)", "ui://secret\nother"])
+    assert.equal((projectCodexChatValue({ type: "mcpToolCall", mcpAppResourceUri: uri }) as any).mcpAppResourceUri, undefined);
 });
 
 test("auto-review projection keeps the public action label and drops oversized bodies", () => {
@@ -59,6 +82,53 @@ test("MCP authentication challenges survive chat projection without result bodie
 test("MCP challenge without scopes remains actionable, oversized scopes never become a partial OAuth grant",()=>{
  assert.deepEqual((projectCodexChatValue({type:"mcpToolCall",result:{_meta:{"mcp/www_authenticate":"Bearer"}}}) as any).nativeMcpAuthChallenge,{scopes:[]});
  assert.deepEqual((projectCodexChatValue({type:"mcpToolCall",result:{_meta:{"mcp/www_authenticate":'Bearer scope="'+"x".repeat(20000)+'"'}}}) as any).nativeMcpAuthChallenge,{scopes:[],truncated:true});
+});
+
+test("large file diff metadata survives a second projection without becoming an empty preview", () => {
+  const projected = projectCodexChatValue({
+    type: "fileChange",
+    id: "large-patch",
+    status: "completed",
+    changes: [
+      {
+        path: "/project/large.py",
+        kind: { type: "update", move_path: null },
+        diff: `--- a/large.py\n+++ b/large.py\n${"+large-body-line\n".repeat(1800)}`,
+      },
+    ],
+  }) as any;
+  assert.equal(projected.changes[0].diff, "");
+  assert.equal(projected.changes[0].transcriptMetadataOnly, true);
+  const transported = JSON.parse(JSON.stringify(projected));
+  const projectedAgain = projectCodexChatValue(transported) as any;
+  assert.deepEqual(projectedAgain, transported);
+  assert.equal(projectedAgain.changes[0].transcriptMetadataOnly, true);
+  assert.equal(projectedAgain.changes[0].diff, "");
+  const shortDiff = "@@ -1 +1 @@\n-old\n+new\n";
+  const short = projectCodexChatValue({
+    type: "fileChange",
+    changes: [
+      {
+        path: "/project/short.py",
+        kind: { type: "update", move_path: null },
+        diff: shortDiff,
+      },
+    ],
+  }) as any;
+  assert.equal(short.changes[0].diff, shortDiff);
+  assert.equal(short.changes[0].transcriptMetadataOnly, undefined);
+  const unknownEmpty = projectCodexChatValue({
+    type: "fileChange",
+    changes: [
+      {
+        path: "/project/unknown.py",
+        kind: { type: "update", move_path: null },
+        diff: "",
+      },
+    ],
+  }) as any;
+  assert.equal(unknownEmpty.changes[0].diff, "");
+  assert.equal(unknownEmpty.changes[0].transcriptMetadataOnly, undefined);
 });
 
  test("auto-review does not expose an oversized command as a truncated executable action", () => {

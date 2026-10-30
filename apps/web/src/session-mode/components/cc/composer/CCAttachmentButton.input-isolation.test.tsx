@@ -52,7 +52,7 @@ test("file attachment insertion reads the current Claude session at click time",
   render(<CCAttachmentButton />);
   act(() => useCCStore.setState({ activeSessionId: "attachment-b" }));
   fireEvent.click(screen.getByRole("button", { name: "添加附件与上下文" }));
-  fireEvent.click(screen.getByRole("button", { name: "文件和文件夹" }));
+  fireEvent.click(screen.getByRole("button", { name: "上传设备文件" }));
   await waitFor(() =>
     expect(readDraft(sessionDraftKey("cc", "attachment-b")).text).toBe(
       "[entry.ts](entry.ts)",

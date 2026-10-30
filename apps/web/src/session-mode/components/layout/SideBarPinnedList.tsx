@@ -110,7 +110,7 @@ export function SideBarPinnedList() {
               className="session-row-menu"
               onClick={(e) => {
                 e.stopPropagation();
-                unpin(item.id);
+                unpin(item.id, item.kind);
               }}
             >
               <PinOff />

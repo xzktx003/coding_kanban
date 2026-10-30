@@ -6,6 +6,25 @@ import test from "node:test";
 
 import { FeishuReplyBindingStore } from "./feishu-reply-binding-store.js";
 
+test("native card account/runtime provenance persists through reply chains and cannot be rebound by replay", () => {
+  const directory = mkdtempSync(join(tmpdir(), "kanban-native-card-scope-")), statePath = join(directory, "bindings.json");
+  try {
+    const store = new FeishuReplyBindingStore({ statePath });
+    const input = { sessionId: "session-codex:native-thread", sessionModeThreadId: "native-thread", sessionModeScope: "original-scope", sessionModeNamespace: "original-account", completionId: "completed-turn", messages: [{ messageId: "om_card", chatId: "oc_private" }] };
+    store.record(input);
+    store.record({ ...input, sessionModeScope: "later-scope", sessionModeNamespace: "later-account" });
+    const parent = store.resolve("om_card")!;
+    assert.equal(parent.sessionModeScope, "original-scope"); assert.equal(parent.sessionModeNamespace, "original-account");
+    store.recordProcessedReply({ messageId: "om_reply", parent, codexThreadId: "native-thread" });
+    const reloaded = new FeishuReplyBindingStore({ statePath });
+    assert.equal(reloaded.resolve("om_reply")?.sessionModeScope, "original-scope");
+    assert.equal(reloaded.resolve("om_reply")?.sessionModeNamespace, "original-account");
+    store.record({ ...input, sessionModeScope: undefined, sessionModeNamespace: undefined, messages: [{ messageId: "om_legacy", chatId: "oc_private" }] });
+    store.record({ ...input, messages: [{ messageId: "om_legacy", chatId: "oc_private" }] });
+    assert.equal(store.resolve("om_legacy")?.sessionModeScope, undefined, "a context-free older card must not be silently upgraded to the current account");
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
 test("persists every notification part as a private reply binding", () => {
   const directory = mkdtempSync(join(tmpdir(), "kanban-feishu-replies-"));
   const statePath = join(directory, "reply-bindings.json");

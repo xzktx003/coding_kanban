@@ -1,10 +1,10 @@
-import { AnimatePresence, motion } from 'framer-motion';
-import { ChevronDown, ChevronRight } from 'lucide-react';
-import { useState } from 'react';
-import { Badge } from '@session/components/ui/badge';
-import type { ToolResultBlock, ToolUseBlock } from '../../types/messages';
-import { ToolCardView } from '../../presentation/cards';
-import { useCardContext } from '../../presentation/CardContext';
+import { AnimatePresence, motion } from "framer-motion";
+import { ChevronDown, ChevronRight } from "lucide-react";
+import { useTranscriptRowBoolean } from "@session/components/agent/TranscriptRowState";
+import { Badge } from "@session/components/ui/badge";
+import type { ToolResultBlock, ToolUseBlock } from "../../types/messages";
+import { ToolCardView } from "../../presentation/cards";
+import { useCardContext } from "../../presentation/CardContext";
 
 const MAX_VISIBLE_LOADING = 5;
 
@@ -35,11 +35,11 @@ function ItemRow({ block, inlineError, result }: ExploredItem) {
 }
 
 export function ExploredGroup({ items, isCompleted }: Props) {
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [isExpanded, setIsExpanded] = useTranscriptRowBoolean("explored");
 
-  const readCount = items.filter((i) => i.block.name === 'Read').length;
+  const readCount = items.filter((i) => i.block.name === "Read").length;
   const searchCount = items.filter(
-    (i) => i.block.name === 'Grep' || i.block.name === 'Glob'
+    (i) => i.block.name === "Grep" || i.block.name === "Glob",
   ).length;
 
   return (
@@ -58,8 +58,12 @@ export function ExploredGroup({ items, isCompleted }: Props) {
               <motion.div
                 key={item.block.id}
                 initial={{ height: 0, opacity: 0 }}
-                animate={isHidden ? { height: 0, opacity: 0 } : { height: 'auto', opacity: 1 }}
-                transition={{ duration: 0.2, ease: 'easeOut' }}
+                animate={
+                  isHidden
+                    ? { height: 0, opacity: 0 }
+                    : { height: "auto", opacity: 1 }
+                }
+                transition={{ duration: 0.2, ease: "easeOut" }}
                 className="overflow-hidden"
               >
                 <ItemRow
@@ -98,7 +102,7 @@ export function ExploredGroup({ items, isCompleted }: Props) {
             </Badge>
             <span className="text-[10px] text-muted-foreground">
               {readCount > 0 && `Read ${readCount}`}
-              {readCount > 0 && searchCount > 0 && ' · '}
+              {readCount > 0 && searchCount > 0 && " · "}
               {searchCount > 0 && `Searched ${searchCount}×`}
             </span>
           </button>
@@ -107,9 +111,9 @@ export function ExploredGroup({ items, isCompleted }: Props) {
             {isExpanded && (
               <motion.div
                 initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
+                animate={{ height: "auto", opacity: 1 }}
                 exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.2, ease: 'easeOut' }}
+                transition={{ duration: 0.2, ease: "easeOut" }}
                 className="overflow-hidden mt-0.5 pl-4"
               >
                 {items.map((item) => (

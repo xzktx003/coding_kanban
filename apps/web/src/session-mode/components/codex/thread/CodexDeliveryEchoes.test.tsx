@@ -1,6 +1,8 @@
 import { act, render, screen } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { webcrypto } from "node:crypto";
+vi.mock("./CodexSteerReceipts", () => ({ CodexSteerReceipts: () => null }));
+vi.mock("@session/services/nativeOperationContext", () => ({ readNativeOperationContext: vi.fn(async () => ({ scopeToken: "fixture-runtime-scope", namespace: "fixture-history" })) }));
 vi.mock("../items/UserMessageItem", () => ({
   UserMessageItem: ({ content }: any) => (
     <div>

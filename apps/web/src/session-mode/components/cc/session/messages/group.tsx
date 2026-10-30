@@ -17,6 +17,7 @@ export const SILENT_TOOLS = new Set(['Read', 'Glob', 'Grep']);
  */
 export function isSilentOnlyMessage(msg: CCMessage): msg is AssistantMessage {
   if (msg.type !== 'assistant') return false;
+  if (msg.truncated) return false;
   const blocks = msg.message.content;
   const toolUses = blocks.filter((b): b is ToolUseBlock => b.type === 'tool_use');
   if (toolUses.length === 0) return false;
@@ -33,6 +34,7 @@ export function isSilentOnlyMessage(msg: CCMessage): msg is AssistantMessage {
  */
 export function shouldSkipUserMessage(msg: CCMessage): boolean {
   if (msg.type !== 'user') return false;
+  if (msg.truncated) return false;
   if (msg.text) return false;
 
   const blocks: ContentBlock[] = msg.content ?? [];

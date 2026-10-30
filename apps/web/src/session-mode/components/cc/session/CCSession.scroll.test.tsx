@@ -34,6 +34,7 @@ it("switching sessions resets history reading and jumps immediately to latest, i
     clientHeight: { configurable: true, value: 400 },
     scrollTop: { configurable: true, writable: true, value: 100 },
   });
+  fireEvent.wheel(history, { deltaY: -100 });
   fireEvent.scroll(history);
   scroll.mockClear();
   view.rerender(<CCSession sessionId="b" disableListener />);

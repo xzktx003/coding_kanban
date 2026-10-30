@@ -1,11 +1,12 @@
 import { create } from "zustand";
+import { sessionWindowStorageName } from "@session/services/sessionWindowContext";
 import { persist } from "zustand/middleware";
 import type { AgentMention } from "@agent-orchestrator/shared";
 export const useAgentMentionDrafts = create<{
   drafts: Record<string, AgentMention[]>;
 }>()(
   persist(() => ({ drafts: {} }), {
-    name: "kanban.session.agent-mentions",
+    name: sessionWindowStorageName("kanban.session.agent-mentions"),
     version: 1,
   }),
 );

@@ -211,3 +211,26 @@ it("keeps a pending report when only the plan changes within the same workspace"
     expect(feedbackUploads.getSnapshot()[0]?.status).toBe("uploaded"),
   );
 });
+
+it("reconnect revokes report UI while an already sent upload may finish without reviving it", async () => {
+  let finish!: (value: unknown) => void;
+  mocks.fetch.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  startFeedbackUpload(
+    "thread-A",
+    "details",
+    { classification: "bug", includeLogs: false },
+    "owner-A",
+  );
+  mocks.subscriber.onResync?.();
+  expect(feedbackUploads.getSnapshot()).toEqual([]);
+  finish(receipt({ threadId: "late" }));
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(feedbackUploads.getSnapshot()).toEqual([]);
+  expect(mocks.fetch).toHaveBeenCalledTimes(1);
+});

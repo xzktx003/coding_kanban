@@ -1,3 +1,4 @@
+import {AcpRuntimeOwners} from "@session/components/acp/AcpRuntimeOwners";
 import { useShallow } from "zustand/react/shallow";
 import { lazy, Suspense } from "react";
 import { useCodexStore } from "@session/components/codex/stores";
@@ -6,6 +7,7 @@ import { useAcpStore } from "@session/stores/useAcpStore";
 import { useAgentCenterStore } from "@session/stores/useAgentCenterStore";
 import { useAgentSettingsStore } from "@session/stores/useAgentSettingsStore";
 import { useSubagentStore } from "@session/features/subagents/store";
+import { AgentComposer } from "./AgentComposer";
 import {
   useRestoreSessionTabs,
   useSessionTabActions,
@@ -20,11 +22,6 @@ const CCSession = lazy(
   () => import("@session/components/cc/session/CCSession"),
 );
 const AcpSession = lazy(() => import("@session/components/acp/AcpSession"));
-const AgentComposer = lazy(() =>
-  import("./AgentComposer").then((module) => ({
-    default: module.AgentComposer,
-  })),
-);
 const AgentCard = lazy(() =>
   import("./AgentCard").then((module) => ({ default: module.AgentCard })),
 );
@@ -103,6 +100,7 @@ export default function AgentView() {
 
   return (
     <div className="session-agent-view flex flex-col min-h-0 h-full">
+      <AcpRuntimeOwners />
       {acpActive && (
         <Suspense fallback={null}>
           <AgentViewHeader />

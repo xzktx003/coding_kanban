@@ -21,9 +21,8 @@ import { recentModelConfigs, resetRecentModels } from "./recentModelConfigs";
 import { useComposerDraftStore } from "./v2/drafts";
 
 const api = vi.hoisted(() => ({ listModels: vi.fn(), listOtherModels: vi.fn(), listConfigProviders: vi.fn(), listProviderPresets: vi.fn() }));
-vi.mock("@session/services/apiAdapt", async (original) => ({ ...(await original<typeof import("@session/services/apiAdapt")>()), ...api }));
 const rpc = vi.hoisted(() => ({ threadStart: vi.fn(), turnStart: vi.fn(), turnSteer: vi.fn(), turnInterrupt: vi.fn(), respondToPermissionsApproval: vi.fn() }));
-vi.mock("@session/services/apiAdapt/codex", async (original) => ({ ...(await original<typeof import("@session/services/apiAdapt/codex")>()), ...rpc }));
+vi.mock("@session/services/apiAdapt/codex", async (original) => ({ ...(await original<typeof import("@session/services/apiAdapt/codex")>()), ...api, ...rpc }));
 const A = "e12-owner-a", B = "e12-owner-b", CWD = "/fixture/e12";
 const OWNER = sessionDraftKey("codex", A, CWD), OTHER = sessionDraftKey("codex", B);
 const SOL = "gpt-5.6-sol", TERRA = "gpt-5.6-terra", EMPTY = "e12-known-empty", UNKNOWN = "e12-unknown";

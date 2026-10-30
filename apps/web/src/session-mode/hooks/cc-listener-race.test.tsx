@@ -8,7 +8,7 @@ const api = vi.hoisted(() => ({
   ccGetSessionMessages: vi.fn(),
   gitCreateWorktree: vi.fn(),
 }));
-vi.mock("@session/services", () => api);
+vi.mock("@session/services/apiAdapt/cc", () => api);
 vi.mock("@session/services/apiAdapt/git", () => api);
 vi.mock("@session/hooks/runtime", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@session/hooks/runtime")>()),

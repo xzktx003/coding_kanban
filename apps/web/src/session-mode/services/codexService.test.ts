@@ -1,3 +1,4 @@
+vi.mock("./nativeOperationContext",()=>({readNativeOperationContext:async()=>({namespace:"private-fixture-native-domain",scopeToken:"a".repeat(64)})}));
 import { beforeEach, expect, it, vi } from "vitest";
 const api = vi.hoisted(() => ({
   threadStart: vi.fn(),
@@ -8,6 +9,9 @@ const api = vi.hoisted(() => ({
   turnStart: vi.fn(),
 }));
 vi.mock("./apiAdapt", () => api);
+vi.mock("./apiAdapt/codex", () => api);
+vi.mock("./apiAdapt/git", () => api);
+vi.mock("./apiAdapt/skills", () => api);
 import { cancelCodexHistoryRead, codexService } from "./codexService";
 import { enqueueSessionRead } from "./sessionReadQueue";
 import { useSessionSyncStore } from "../stores/useSessionSyncStore";
@@ -30,6 +34,7 @@ import {
   useThreadModelStore,
 } from "../stores/useThreadModelStore";
 beforeEach(() => {
+  for (let i=localStorage.length-1;i>=0;i--) { const key=localStorage.key(i); if(key?.startsWith("kanban.session.execution")) localStorage.removeItem(key); }
   vi.clearAllMocks();
   useThreadModelStore.setState({ threads: {} });
   useWorkspaceStore.setState({ cwd: "/project" });
@@ -488,7 +493,7 @@ it("sends the selected collaboration mode on each actual turn, including an exis
 it("enables questions for new threads and reads existing history without applying execution config", async () => {
   useConfigStore.setState({ threadCwdMode: "local" });
   api.threadStart.mockResolvedValueOnce({
-    thread: { id: "questions", turns: [] },
+    thread: { id: "questions", cwd:"/project", turns: [] },
     model: "test-model",
   });
   await codexService.threadStart();
@@ -515,7 +520,7 @@ it("routes explicit native auto review while preserving owner sandbox policy", a
     approvalsReviewer: "auto_review",
   });
   api.threadStart.mockResolvedValueOnce({
-    thread: { id: "auto-review", preview: "", turns: [] },
+    thread: { id: "auto-review", cwd:"/project", preview: "", turns: [] },
     model: "test-model",
   });
   await codexService.threadStart();
@@ -545,7 +550,7 @@ it("keeps explicit user review for read-only and danger-full-access modes", asyn
     sandbox: "read-only",
     approvalPolicy: "untrusted",
   });
-  api.threadStart.mockResolvedValueOnce({ thread: { id: "read", turns: [] } });
+  api.threadStart.mockResolvedValueOnce({ thread: { id: "read", cwd:"/project", turns: [] } });
   await codexService.threadStart();
   expect(api.threadStart.mock.calls.at(-1)?.[0].approvalsReviewer).toBe("user");
 
@@ -553,7 +558,7 @@ it("keeps explicit user review for read-only and danger-full-access modes", asyn
     sandbox: "danger-full-access",
     approvalPolicy: "never",
   });
-  api.threadStart.mockResolvedValueOnce({ thread: { id: "full", turns: [] } });
+  api.threadStart.mockResolvedValueOnce({ thread: { id: "full", cwd:"/project", turns: [] } });
   await codexService.threadStart();
   expect(api.threadStart.mock.calls.at(-1)?.[0].approvalsReviewer).toBe("user");
 });
@@ -1062,6 +1067,120 @@ it("cached read-only selection resolves before native verification without takin
   });
 });
 
+it("a cached selection preserves the active native turn instead of deriving interruption from older transcript rows", async () => {
+  const id = "active-native-cached-target";
+  useCodexStore.setState({
+    currentThreadId: null,
+    currentTurnId: null,
+    activeThreadIds: [id],
+    historyLoadedMap: { [id]: true },
+    threadStatusMap: { [id]: { type: "active", activeFlags: [] } },
+    turnTimingMap: {
+      [id]: {
+        turnId: "running-native",
+        status: "inProgress",
+        startedAtMs: 1000,
+        durationMs: null,
+      },
+    },
+    events: {
+      [id]: [
+        {
+          method: "turn/completed",
+          params: {
+            threadId: id,
+            turn: { id: "old-interrupted", status: "interrupted", items: [] },
+          },
+        },
+      ] as any,
+    },
+  });
+  await codexService.setCurrentThread(id);
+  expect(useCodexStore.getState().currentTurnId).toBe("running-native");
+});
+
+it("an independently inferred history interruption cannot replace current native inProgress until idle is confirmed", async () => {
+  const id = "passive-history-interruption";
+  const nativeTiming = {
+    turnId: "live",
+    status: "inProgress" as const,
+    startedAtMs: 1000,
+    durationMs: null,
+  };
+  useCodexStore.setState({
+    currentThreadId: id,
+    currentTurnId: "live",
+    threads: [],
+    events: {},
+    historyLoadedMap: {},
+    historyLoadingMap: {},
+    threadStatusMap: { [id]: { type: "active", activeFlags: [] } },
+    turnTimingMap: { [id]: nativeTiming },
+  });
+  hydrateThreadModel(id, { model: "fixture-model" });
+  // The accepted native ACK, rather than an optimistic/cache store assignment,
+  // establishes the execution provenance used by passive history recovery.
+  api.turnStart.mockResolvedValueOnce({ turn: { id: "live", status: "inProgress", startedAt: 1, durationMs: null, items: [] } });
+  await codexService.turnStart(id, "native fixture input", [], undefined, undefined, {});
+  const response = {
+    thread: {
+      id,
+      turns: [
+        {
+          id: "live",
+          status: "interrupted",
+          startedAt: 1,
+          durationMs: 10,
+          items: [],
+        },
+      ],
+    },
+    historyPage: { nextCursor: null, earlier: false },
+  };
+  api.threadRead.mockResolvedValueOnce(response);
+  await codexService.loadThreadHistory(id, undefined, {
+    recent: true,
+    background: true,
+  });
+  expect(useCodexStore.getState().turnTimingMap[id]).toEqual(nativeTiming);
+  expect(useCodexStore.getState().currentTurnId).toBe("live");
+  expect(
+    useCodexStore
+      .getState()
+      .events[
+        id
+      ].some((event: any) => event.method === "turn/completed" && event.params.turn.id === "live" && event.params.turn.status === "interrupted"),
+  ).toBe(false);
+  useCodexStore.setState({ threadStatusMap: { [id]: { type: "idle" } } });
+  api.threadRead.mockResolvedValueOnce(response);
+  await codexService.loadThreadHistory(id, undefined, {
+    recent: true,
+    background: true,
+  });
+  expect(useCodexStore.getState().turnTimingMap[id].status).toBe("interrupted");
+  expect(useCodexStore.getState().currentTurnId).toBeNull();
+  useCodexStore.setState({
+    turnTimingMap: {
+      [id]: { ...nativeTiming, status: "completed", durationMs: 50 },
+    },
+  });
+  api.turnStart.mockResolvedValueOnce({ turn: { id: "live", status: "completed", startedAt: 1, durationMs: 50, items: [] } });
+  await codexService.turnStart(id, "accepted fixture final ACK", [], undefined, undefined, {});
+  api.threadRead.mockResolvedValueOnce(response);
+  await codexService.loadThreadHistory(id, undefined, {
+    recent: true,
+    background: true,
+  });
+  expect(useCodexStore.getState().turnTimingMap[id].status).toBe("completed");
+  expect(
+    useCodexStore
+      .getState()
+      .events[
+        id
+      ].some((event: any) => event.method === "turn/completed" && event.params.turn.id === "live" && event.params.turn.status === "interrupted"),
+  ).toBe(false);
+});
+
 it("cancels a read-only history request so a late response cannot restore pruned transcript content", async () => {
   let resolve!: (value: unknown) => void;
   api.threadRead.mockImplementationOnce(
@@ -1084,6 +1203,8 @@ it("cancels a read-only history request so a late response cannot restore pruned
   const pending = codexService.loadThreadHistory("closed-late", undefined, {
     background: true,
   });
+  const cancelled = expect(pending).rejects.toMatchObject({ name: "AbortError" });
+  await vi.waitFor(() => expect(api.threadRead).toHaveBeenCalledOnce());
   expect(useSessionSyncStore.getState().checking["closed-late"]).toBe(true);
 
   cancelCodexHistoryRead("closed-late");
@@ -1101,7 +1222,7 @@ it("cancels a read-only history request so a late response cannot restore pruned
       ],
     },
   });
-  await pending;
+  await cancelled;
 
   const state = useCodexStore.getState();
   expect(state.events["closed-late"]).toBeUndefined();

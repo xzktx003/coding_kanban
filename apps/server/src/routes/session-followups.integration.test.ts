@@ -14,12 +14,16 @@ async function until(check: () => boolean | Promise<boolean>) {
   }
 }
 test(
-  "production HTTP adapter dispatches without a browser and only one gateway owns the journal",
+  "production HTTP adapter submits to the sole native scheduler without a browser and only one gateway owns the journal",
   { timeout: 20000 },
   async () => {
     const root = await mkdtemp(join(tmpdir(), "followup-http-")),
       file = join(root, "queue.json");
     const calls: any[] = [];
+    const adds: any[] = [],
+      queued: any[] = [],
+      unexpected: string[] = [];
+    let settings: any = {};
     const streams = new Set<ServerResponse>();
     let status = "idle",
       seq = 0;
@@ -27,9 +31,33 @@ test(
       const frame = `data: ${JSON.stringify({ seq: ++seq, event: "codex:notification", payload: { method, params: { threadId: "owned-thread", turn } } })}\n\n`;
       for (const s of streams) s.write(frame);
     };
+    const startNext = () => {
+      if (status !== "idle" || !queued.length) return;
+      const row = queued.shift();
+      status = "active";
+      calls.push({
+        threadId: "owned-thread",
+        clientUserMessageId: row.clientUserMessageId,
+        input: row.input,
+        ...settings,
+      });
+      emit("turn/started", {
+        id: "run-" + row.clientUserMessageId,
+        status: "inProgress",
+      });
+    };
     const upstream = createServer(async (req, res) => {
       if (req.url === "/health") {
         res.end(JSON.stringify({ instance: "fixture-runtime" }));
+        return;
+      }
+      if (req.url === "/api/internal/codex/operation-context") {
+        res.end(
+          JSON.stringify({
+            scope: "native-scope",
+            namespace: "native-namespace",
+          }),
+        );
         return;
       }
       if (req.url?.startsWith("/api/events")) {
@@ -51,17 +79,31 @@ test(
         );
         return;
       }
-      if (req.url === "/api/codex/turn/start") {
-        calls.push(body);
-        status = "active";
-        const turn = {
-          id: "run-" + body.clientUserMessageId,
-          status: "inProgress",
-        };
-        emit("turn/started", turn);
-        res.end(JSON.stringify({ turn }));
+      if (req.url === "/api/codex/thread/queue/list") {
+        res.end(JSON.stringify({ data: queued, nextCursor: null }));
         return;
       }
+      if (req.url === "/api/internal/codex/guarded-queue") {
+        assert.equal(body.expectedScope, "native-scope");
+        if (body.method === "thread/settings/update") {
+          settings = body.params;
+          res.end("{}");
+          return;
+        }
+        if (body.method === "thread/queue/add") {
+          const row = {
+            id: "queue-" + body.params.clientUserMessageId,
+            clientUserMessageId: body.params.clientUserMessageId,
+            input: body.params.input,
+          };
+          adds.push(body.params);
+          queued.push(row);
+          startNext();
+          res.end(JSON.stringify({ queuedSubmission: row }));
+          return;
+        }
+      }
+      unexpected.push(req.url ?? "missing");
       res.writeHead(404).end();
     });
     await new Promise<void>((r) => upstream.listen(0, "127.0.0.1", r));
@@ -102,6 +144,7 @@ test(
                 text: id,
                 images: [],
                 parameters: { model: "snapshot" },
+                expectedScope: "native-scope",
               },
             })
           ).statusCode,
@@ -118,19 +161,35 @@ test(
         409,
       );
       const refused = await contender.inject({
-        method: "POST", url: "/api/session/followups/submit",
-        payload: { id: "refused", threadId: "owned-thread", mode: "queue", text: "not admitted", images: [], parameters: {} },
+        method: "POST",
+        url: "/api/session/followups/submit",
+        payload: {
+          id: "refused",
+          threadId: "owned-thread",
+          mode: "queue",
+          text: "not admitted",
+          images: [],
+          parameters: {},
+        },
       });
       assert.equal(refused.statusCode, 409);
       assert.equal(refused.json().code, "FOLLOWUP_QUEUE_OWNED_ELSEWHERE");
       assert.equal(refused.json().deliveryStage, "not-admitted");
-      assert.equal((await q.get("owned-thread")).items.some(item => item.id === "refused"), false);
+      assert.equal(
+        (await q.get("owned-thread")).items.some(
+          (item) => item.id === "refused",
+        ),
+        false,
+      );
       assert.equal(calls.length, 1);
+      assert.equal(adds.length, 2);
       status = "idle";
       emit("turn/completed", { id: "run-one", status: "completed" });
+      startNext(); // The official service, never the gateway, drains its queue.
       await until(() => calls.length === 2);
       assert.equal(calls[1].input[0].text, "two");
-      // A sequence gap must pause outstanding work instead of trusting an incomplete history.
+      // A sequence gap cannot replay accepted messages or create a local
+      // scheduler. The official service retains and advances its own queue.
       await q.submit({
         id: "three",
         threadId: "owned-thread",
@@ -138,13 +197,25 @@ test(
         text: "three",
         images: [],
         parameters: {},
+        expectedScope: "native-scope",
       });
       seq += 2;
       emit("turn/completed", { id: "run-two", status: "completed" });
       status = "idle";
-      await until(async () => Boolean((await q.get("owned-thread")).paused));
+      startNext();
+      await until(() => calls.length === 3);
       await q.tick();
-      assert.equal(calls.length, 2);
+      assert.equal(calls.length, 3);
+      assert.equal(
+        adds.length,
+        3,
+        "an SSE gap never re-adds accepted native messages",
+      );
+      assert.deepEqual(
+        unexpected,
+        [],
+        "the gateway must never use a second turn/start scheduler",
+      );
     } finally {
       await contender.close();
       await app.close();

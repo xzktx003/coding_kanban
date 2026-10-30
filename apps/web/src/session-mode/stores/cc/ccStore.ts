@@ -1,3 +1,4 @@
+import { admitClaudeTranscript } from "../../services/providerTranscriptAdmission";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { CCMessage } from "@session/components/cc/types/messages";
@@ -159,7 +160,11 @@ export const useCCStore = create<CCStoreState>()(
       addMessage: (message) =>
         set((state) => {
           const sid = state.activeSessionId;
-          const newMessages = [...state.messages, message];
+          const newMessages = admitClaudeTranscript(
+            sid,
+            [...state.messages, message],
+            state.messages,
+          );
           const isDone = message.type === "result";
           const updatedMap = sid
             ? { ...state.sessionMessagesMap, [sid]: newMessages }
@@ -199,7 +204,11 @@ export const useCCStore = create<CCStoreState>()(
       addMessageToSession: (sessionId, message) =>
         set((state) => {
           const prev = state.sessionMessagesMap[sessionId] ?? [];
-          const updated = [...prev, message];
+          const updated = admitClaudeTranscript(
+            sessionId,
+            [...prev, message],
+            prev,
+          );
           const isDone = message.type === "result";
           const isActive = state.activeSessionId === sessionId;
           // Track the start of each processing cycle:
@@ -244,8 +253,12 @@ export const useCCStore = create<CCStoreState>()(
         })),
       updateMessage: (index, message) =>
         set((state) => {
-          const updatedMessages = state.messages.map((m, i) =>
-            i === index ? ({ ...m, ...message } as CCMessage) : m,
+          const updatedMessages = admitClaudeTranscript(
+            state.activeSessionId,
+            state.messages.map((m, i) =>
+              i === index ? ({ ...m, ...message } as CCMessage) : m,
+            ),
+            state.messages,
           );
           const updatedMap = state.activeSessionId
             ? {
@@ -258,8 +271,12 @@ export const useCCStore = create<CCStoreState>()(
       updateSessionMessage: (sessionId, index, message) =>
         set((state) => {
           const sessionMsgs = state.sessionMessagesMap[sessionId] ?? [];
-          const updated = sessionMsgs.map((m, i) =>
-            i === index ? ({ ...m, ...message } as CCMessage) : m,
+          const updated = admitClaudeTranscript(
+            sessionId,
+            sessionMsgs.map((m, i) =>
+              i === index ? ({ ...m, ...message } as CCMessage) : m,
+            ),
+            sessionMsgs,
           );
           const updatedMap = {
             ...state.sessionMessagesMap,
@@ -272,7 +289,25 @@ export const useCCStore = create<CCStoreState>()(
             ...(isActive ? { messages: updated } : {}),
           };
         }),
-      setMessages: (messages) => set({ messages }),
+      setMessages: (messages) =>
+        set((state) => {
+          const admitted = admitClaudeTranscript(
+            state.activeSessionId,
+            messages,
+            state.messages,
+          );
+          return {
+            messages: admitted,
+            ...(state.activeSessionId
+              ? {
+                  sessionMessagesMap: {
+                    ...state.sessionMessagesMap,
+                    [state.activeSessionId]: admitted,
+                  },
+                }
+              : {}),
+          };
+        }),
       updateOptions: (newOptions) =>
         set((state) => ({
           options: { ...state.options, ...newOptions },

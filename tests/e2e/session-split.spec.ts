@@ -1,5 +1,14 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { chooseSessionLayout, installSessionUxFixture, seedSessionUx } from "./session-ux-fixture";
+
+async function inputTarget(page: Page) {
+  return page.evaluate(async () => {
+    const { useCodexStore } = await import(
+      "/src/session-mode/components/codex/stores/index.ts"
+    );
+    return useCodexStore.getState().currentThreadId;
+  });
+}
 
 test("dragging tabs creates nested groups; moving, closing and reload preserve one input destination", async ({
   page,
@@ -56,9 +65,9 @@ test("dragging tabs creates nested groups; moving, closing and reload preserve o
   await expect(groups).toHaveCount(3);
   await expect(groups.nth(1).getByRole('button',{name:'项目详情：research',exact:true})).toBeVisible();
   await expect(groups.nth(2).getByRole('button',{name:'项目详情：kanban',exact:true})).toBeVisible();
-  const destination = (await page.locator('.session-input-target').textContent())!;
+  const destination = await inputTarget(page);
   await groups.nth(2).getByRole('button',{name:'项目详情：kanban',exact:true}).click();
-  await expect(page.locator('.session-input-target')).toHaveText(destination);
+  expect(await inputTarget(page)).toBe(destination);
   await page.keyboard.press('Escape');
   await page.screenshot({path:'.dev-runtime/project-context-v2/split.png',animations:'disabled'});
   const rectangles = await groups.evaluateAll((els) =>
@@ -74,9 +83,7 @@ test("dragging tabs creates nested groups; moving, closing and reload preserve o
     page.locator(".session-agent-view [contenteditable=true]"),
   ).toHaveCount(1);
   await page.locator('[data-tab-key="codex:ux-0"]').click();
-  await expect(page.locator(".session-input-target")).toContainText(
-    "中文会话 0",
-  );
+  expect(await inputTarget(page)).toBe("ux-0");
   await page
     .locator(".session-agent-view [contenteditable=true]")
     .fill("隔离的分屏输入目标检查");
@@ -147,9 +154,7 @@ test("dragging tabs creates nested groups; moving, closing and reload preserve o
     "aria-selected",
     "true",
   );
-  await expect(page.locator(".session-input-target")).toContainText(
-    "中文会话 2",
-  );
+  expect(await inputTarget(page)).toBe("ux-2");
   await page.getByRole("button", { name: "更多功能", exact: true }).click();
   await expect(
     page.getByRole("menuitem", { name: "文件浏览器", exact: true }),

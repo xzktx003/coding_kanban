@@ -19,17 +19,15 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@session/components/ui/popover";
-import { acpStop } from "@session/services/apiAdapt/acp";
+import { useAcpAgentChoice } from "./useAcpAgentChoice";
+import { cancelPendingAcpAgentChoice } from "@session/services/acpAgentChoice";
 import { useAcpStore } from "@session/stores/useAcpStore";
 import { useAgentSettingsStore } from "@session/stores/useAgentSettingsStore";
-import { useSessionActionConfirmation } from "../common/useSessionActionConfirmation";
-import { toast } from "@session/components/ui/use-toast";
 import {
   useAgentCenterStore,
   selectedAgentCard,
 } from "@session/stores/useAgentCenterStore";
 import { selectBuiltinInputTarget } from "@session/services/builtinInputNavigation";
-import { invalidateAcpSessionOperation } from "../acp/sessionOperations";
 
 type AgentModelPanelProps = { trigger: ReactNode };
 
@@ -38,48 +36,14 @@ export function AgentModelPanel({ trigger }: AgentModelPanelProps) {
   const card = useAgentCenterStore(selectedAgentCard);
   const selectedAgent = card?.kind ?? preferredAgent;
   const active = useAcpStore((s) => s.active);
-  const { agentId, connectionId, setActive, setAgentId, reset } = useAcpStore();
+  const { agentId } = useAcpStore();
   const agents = useAcpAgents() ?? [];
   const [open, setOpen] = useState(false);
-  const { ask, confirmation } = useSessionActionConfirmation();
+  const { selectAcp, confirmation } = useAcpAgentChoice();
 
   const selectBuiltin = (id: "codex" | "cc") => {
+    cancelPendingAcpAgentChoice();
     selectBuiltinInputTarget(id);
-  };
-
-  const selectAcp = async (id: string) => {
-    if (active && agentId === id) return;
-    if (connectionId && agentId !== id) {
-      const originalSession = useAcpStore.getState().sessionId;
-      const accepted = await ask({
-        title: "切换 Agent？",
-        description:
-          "切换会关闭当前 Agent 服务，并中断仍在执行的任务。当前会话记录会保留。",
-        confirmLabel: "关闭服务并切换",
-      });
-      if (
-        !accepted ||
-        useAcpStore.getState().connectionId !== connectionId ||
-        useAcpStore.getState().agentId !== agentId ||
-        useAcpStore.getState().sessionId !== originalSession
-      )
-        return;
-      try {
-        invalidateAcpSessionOperation();
-        await acpStop(connectionId);
-      } catch (error) {
-        toast({
-          title: "无法切换 Agent",
-          description: String(error),
-          variant: "destructive",
-        });
-        return;
-      }
-      if (useAcpStore.getState().connectionId !== connectionId) return;
-      reset();
-    }
-    setAgentId(id);
-    setActive(true);
   };
 
   return (

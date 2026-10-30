@@ -5,6 +5,7 @@ import { registerCodexRoutes } from "./routes.js";
 import { CodexService } from "./client.js";
 import { EventHub } from "../core/events.js";
 import type { Json } from "../core/json.js";
+import { RpcError } from "../transport/rpc.js";
 
 test("Slack HTTP preview uses only its private read-only host thread and returns bounded matched fields", async (t) => {
   const app = Fastify(),
@@ -266,6 +267,32 @@ test("completed Goal clear has its own owner-only route and validates the full c
   assert.equal(mutations, 0);
 });
 
+test("only a native invalid-request Goal read is projected as structured unavailable", async t => {
+  const app = Fastify(), service = new CodexService({ hub: new EventHub(), instance: "goal-read-unavailable", sweepIntervalMs: 0 });
+  let failure: Error = new RpcError("thread not found: fixture", -32600);
+  Object.assign(service, { call: async () => { throw failure; } });
+  app.setErrorHandler((error, _request, reply) => {
+    const value = error as Error & { statusCode?: number; code?: string; nativeErrorCode?: number };
+    reply.code(value.statusCode ?? 500).send({ error: value.message, ...(value.code ? { code: value.code } : {}), ...(value.nativeErrorCode === undefined ? {} : { nativeErrorCode: value.nativeErrorCode }) });
+  });
+  registerCodexRoutes(app, service);
+  t.after(async () => { await app.close(); await service.close(); });
+  const url = "/api/codex/thread/goal/get";
+  const unavailable = await app.inject({ method: "POST", url, payload: { threadId: "fixture" } });
+  assert.equal(unavailable.statusCode, 409);
+  assert.deepEqual(unavailable.json(), {
+    error: "原生 Goal 状态暂不可用，不能推断为无活动 Goal",
+    code: "NATIVE_READ_UNAVAILABLE",
+    nativeErrorCode: -32600,
+  });
+  failure = new RpcError("unrelated invalid request", -32600);
+  const stillScopedToGoal = await app.inject({ method: "POST", url: "/api/codex/thread/queue/list", payload: { threadId: "fixture" } });
+  assert.equal(stillScopedToGoal.statusCode, 500);
+  failure = Object.assign(new Error("thread not found: fixture"), { code: -32600 });
+  const plainError = await app.inject({ method: "POST", url, payload: { threadId: "fixture" } });
+  assert.equal(plainError.statusCode, 500);
+});
+
 for (const path of ["set", "clear", "clear-completed"]) test(`an aborted Goal ${path} HTTP request reaches its preflight cancellation signal before any response`, async t => {
   const app = Fastify(), service = new CodexService({ hub: new EventHub(), instance: "goal-abort-route", sweepIntervalMs: 0 });
   let entered!: (signal: AbortSignal | undefined) => void;
@@ -295,3 +322,5 @@ for (const path of ["set", "clear", "clear-completed"]) test(`an aborted Goal ${
   } finally { clearTimeout(timer); }
   assert.equal(signal.aborted, true);
 });
+
+test("explicit start and fork scopes are checked in the native write guard and never forwarded as native parameters",async t=>{const hub=new EventHub(),service=new CodexService({hub,instance:"private-create-route-fixture",sweepIntervalMs:0}),app=Fastify(),calls:Array<{method:string;params:Json;scope:string}>=[];Object.assign(service,{guardedCall:async(method:string,params:Json,scope:string)=>{calls.push({method,params,scope});return {thread:{id:"created",cwd:"/project"}};},call:async()=>{throw new Error("Scoped creation must not use an unguarded write");}});registerCodexRoutes(app,service);t.after(async()=>{await app.close();await service.close();hub.close();});for(const method of ["start","fork"]){const params=method==="start"?{cwd:"/project"}:{threadId:"source",cwd:"/project"};const response=await app.inject({method:"POST",url:"/api/codex/thread/"+method,payload:{...params,expectedScope:"a".repeat(64)}});assert.equal(response.statusCode,200,response.body);assert.deepEqual(calls.at(-1),{method:"thread/"+method,params,scope:"a".repeat(64)});}const bad=await app.inject({method:"POST",url:"/api/codex/thread/start",payload:{cwd:"/project",expectedScope:"malformed"}});assert.equal(bad.statusCode,400);assert.equal(calls.length,2);});

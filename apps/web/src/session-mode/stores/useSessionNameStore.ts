@@ -36,7 +36,10 @@ export function normalizeSessionNames(value: unknown): Record<string, string> {
 export const useSessionNameStore = create<{
   names: Record<string, string>;
   sources: Record<string, "fallback" | "native" | "manual">;
+  /** In-memory edit fences; a same-valued rename is still a new user intent. */
+  editRevisions: Record<string, number>;
   setName: (kind: SessionKind, id: string, name: string) => void;
+  applyNativeName: (kind: SessionKind, id: string, name: string) => void;
   initializeName: (
     kind: SessionKind,
     id: string,
@@ -48,11 +51,23 @@ export const useSessionNameStore = create<{
     (set) => ({
       names: {},
       sources: {},
+      editRevisions: {},
       setName: (kind, id, name) =>
         set((s) => ({
           names: { ...s.names, [sessionNameKey(kind, id)]: name },
           sources: { ...s.sources, [sessionNameKey(kind, id)]: "manual" },
+          editRevisions: {
+            ...s.editRevisions,
+            [sessionNameKey(kind, id)]:
+              (s.editRevisions[sessionNameKey(kind, id)] ?? 0) + 1,
+          },
         })),
+      applyNativeName: (kind, id, name) => set((s) => {
+        const key = sessionNameKey(kind, id);
+        const title = name.trim().replace(/\s+/g, " ").slice(0, SESSION_NAME_LIMIT);
+        if (!title) return s;
+        return { names: { ...s.names, [key]: title }, sources: { ...s.sources, [key]: "native" }, editRevisions: { ...s.editRevisions, [key]: (s.editRevisions[key] ?? 0) + 1 } };
+      }),
       initializeName: (kind, id, name, source = "native") =>
         set((s) => {
           const key = sessionNameKey(kind, id);

@@ -1,3 +1,4 @@
+vi.mock("./nativeOperationContext",()=>({readNativeOperationContext:async()=>({namespace:"private-fixture-native-domain",scopeToken:"a".repeat(64)})}));
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({
@@ -6,6 +7,9 @@ const api = vi.hoisted(() => ({
   threadGoalSet: vi.fn(),
 }));
 vi.mock("./apiAdapt", () => api);
+vi.mock("./apiAdapt/codex", () => api);
+vi.mock("./apiAdapt/git", () => api);
+vi.mock("./apiAdapt/skills", () => api);
 
 import { codexService, resetCodexRuntimeState } from "./codexService";
 import { useCodexStore, useConfigStore } from "../components/codex/stores";
@@ -28,6 +32,7 @@ function deferred<T>() {
 }
 
 beforeEach(() => {
+  for (let i=localStorage.length-1;i>=0;i--) { const key=localStorage.key(i); if(key?.startsWith("kanban.session.execution")) localStorage.removeItem(key); }
   vi.useFakeTimers();
   vi.resetAllMocks();
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -138,9 +143,10 @@ it("bounds a stalled goal update without reporting a late response as success or
 
 it("keeps a successful worktree creation and deferred activation compatible", async () => {
   useConfigStore.setState({ threadCwdMode: "worktree" });
+  api.threadStart.mockResolvedValueOnce({...created,thread:{...created.thread,cwd:"/worktree"}});
   const shouldActivate = vi.fn(() => false);
   expect(await codexService.threadStart({ shouldActivate })).toEqual(
-    created.thread,
+    {...created.thread,cwd:"/worktree"},
   );
   expect(api.threadStart.mock.calls[0][0].cwd).toBe("/worktree");
   expect(api.gitCreateWorktree.mock.calls[0][2].signal.aborted).toBe(false);
@@ -192,6 +198,7 @@ it("never continues a worktree creation on another runtime after the connection 
   const worktree = deferred<{ worktree_path: string }>();
   api.gitCreateWorktree.mockReturnValue(worktree.promise);
   const pending = codexService.threadStart();
+  await vi.waitFor(()=>expect(api.gitCreateWorktree).toHaveBeenCalledOnce());
   resetCodexRuntimeState();
   worktree.resolve({ worktree_path: "/previous-runtime-worktree" });
   await expect(pending).rejects.toThrow(/连接.*切换.*结果未确认/);
@@ -204,6 +211,7 @@ it("never applies thread creation settings or activation after the connection ch
   api.threadStart.mockReturnValue(creation.promise);
   const shouldActivate = vi.fn(() => true);
   const pending = codexService.threadStart({ shouldActivate });
+  await vi.waitFor(()=>expect(api.threadStart).toHaveBeenCalledOnce());
   resetCodexRuntimeState();
   creation.resolve(created);
   await expect(pending).rejects.toThrow(/连接.*切换.*结果未确认/);

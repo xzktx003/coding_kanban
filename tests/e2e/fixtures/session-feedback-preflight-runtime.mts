@@ -1,90 +1,86 @@
+import { fork } from "node:child_process";
 import { createRequire } from "node:module";
-import { resolve } from "node:path";
-import { isDeepStrictEqual } from "node:util";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Json, JsonObject } from "../../../packages/session-runtime/src/core/json";
+import type { createRuntimePreflightFixture as createLocalFixture } from "./session-feedback-preflight-runtime-core.mts";
+import { ACCOUNT_RESPONSE } from "./session-feedback-preflight-runtime-core.mts";
+export { ACCOUNT_RESPONSE, RUNTIME_INSTANCE } from "./session-feedback-preflight-runtime-core.mts";
 
-export const RUNTIME_INSTANCE = "feedback-r21-fixture";
-export const ACCOUNT_RESPONSE = {
-  account: { type: "apiKey" },
-  requiresOpenaiAuth: false,
-} as const;
+type Fixture = Awaited<ReturnType<typeof createLocalFixture>>;
+type Snapshot = ReturnType<Fixture["snapshot"]>;
+type Cleanup = Awaited<ReturnType<Fixture["close"]>>;
+type WorkerCleanup = Cleanup & {
+  fixtureProcess: { pid: number; exited: boolean; code: number | null; signal: NodeJS.Signals | null };
+};
 
-// Factory only: discovery imports this declaration without constructing any runtime.
+/**
+ * Playwright can import shared JS through both its CJS and ESM hooks, while
+ * its in-memory transform cache is keyed by filename. Keep the production
+ * handler outside those hooks in an owned tsx process. No listener, native
+ * process, real account, login home or feedback upload is created.
+ */
 export async function createRuntimePreflightFixture(thread: JsonObject) {
+  const home = await mkdtemp(join(tmpdir(), "feedback-preflight-worker-"));
   const localRequire = createRequire(resolve(process.cwd(), "packages/session-runtime/package.json"));
-  const Fastify = localRequire("fastify") as typeof import("../../../packages/session-runtime/node_modules/fastify");
-  const [{ registerCodexRoutes }, { CodexService }, { EventHub }] = await Promise.all([
-    import("../../../packages/session-runtime/src/codex/routes"),
-    import("../../../packages/session-runtime/src/codex/client"),
-    import("../../../packages/session-runtime/src/core/events"),
-  ]);
-  if (thread.id !== "ux-0" || typeof thread.cwd !== "string")
-    throw new Error("R21 runtime fixture requires the exact synthetic ux-0 metadata");
-  const app = Fastify({ logger: false });
-  const service = new CodexService({ hub: new EventHub(), instance: RUNTIME_INSTANCE, env: {}, sweepIntervalMs: 0 });
-  const rawCalls: Array<{ method: string; params: Json }> = [];
-  const forbidden: Array<{ channel: string; method: string; params: Json }> = [];
-  const injections: Array<{ path: string; body: Json; status: number; response: unknown }> = [];
-  let closed = false;
-  const refuse = (channel: string, method: string, params: Json): never => {
-    forbidden.push({ channel, method, params });
-    throw new Error("R21 fixture rejects non-contract RPC: " + channel + ":" + method);
-  };
-  const raw = async (method: string, params: Json): Promise<Json> => {
-    rawCalls.push({ method, params: structuredClone(params) });
-    let expected: Json;
-    let response: Json;
-    if (method === "account/read") {
-      expected = { refreshToken: false };
-      response = structuredClone(ACCOUNT_RESPONSE);
-    } else if (method === "thread/read") {
-      expected = { threadId: "ux-0", includeTurns: false };
-      const { turns: _turns, ...metadata } = thread;
-      response = { thread: metadata };
-    } else if (method === "config/read") {
-      expected = { cwd: thread.cwd, includeLayers: false };
-      // A complete, successful native effective config snapshot with no explicit feedback override.
-      response = { config: {} };
-    } else if (method === "configRequirements/read") {
-      expected = null;
-      response = { requirements: null };
-    } else return refuse("raw", method, params);
-    if (!isDeepStrictEqual(params, expected)) return refuse("raw-params", method, params);
-    return structuredClone(response);
-  };
-  Object.assign(service, {
-    raw,
-    // Ownership captured the original raw at construction: no call/ownership path may run.
-    call: async (method: string, params: Json) => refuse("writer-call", method, params),
+  const child = fork(fileURLToPath(new URL("./session-feedback-preflight-runtime-worker.mts", import.meta.url)), [], {
+    execArgv: ["--import", localRequire.resolve("tsx")],
+    env: { PATH: process.env.PATH, HOME: home, SESSION_DATA_HOME: join(home, "data") },
+    stdio: ["ignore", "pipe", "pipe", "ipc"],
   });
-  app.addHook("onRequest", async (request, reply) => {
-    if (request.method !== "POST" || request.url !== "/api/codex/feedback/preflight")
-      return reply.code(409).send({ error: "R21 inject accepts only its read-only preflight route" });
+  let output = "", sequence = 0, exited = false;
+  let exitCode: number | null = null, exitSignal: NodeJS.Signals | null = null;
+  let snapshot: Snapshot | undefined;
+  let closeWork: Promise<WorkerCleanup> | undefined;
+  const pending = new Map<number, { resolve(value: any): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }>();
+  const exitedPromise = new Promise<void>(done => child.once("exit", (code, signal) => { exited = true; exitCode = code; exitSignal = signal; done(); }));
+  const fail = (message: string) => {
+    for (const request of pending.values()) { clearTimeout(request.timer); request.reject(new Error(message)); }
+    pending.clear();
+  };
+  child.stdout?.on("data", chunk => { output = (output + String(chunk)).slice(-16_384); });
+  child.stderr?.on("data", chunk => { output = (output + String(chunk)).slice(-16_384); });
+  child.once("error", error => fail(`Owned preflight worker failed: ${error.message}`));
+  child.once("exit", (code, signal) => fail(`Owned preflight worker exited (${code ?? signal}): ${output}`));
+  child.on("message", (message: any) => {
+    if (!message || !Number.isSafeInteger(message.id)) return;
+    const request = pending.get(message.id);
+    if (!request) return;
+    pending.delete(message.id); clearTimeout(request.timer);
+    if (message.error) request.reject(new Error(String(message.error)));
+    else { if (message.snapshot) snapshot = message.snapshot; request.resolve(message.value); }
   });
-  registerCodexRoutes(app, service);
+  const call = (operation: "initialize" | "inject" | "close", body?: Json) => new Promise<any>((resolveRequest, reject) => {
+    if (!child.connected || exited) return reject(new Error("Owned preflight worker is unavailable"));
+    const id = ++sequence;
+    const timer = setTimeout(() => { pending.delete(id); reject(new Error(`Owned preflight worker ${operation} deadline exceeded`)); }, 10_000);
+    pending.set(id, { resolve: resolveRequest, reject, timer });
+    child.send({ id, operation, body }, error => {
+      if (error) { clearTimeout(timer); pending.delete(id); reject(error); }
+    });
+  });
+  const stopOwnedChild = async () => {
+    if (!exited) child.kill("SIGTERM");
+    await exitedPromise;
+    await rm(home, { recursive: true, force: true });
+  };
+  try { await call("initialize", thread); }
+  catch (error) { await stopOwnedChild(); throw error; }
   return {
     accountResponse: ACCOUNT_RESPONSE,
-    rawCalls, forbidden, injections,
-    async inject(body: Json) {
-      if (closed) throw new Error("R21 preflight fixture is closed");
-      const response = await app.inject({ method: "POST", url: "/api/codex/feedback/preflight", payload: body });
-      let json: unknown;
-      try { json = response.json(); } catch { json = { unparsedBody: response.body }; }
-      injections.push({ path: "/api/codex/feedback/preflight", body: structuredClone(body), status: response.statusCode, response: json });
-      // Return the unmodified actual runtime handler bytes, including a baseline 404.
-      return { status: response.statusCode, contentType: String(response.headers["content-type"] ?? "application/json"), body: response.body };
-    },
-    snapshot() {
-      return { instance: RUNTIME_INSTANCE, closed, listening: app.server.listening,
-        ownershipIds: service.ownership.ids(), rawCalls: structuredClone(rawCalls),
-        forbidden: structuredClone(forbidden), injections: structuredClone(injections) };
-    },
-    async close() {
-      const errors: string[] = [];
-      try { await app.close(); } catch (error) { errors.push("app.close: " + String(error)); }
-      try { await service.close(); } catch (error) { errors.push("service.close: " + String(error)); }
-      closed = errors.length === 0;
-      return { ...this.snapshot(), errors };
+    async inject(body: Json) { return call("inject", body) as ReturnType<Fixture["inject"]>; },
+    snapshot() { if (!snapshot) throw new Error("Owned preflight worker is not initialized"); return structuredClone(snapshot); },
+    close() {
+      if (closeWork) return closeWork;
+      closeWork = (async () => {
+        let result: Cleanup;
+        try { result = await call("close") as Cleanup; }
+        finally { await stopOwnedChild(); }
+        return { ...result, fixtureProcess: { pid: child.pid!, exited, code: exitCode, signal: exitSignal } };
+      })();
+      return closeWork;
     },
   };
 }

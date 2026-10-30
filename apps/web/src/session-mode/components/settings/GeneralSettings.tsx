@@ -22,7 +22,9 @@ import {
   type Accent,
   type Theme,
   useThemeStore,
+  useSettingsStore,
 } from "@session/stores/settings";
+import { TypographySettings } from "./TypographySettings";
 import { LanguageSelector } from "./LanguageSelector";
 import { FeishuNotificationSettings } from "./FeishuNotificationSettings";
 
@@ -43,6 +45,12 @@ const ACCENT_OPTIONS: Array<{
 
 export function GeneralSettings() {
   const followup = useFollowupSettingsStore();
+  const warmFollowedSessions = useSettingsStore(
+    (state) => state.warmFollowedSessions,
+  );
+  const setWarmFollowedSessions = useSettingsStore(
+    (state) => state.setWarmFollowedSessions,
+  );
   const {
     theme,
     setTheme,
@@ -134,6 +142,38 @@ export function GeneralSettings() {
           </select>
         </label>
       </section>
+      <section className="space-y-3">
+        <h3 className="text-sm font-medium px-1">会话性能</h3>
+        <Card>
+          <CardContent className="px-4">
+            <div className="flex items-center justify-between gap-4">
+              <div className="space-y-0.5">
+                <label
+                  htmlFor="session-warm-followed"
+                  className="text-sm font-medium"
+                >
+                  预热关注会话
+                </label>
+                <p
+                  id="session-warm-followed-description"
+                  className="text-xs text-muted-foreground"
+                >
+                  保留最近消息，让切换更快；资源不足时自动回收。关闭后，不可见正文将在
+                  60 秒后释放。仅影响此设备，任务和草稿始终保留。
+                </p>
+              </div>
+              <Switch
+                id="session-warm-followed"
+                aria-label="预热关注会话"
+                aria-describedby="session-warm-followed-description"
+                checked={warmFollowedSessions}
+                onCheckedChange={setWarmFollowedSessions}
+              />
+            </div>
+          </CardContent>
+        </Card>
+      </section>
+      <TypographySettings />
       <FeishuNotificationSettings />
       <section className="space-y-3">
         <h3 className="text-sm font-medium px-1">{t("preferences")}</h3>

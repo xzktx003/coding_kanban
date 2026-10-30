@@ -18,7 +18,7 @@ vi.mock("@session/components/codex/stores", () => ({
     getState: () => ({ ...mock.state, addEvent: mock.addEvent }),
   },
 }));
-vi.mock("@session/services/apiAdapt", () => ({
+vi.mock("@session/services/apiAdapt/codex", () => ({
   allowSleep: vi.fn(),
   preventSleep: vi.fn(),
 }));
@@ -47,6 +47,6 @@ for (const threadName of [undefined, null, "new name"]) {
       } as ServerNotification),
     );
     expect(mock.state.threads[0].name).toBe(threadName ?? null);
-    expect(useSessionNameStore.getState().names["codex:thread"]).toBe("old");
+    expect(useSessionNameStore.getState().names["codex:thread"]).toBe(threadName ?? "old");
   });
 }

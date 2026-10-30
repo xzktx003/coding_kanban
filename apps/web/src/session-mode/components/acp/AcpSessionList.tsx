@@ -35,7 +35,7 @@ export function AcpSessionList({ directory }: { directory: string }) {
     remove,
     confirmation,
   } = useAcpSessions(directory);
-  const sessionId = useAcpStore((s) => s.sessionId);
+  const sessionId = useAcpStore((s) => s.historySessionId);
   const running = useAcpStore((s) => s.running);
   const agentId = useAcpStore((s) => s.agentId);
   const [pendingDelete, setPendingDelete] = useState<AcpSessionRecord | null>(

@@ -29,6 +29,8 @@ export interface FeishuReplyBinding {
   sessionId: string;
   completionId: string;
   sessionModeThreadId?: string;
+  sessionModeScope?: string;
+  sessionModeNamespace?: string;
   codexThreadId?: string;
   transcriptAgentKind?: FeishuTranscriptAgentKind;
   transcriptSessionId?: string;
@@ -51,6 +53,8 @@ export interface RecordFeishuReplyBindingsInput {
   sessionId: string;
   completionId: string;
   sessionModeThreadId?: string;
+  sessionModeScope?: string;
+  sessionModeNamespace?: string;
   codexThreadId?: string;
   transcriptAgentKind?: string;
   transcriptSessionId?: string;
@@ -184,6 +188,8 @@ function parseBinding(value: unknown): FeishuReplyBinding | null {
     completionId,
     codexThreadId,
     sessionModeThreadId,
+    sessionModeScope,
+    sessionModeNamespace,
     transcriptAgentKind,
     transcriptSessionId,
     referencedFiles,
@@ -206,6 +212,8 @@ function parseBinding(value: unknown): FeishuReplyBinding | null {
         !CODEX_THREAD_ID_PATTERN.test(sessionModeThreadId) ||
         sessionId !== `session-codex:${sessionModeThreadId}` ||
         codexThreadId !== undefined)) ||
+    ([sessionModeScope, sessionModeNamespace].some(field => field !== undefined) &&
+      (!sessionModeThreadId || [sessionModeScope, sessionModeNamespace].some(field => typeof field !== "string" || !field || field.length > 512))) ||
     !isValidTimestamp(createdAt)
   ) {
     return null;
@@ -222,6 +230,7 @@ function parseBinding(value: unknown): FeishuReplyBinding | null {
     sessionId,
     completionId,
     ...(typeof sessionModeThreadId === "string" ? { sessionModeThreadId } : {}),
+    ...(typeof sessionModeScope === "string" && typeof sessionModeNamespace === "string" ? { sessionModeScope, sessionModeNamespace } : {}),
     ...(typeof codexThreadId === "string" &&
     parsedTranscriptTarget?.transcriptAgentKind !== "claude"
       ? { codexThreadId }
@@ -286,6 +295,7 @@ export class FeishuReplyBindingStore {
   }
 
   record(input: RecordFeishuReplyBindingsInput): void {
+    if ([input.sessionModeScope, input.sessionModeNamespace].some(field => field !== undefined) && (!input.sessionModeThreadId || [input.sessionModeScope, input.sessionModeNamespace].some(field => typeof field !== "string" || !field || field.length > 512))) throw new Error("Invalid native session reply scope");
     if (
       input.sessionModeThreadId !== undefined &&
       (!CODEX_THREAD_ID_PATTERN.test(input.sessionModeThreadId) ||
@@ -308,13 +318,16 @@ export class FeishuReplyBindingStore {
       if (existing?.sessionModeThreadId && !input.sessionModeThreadId) {
         continue;
       }
+      // An existing card is an immutable authorization source. Never enrich an
+      // old context-free card or rebind it to a new account/runtime on replay.
+      if (existing?.sessionModeThreadId && (existing.sessionModeThreadId !== input.sessionModeThreadId || existing.sessionModeScope !== input.sessionModeScope || existing.sessionModeNamespace !== input.sessionModeNamespace)) continue;
       nextBindings.push({
         messageId: message.messageId,
         chatId: message.chatId,
         sessionId: input.sessionId,
         completionId: input.completionId,
         ...(input.sessionModeThreadId
-          ? { sessionModeThreadId: input.sessionModeThreadId }
+          ? { sessionModeThreadId: input.sessionModeThreadId, ...(input.sessionModeScope && input.sessionModeNamespace ? { sessionModeScope: input.sessionModeScope, sessionModeNamespace: input.sessionModeNamespace } : {}) }
           : {}),
         ...(transcriptTarget?.transcriptAgentKind !== "claude" &&
         input.codexThreadId &&
@@ -368,6 +381,8 @@ export class FeishuReplyBindingStore {
       .filter(
         (binding) =>
           binding.sessionId === selected.sessionId &&
+          binding.sessionModeScope === selected.sessionModeScope &&
+          binding.sessionModeNamespace === selected.sessionModeNamespace &&
           binding.createdAt === selected.createdAt,
       )
       .sort((left, right) => left.messageId.localeCompare(right.messageId))
@@ -416,7 +431,7 @@ export class FeishuReplyBindingStore {
       sessionId: input.parent.sessionId,
       completionId: input.parent.completionId,
       ...(input.parent.sessionModeThreadId
-        ? { sessionModeThreadId: input.parent.sessionModeThreadId }
+        ? { sessionModeThreadId: input.parent.sessionModeThreadId, ...(input.parent.sessionModeScope && input.parent.sessionModeNamespace ? { sessionModeScope: input.parent.sessionModeScope, sessionModeNamespace: input.parent.sessionModeNamespace } : {}) }
         : { codexThreadId: input.codexThreadId }),
       ...(input.parent.transcriptAgentKind === "codex" &&
       input.parent.transcriptSessionId

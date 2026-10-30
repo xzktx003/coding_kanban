@@ -12,7 +12,7 @@ import {
   acknowledgeDeliveryEchoes,
   deliveredClientIds,
 } from "@session/stores/useCodexDeliveryStore";
-import { subagentParent } from "@agent-orchestrator/shared";
+import { subagentParent } from "@agent-orchestrator/shared/session-subagents";
 import { isObservedCodexThread } from "@session/services/observedCodexThreads";
 import {
   observeSubagents,
@@ -28,7 +28,7 @@ import { type RefObject, useCallback, useEffect, useRef } from "react";
 import type { ServerNotification } from "@session/bindings/ServerNotification";
 import type { AccountLoginCompletedNotification } from "@session/bindings/v2";
 import { useCodexStore } from "@session/components/codex/stores";
-import { allowSleep, preventSleep } from "@session/services/apiAdapt";
+import { allowSleep, preventSleep } from "@session/services/apiAdapt/codex";
 import {
   appendStreamingTextPreview,
   compactCodexEventPayload,
@@ -46,7 +46,16 @@ import {
 import { useRequestUserInputStore } from "../stores/useRequestUserInputStore";
 import { hydrateThreadModel } from "@session/stores/useThreadModelStore";
 import { isDeltaEvent, type DeltaEvent } from "../stores/eventUtils";
-import { notifyGoalCompletionAutoClear, resetGoalCompletionScope } from "@session/services/goalCompletionAutoClear";
+import {
+  notifyGoalCompletionAutoClear,
+  resetGoalCompletionScope,
+} from "@session/services/goalCompletionAutoClear";
+import {
+  captureNativeExecutionScope,
+  recordNativeExecutionTiming,
+  reconcileNativeExecutionEvents,
+  isNativeExecutionScopeCurrent,
+} from "@session/services/nativeTurnExecutionProof";
 
 export type BeepMode = "never" | "unfocused" | "always";
 
@@ -201,6 +210,19 @@ export function useServerNotificationHandler(
     (payload: ServerNotification) => {
       observeConfigNotice(payload);
       const method = payload.method;
+      const control = payload as unknown as {
+        method: string;
+        params?: { threadId?: unknown };
+      };
+      if (
+        control.method === "thread/readState/changed" &&
+        typeof control.params?.threadId === "string"
+      )
+        window.dispatchEvent(
+          new CustomEvent("session-native-read-state-changed", {
+            detail: { threadId: control.params.threadId },
+          }),
+        );
       // Private reasoning is never retained, even when an older source emits it.
       if (method === "item/reasoning/textDelta") return;
       if (method === "serverRequest/resolved") {
@@ -271,12 +293,18 @@ export function useServerNotificationHandler(
           useCodexStore
             .getState()
             .threads.some((thread) => thread.id === threadId);
-        if (method === "thread/goal/updated" || method === "thread/goal/cleared") {
+        if (
+          method === "thread/goal/updated" ||
+          method === "thread/goal/cleared"
+        ) {
           // Completion is small lifecycle metadata. A known read-only history
           // keeps its badge even when its transcript is no longer observed.
           if (known) {
             useCodexStore.getState().addEvent(threadId, payload);
-            if (method === "thread/goal/updated" && payload.params.goal.status === "complete")
+            if (
+              method === "thread/goal/updated" &&
+              payload.params.goal.status === "complete"
+            )
               void notifyGoalCompletionAutoClear(threadId);
           }
           return;
@@ -308,7 +336,7 @@ export function useServerNotificationHandler(
           if (threadName)
             useSessionNameStore
               .getState()
-              .initializeName("codex", threadId, threadName);
+              .applyNativeName("codex", threadId, threadName);
           useCodexStore.setState((state) => ({
             threads: state.threads.map((thread) =>
               thread.id === threadId
@@ -384,13 +412,24 @@ export function useServerNotificationHandler(
         // Lifecycle cleanup also runs after a task leaves display membership.
         // Only observed tasks retain transcript bodies and derived execution state.
         if (!observed) {
-          if (known && method === "thread/status/changed" && payload.params.status.type === "idle" &&
-              useCodexStore.getState().goalMap[threadId]?.status === "complete") {
+          if (
+            known &&
+            method === "thread/status/changed" &&
+            payload.params.status.type === "idle" &&
+            useCodexStore.getState().goalMap[threadId]?.status === "complete"
+          ) {
             // Retain only the small idle authority input for an already known
             // completed goal; never reattach a dormant transcript to clear it.
-            useCodexStore.setState(state => state.threadStatusMap[threadId]?.type === "idle" ? state : {
-              threadStatusMap: { ...state.threadStatusMap, [threadId]: payload.params.status },
-            });
+            useCodexStore.setState((state) =>
+              state.threadStatusMap[threadId]?.type === "idle"
+                ? state
+                : {
+                    threadStatusMap: {
+                      ...state.threadStatusMap,
+                      [threadId]: payload.params.status,
+                    },
+                  },
+            );
             void notifyGoalCompletionAutoClear(threadId);
           }
           return;
@@ -402,9 +441,47 @@ export function useServerNotificationHandler(
           return;
         }
         const previousEvents = useCodexStore.getState().events[threadId] ?? [];
+        const nativeScope =
+          method === "turn/started" || method === "turn/completed"
+            ? captureNativeExecutionScope()
+            : null;
         useCodexStore.getState().addEvent(threadId, displayPayload);
-        if (method === "turn/completed" ||
-            (method === "thread/status/changed" && payload.params.status.type === "idle"))
+        if (
+          nativeScope &&
+          (payload.method === "turn/started" ||
+            payload.method === "turn/completed")
+        ) {
+          const timing = useCodexStore.getState().turnTimingMap[threadId];
+          const native = payload.params.turn;
+          if (timing?.turnId === native.id && timing.status === native.status)
+            recordNativeExecutionTiming(threadId, timing, nativeScope);
+        }
+        if (nativeScope || method === "thread/status/changed") {
+          const current = useCodexStore.getState();
+          const events = current.events[threadId];
+          if (events) {
+            const projected = reconcileNativeExecutionEvents(
+              threadId,
+              events,
+              current.turnTimingMap[threadId],
+              current.threadStatusMap[threadId]?.type === "active",
+            );
+            if (projected !== events)
+              useCodexStore.setState((state) =>
+                state.events[threadId] !== events ||
+                state.turnTimingMap[threadId] !==
+                  current.turnTimingMap[threadId] ||
+                (nativeScope && !isNativeExecutionScopeCurrent(nativeScope))
+                  ? state
+                  : { events: { ...state.events, [threadId]: projected } },
+              );
+          }
+        }
+        if (
+          method === "turn/completed" ||
+          (method === "thread/status/changed" &&
+            payload.params.status.type === "idle")
+        )
           void notifyGoalCompletionAutoClear(threadId);
         revealNewQuestion(displayPayload, previousEvents);
       }

@@ -12,8 +12,8 @@ import {
   canonicalizePath,
   getHomeDirectory,
   readDirectory,
-  type TauriFileEntry,
-} from '@session/services/apiAdapt';
+} from '@session/services/apiAdapt/filesystem';
+import type { TauriFileEntry } from '@session/services/apiAdapt/shared';
 
 function getParentPath(path: string): string | null {
   const normalized = path.replace(/[\\/]+$/, '');

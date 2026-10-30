@@ -1,14 +1,12 @@
 import { v4 as randomUUID } from "uuid";
 import { toast } from "sonner";
 import { useCallback, useRef } from "react";
-import { fromSdkMessages } from "@session/components/cc/utils/fromSdkMessages";
 import { refreshClaudeHistory } from "@session/services/followedSessionAuxSync";
+import { ensureClaudeSessionForSend } from "@session/services/claudeConnectionRecovery";
 import {
-  ccGetSessionMessages,
   ccNewSession,
-  ccResumeSession,
   ccSendMessage,
-} from "@session/services";
+} from "@session/services/apiAdapt/cc";
 import { gitCreateWorktree } from "@session/services/apiAdapt/git";
 import { type CCOptions, useCCStore } from "@session/stores/cc";
 import { useAgentCenterStore } from "@session/stores/useAgentCenterStore";
@@ -312,8 +310,7 @@ export function useCCSessionManager() {
         // Restore the transcript: resuming only spawns the client, the backend
         // does not replay past messages over the event stream.
         try {
-          const history = await ccGetSessionMessages(sessionId);
-          setMessages(fromSdkMessages(history, sessionId));
+          await refreshClaudeHistory(sessionId);
         } catch (err) {
           console.warn("[useCCSessionManager] Failed to load session history", {
             sessionId,
@@ -324,8 +321,9 @@ export function useCCSessionManager() {
         // Wait for CC view listener readiness before replaying historical messages.
         await waitForListeners(sessionId);
 
-        await ccResumeSession(
+        await ensureClaudeSessionForSend(
           sessionId,
+          effectiveCwd,
           buildAgentOptions(options, effectiveCwd, {
             resume: sessionId,
             continueConversation: true,
@@ -401,12 +399,12 @@ export function useCCSessionManager() {
 
   const ensureSessionForSend = useCallback(
     async (sessionId: string, projectPath?: string) => {
-      if (useCCStore.getState().activeSessionIds.includes(sessionId)) return;
       const directory = projectPath ?? useWorkspaceStore.getState().cwd;
       if (!directory?.trim()) throw new Error("请选择会话的项目目录");
       const capturedOptions = useCCStore.getState().options;
-      await ccResumeSession(
+      await ensureClaudeSessionForSend(
         sessionId,
+        directory,
         buildAgentOptions(capturedOptions, directory, {
           resume: sessionId,
           continueConversation: true,

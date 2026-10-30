@@ -1,19 +1,21 @@
 import {
   lazy,
   Suspense,
-  useCallback,
   useEffect,
   useRef,
   useState,
 } from "react";
 import { useIsMobile } from "@session/hooks/use-mobile";
-import { useGitWatch } from "@session/hooks/useGitWatch";
 import { useLayoutStore, useWorkspaceStore } from "@session/stores";
-import { useGitStatsStore } from "@session/stores/useGitStatsStore";
 import { detectWebFramework } from "../../features/web-preview/webFrameworkDetection";
 import { RightPanelHeader } from "./RightPanelHeader";
+import { OptionalSessionPanel } from "./OptionalSessionPanel";
 import { useSavedTurnReviewStore } from "@session/stores/useSavedTurnReviewStore";
-const SavedTurnDiffPanel = lazy(() => import("@session/features/git/SavedTurnDiffPanel").then(m => ({ default: m.SavedTurnDiffPanel })));
+const SavedTurnDiffPanel = lazy(() =>
+  import("@session/features/git/SavedTurnDiffPanel").then((m) => ({
+    default: m.SavedTurnDiffPanel,
+  })),
+);
 
 const VsCodePanel = lazy(() =>
   import("@session/features/vscode/VsCodePanel").then((m) => ({
@@ -50,37 +52,17 @@ function ToolLoading({ label }: { label: string }) {
 export function RightPanel({ visible = true }: { visible?: boolean }) {
   const { activeRightPanelTab, openRightPanelTabs } = useLayoutStore();
   const { cwd } = useWorkspaceStore();
-  const savedReview = useSavedTurnReviewStore(s => s.target);
-  const { refreshStats } = useGitStatsStore();
+  const savedReview = useSavedTurnReviewStore((s) => s.target);
   const isMobile = useIsMobile();
   const hasOpenedFiles = useRef(false);
+  const hasOpenedDiff = useRef(false);
+  if (visible && activeRightPanelTab === "diff") hasOpenedDiff.current = true;
   const hasOpenedVsCode = useRef(false);
   if (openRightPanelTabs.includes("vscode")) hasOpenedVsCode.current = true;
   const hasOpenedTerminal = useRef(false);
   if (openRightPanelTabs.includes("terminal")) hasOpenedTerminal.current = true;
   if (activeRightPanelTab === "files") hasOpenedFiles.current = true;
   const [webPreviewUrl, setWebPreviewUrl] = useState("");
-
-  // Use refs to avoid stale closures without adding them to effect deps.
-  const cwdRef = useRef(cwd);
-  const refreshStatsRef = useRef(refreshStats);
-  cwdRef.current = cwd;
-  refreshStatsRef.current = refreshStats;
-
-  // Eagerly refresh (with loading state) whenever cwd changes.
-  useEffect(() => {
-    if (!cwd) return;
-    void refreshStats(cwd, false);
-  }, [cwd, refreshStats]);
-
-  // Stable silent refresher for git watch — never changes identity so useGitWatch
-  // doesn't teardown/recreate its fs watcher on every render.
-  const silentRefresher = useCallback(() => {
-    const currentCwd = cwdRef.current;
-    if (currentCwd) void refreshStatsRef.current(currentCwd, true);
-  }, []);
-
-  useGitWatch(cwd, silentRefresher, Boolean(cwd));
 
   useEffect(() => {
     let cancelled = false;
@@ -118,95 +100,107 @@ export function RightPanel({ visible = true }: { visible?: boolean }) {
         }
       >
         <div className="flex-1 min-w-0 min-h-0 overflow-hidden">
-          <Suspense
-            fallback={
-              activeRightPanelTab === "diff" ? (
-                <ToolLoading label="变更" />
-              ) : null
-            }
+          <OptionalSessionPanel
+            label="工具面板"
+            visible={visible}
+            onClose={() => useLayoutStore.getState().setRightPanelOpen(false)}
           >
-            <div
-              className={
-                activeRightPanelTab === "diff"
-                  ? "h-full min-h-0 overflow-hidden"
-                  : "hidden"
-              }
-            >
-              {savedReview ? <SavedTurnDiffPanel /> : <GitDiffPanel
-                cwd={cwd}
-                isActive={visible && activeRightPanelTab === "diff"}
-              />}
-            </div>
-          </Suspense>
-
-          {activeRightPanelTab === "tasks" && (
-            <div className="h-full min-h-0 overflow-hidden">
-              <Suspense fallback={<ToolLoading label="看板" />}>
-                <TasksPanel />
+            {hasOpenedDiff.current && (
+              <Suspense
+                fallback={
+                  activeRightPanelTab === "diff" ? (
+                    <ToolLoading label="变更" />
+                  ) : null
+                }
+              >
+                <div
+                  className={
+                    activeRightPanelTab === "diff"
+                      ? "h-full min-h-0 overflow-hidden"
+                      : "hidden"
+                  }
+                >
+                  {savedReview ? (
+                    <SavedTurnDiffPanel />
+                  ) : (
+                    <GitDiffPanel
+                      cwd={cwd}
+                      isActive={visible && activeRightPanelTab === "diff"}
+                    />
+                  )}
+                </div>
               </Suspense>
-            </div>
-          )}
+            )}
 
-          {activeRightPanelTab === "todo" && (
-            <div className="h-full min-h-0 overflow-hidden">
-              <Suspense fallback={<ToolLoading label="待办" />}>
-                <TodoView />
-              </Suspense>
-            </div>
-          )}
+            {activeRightPanelTab === "tasks" && (
+              <div className="h-full min-h-0 overflow-hidden">
+                <Suspense fallback={<ToolLoading label="看板" />}>
+                  <TasksPanel />
+                </Suspense>
+              </div>
+            )}
 
-          {hasOpenedFiles.current && (
-            <div
-              className="h-full min-h-0 overflow-hidden"
-              hidden={activeRightPanelTab !== "files"}
-              inert={activeRightPanelTab !== "files" || !visible}
-            >
-              <Suspense fallback={<ToolLoading label="文件" />}>
-                <FilesPanel />
-              </Suspense>
-            </div>
-          )}
+            {activeRightPanelTab === "todo" && (
+              <div className="h-full min-h-0 overflow-hidden">
+                <Suspense fallback={<ToolLoading label="待办" />}>
+                  <TodoView />
+                </Suspense>
+              </div>
+            )}
 
-          {hasOpenedTerminal.current && (
-            <div
-              className={
-                activeRightPanelTab === "terminal"
-                  ? "h-full min-h-0 overflow-hidden"
-                  : "hidden"
-              }
-            >
-              <Suspense fallback={<ToolLoading label="终端" />}>
-                <TerminalPanel
-                  isActive={visible && activeRightPanelTab === "terminal"}
-                />
-              </Suspense>
-            </div>
-          )}
+            {hasOpenedFiles.current && (
+              <div
+                className="h-full min-h-0 overflow-hidden"
+                hidden={activeRightPanelTab !== "files"}
+                inert={activeRightPanelTab !== "files" || !visible}
+              >
+                <Suspense fallback={<ToolLoading label="文件" />}>
+                  <FilesPanel />
+                </Suspense>
+              </div>
+            )}
 
-          {hasOpenedVsCode.current && (
-            <div
-              className="h-full min-h-0 overflow-hidden"
-              hidden={activeRightPanelTab !== "vscode"}
-              inert={!visible || activeRightPanelTab !== "vscode"}
-            >
-              <Suspense fallback={<ToolLoading label="VS Code" />}>
-                <VsCodePanel
-                  active={visible && activeRightPanelTab === "vscode"}
-                />
-              </Suspense>
-            </div>
-          )}
+            {hasOpenedTerminal.current && (
+              <div
+                className={
+                  activeRightPanelTab === "terminal"
+                    ? "h-full min-h-0 overflow-hidden"
+                    : "hidden"
+                }
+              >
+                <Suspense fallback={<ToolLoading label="终端" />}>
+                  <TerminalPanel
+                    isActive={visible && activeRightPanelTab === "terminal"}
+                  />
+                </Suspense>
+              </div>
+            )}
 
-          {activeRightPanelTab === "webpreview" && (
-            <div className="h-full min-h-0 overflow-hidden">
-              <Suspense fallback={<ToolLoading label="浏览器" />}>
-                <WebPreview
-                  url={webPreviewUrl}
-                  onUrlChange={setWebPreviewUrl}
-                />
-              </Suspense>
-            </div>
-          )}
+            {hasOpenedVsCode.current && (
+              <div
+                className="h-full min-h-0 overflow-hidden"
+                hidden={activeRightPanelTab !== "vscode"}
+                inert={!visible || activeRightPanelTab !== "vscode"}
+              >
+                <Suspense fallback={<ToolLoading label="VS Code" />}>
+                  <VsCodePanel
+                    active={visible && activeRightPanelTab === "vscode"}
+                  />
+                </Suspense>
+              </div>
+            )}
+
+            {activeRightPanelTab === "webpreview" && (
+              <div className="h-full min-h-0 overflow-hidden">
+                <Suspense fallback={<ToolLoading label="浏览器" />}>
+                  <WebPreview
+                    url={webPreviewUrl}
+                    onUrlChange={setWebPreviewUrl}
+                  />
+                </Suspense>
+              </div>
+            )}
+          </OptionalSessionPanel>
         </div>
       </div>
     </div>

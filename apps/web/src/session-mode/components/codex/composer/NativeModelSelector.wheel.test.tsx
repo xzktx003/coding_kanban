@@ -15,8 +15,8 @@ import * as recentModels from "@session/components/codex/composer/recentModelCon
 
 const api = vi.hoisted(() => ({ listModels: vi.fn(), listOtherModels: vi.fn(),
   listConfigProviders: vi.fn(), listProviderPresets: vi.fn() }));
-vi.mock("@session/services/apiAdapt", async (original) => ({
-  ...(await original<typeof import("@session/services/apiAdapt")>()), ...api,
+vi.mock("@session/services/apiAdapt/codex", async (original) => ({
+  ...(await original<typeof import("@session/services/apiAdapt/codex")>()), ...api,
 }));
 const A="r24-wheel-a", B="r24-wheel-b", MODEL="r24-wheel-model";
 const owner=(thread:string)=>sessionDraftKey("codex",thread);

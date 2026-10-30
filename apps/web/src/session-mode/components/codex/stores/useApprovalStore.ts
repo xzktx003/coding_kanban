@@ -11,7 +11,7 @@ import type {
 import {
   respondToCommandExecutionApproval,
   respondToFileChangeApproval,
-} from "@session/services";
+} from "@session/services/apiAdapt/codex";
 
 export type ApprovalRequest =
   | (CommandExecutionRequestApprovalParams & {

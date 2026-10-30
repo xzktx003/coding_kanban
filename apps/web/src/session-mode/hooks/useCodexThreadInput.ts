@@ -6,7 +6,7 @@ import {
 } from "@session/features/subagents/store";
 import { subagentService } from "@session/features/subagents/service";
 import { selectCodexThreadInput } from "@session/features/subagents/inputIdentity";
-import { classifySubagentThread } from "@agent-orchestrator/shared";
+import { classifySubagentThread } from "@agent-orchestrator/shared/session-subagents";
 import { useSessionInteractionVisible } from "@session/session-dom";
 
 /** Only visible inputs with a child clue read metadata; no history or writer is opened. */

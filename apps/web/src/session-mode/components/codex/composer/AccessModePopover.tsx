@@ -13,6 +13,9 @@ import { useNativeFullAccessConfirmation } from "./NativeFullAccessConfirmation"
 import { ComposerFooterLabel } from "./ComposerToolbarContext";
 import { NativeComposerIcon } from "./NativeComposerIcon";
 import { ComposerTooltip } from "./ComposerTooltip";
+import { PermissionProfiles } from "./PermissionProfiles";
+import { useCodexStore } from "../stores";
+import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
 
 /** Main PermissionsModeDropdown semantics; auto review needs an authoritative native capability. */
 export function AccessModePopover({ threadId }: { threadId: string | null }) {
@@ -28,16 +31,21 @@ export function AccessModePopover({ threadId }: { threadId: string | null }) {
     collaborationMode,
     setCollaborationMode,
     setApprovalsReviewer,
+    permissions,
+    setPermissions,
   } = useThreadModelSettings(threadId);
+  const threadCwd = useCodexStore((state) => state.threads?.find((thread) => thread.id === threadId)?.cwd);
+  const workspaceCwd = useWorkspaceStore((state) => state.cwd);
   const {
     ask,
     confirmation,
     open: fullAccessOpen,
   } = useNativeFullAccessConfirmation();
   const [menuOpen, setMenuOpen] = useState(false);
-  const full = permissionsKnown && sandbox === "danger-full-access";
-  const auto = permissionsKnown && approvalsReviewer !== "user";
-  const readOnly = permissionsKnown && sandbox === "read-only";
+  const [profilesOpen, setProfilesOpen] = useState(false);
+  const full = !permissions && permissionsKnown && sandbox === "danger-full-access";
+  const auto = !permissions && permissionsKnown && approvalsReviewer !== "user";
+  const readOnly = !permissions && permissionsKnown && sandbox === "read-only";
   const custom =
     permissionsKnown &&
     (sandboxPolicy?.type === "externalSandbox" ||
@@ -45,6 +53,8 @@ export function AccessModePopover({ threadId }: { threadId: string | null }) {
   const label =
     collaborationMode === "plan"
       ? t("plan")
+      : permissions
+        ? `配置：${permissions}`
       : !permissionsKnown
         ? "权限待确认"
         : auto
@@ -66,7 +76,7 @@ export function AccessModePopover({ threadId }: { threadId: string | null }) {
       key: "default",
       label: "请求批准",
       description: "编辑外部文件和使用互联网时始终询问",
-      active: !!permissionsKnown && !full && !auto && !readOnly && !custom,
+      active: !permissions && !!permissionsKnown && !full && !auto && !readOnly && !custom,
       disabled: false,
       choose: () => {
         setAccessMode("workspace-write");
@@ -105,7 +115,7 @@ export function AccessModePopover({ threadId }: { threadId: string | null }) {
   ];
   return (
     <>
-      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+      <DropdownMenu open={menuOpen} onOpenChange={(open) => { setMenuOpen(open); if (!open) setProfilesOpen(false); }}>
         <ComposerTooltip
           label="更改权限"
           popupOpen={menuOpen || fullAccessOpen}
@@ -198,6 +208,7 @@ export function AccessModePopover({ threadId }: { threadId: string | null }) {
               <NativeComposerIcon name="check" />
             </DropdownMenuItem>
           )}
+          {profilesOpen ? <PermissionProfiles cwd={threadId ? threadCwd ?? null : workspaceCwd ?? null} selected={permissions} onSelect={(id) => { setPermissions(id); finish(); }} /> : <DropdownMenuItem disabled={!!threadId && !threadCwd} title={threadId && !threadCwd ? "会话工作目录尚待核对" : undefined} onSelect={(event) => { event.preventDefault(); setProfilesOpen(true); }}>选择权限配置…</DropdownMenuItem>}
           <div className="session-native-permission-adaptations">
             <DropdownMenuItem
               role="menuitemradio"

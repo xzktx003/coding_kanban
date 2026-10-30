@@ -155,6 +155,32 @@ it("does not offer blank review or saved-patch actions for projected metadata", 
   expect(api.apply).not.toHaveBeenCalled();
 });
 
+it("keeps short projected diffs previewable while long projected diffs stay unloaded", () => {
+  const short = changes[0];
+  const long = {
+    path: "/a/large.py",
+    diff: "",
+    kind: { type: "update" as const, move_path: null },
+    addedCount: 0,
+    removedCount: 0,
+    transcriptMetadataOnly: true,
+  };
+  render(
+    <ThreadFileChangesSummary
+      changes={[short, long]}
+      threadId="a"
+      turnId="mixed-turn"
+    />,
+  );
+  expect(screen.getByRole("button", { name: "预览 file.py Diff" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "查看文件 large.py" })).toBeTruthy();
+  expect(screen.getByText("详情未加载")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "预览 large.py Diff" })).toBeNull();
+  expect(screen.queryByText("+0")).toBeNull();
+  expect(screen.queryByText("-0")).toBeNull();
+  expect(api.apply).not.toHaveBeenCalled();
+});
+
 it("projected paths can open the owning file without opening an empty historical diff or changing input target", () => {
   const reveal = vi
     .spyOn(useEditorStore.getState(), "revealFile")

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 const api = vi.hoisted(() => ({ canonicalizePath: vi.fn(async (path: string) => path), readDirectory: vi.fn(async () => []), getHomeDirectory: vi.fn(async () => '/home/user') }));
-vi.mock('@session/services/apiAdapt', () => api);
+vi.mock('@session/services/apiAdapt/filesystem', () => api);
 vi.mock('@session/browser-opener', () => ({ openUrl: vi.fn() }));
 vi.mock('@session/hooks/runtime', () => ({ isTauri: () => false, isDesktopTauri: () => false }));
 import { BrowserProjects } from '../features/ProjectSelector/BrowserProjects';

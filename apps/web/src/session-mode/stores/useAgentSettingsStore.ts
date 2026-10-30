@@ -1,3 +1,4 @@
+import { sessionWindowStorageName } from "@session/services/sessionWindowContext";
 import { create } from "zustand";
 import {
   createPerFieldStorage,
@@ -26,7 +27,7 @@ interface AgentSettingsStore extends AgentSettings {
  * therefore owns its own key; see `lib/perFieldStorage.ts` for the boundary.
  */
 const storage = createPerFieldStorage<AgentSettings>({
-  legacyKey: "kanban.session.agent-settings",
+  legacyKey: sessionWindowStorageName("kanban.session.agent-settings"),
   version: 2,
   defaults: { selectedAgent: "codex", instructionType: "system" },
   validators: {

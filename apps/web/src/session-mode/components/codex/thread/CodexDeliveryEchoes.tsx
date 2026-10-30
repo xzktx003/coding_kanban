@@ -8,6 +8,8 @@ import {
   useCodexDeliveryStore,
 } from "@session/stores/useCodexDeliveryStore";
 import { UserMessageItem } from "../items/UserMessageItem";
+import { CodexSteerReceipts } from "./CodexSteerReceipts";
+import { useFollowupStore } from "@session/services/followupService";
 
 export function CodexDeliveryEchoes({
   threadId,
@@ -18,6 +20,7 @@ export function CodexDeliveryEchoes({
 }) {
   const recovering = useSessionSyncStore((s) => s.recovering[threadId]);
   const entries = useCodexDeliveryStore((s) => s.entries);
+  const receiptRevision = useFollowupStore((s) => s.threads[threadId]?.revision ?? 0);
   const acknowledged = useMemo(() => deliveredClientIds(events), [events]);
   const terminalTurns = useMemo(() => {
     const statuses = new Map<string, string>();
@@ -76,6 +79,7 @@ export function CodexDeliveryEchoes({
   );
   return (
     <>
+      <CodexSteerReceipts threadId={threadId} events={events} pendingClientIds={echoes.map(e => e.id)} revision={receiptRevision} />
       {echoes.map((e) => (
         <div key={e.id} data-delivery-echo={e.id} className="pb-2">
           <UserMessageItem

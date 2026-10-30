@@ -24,7 +24,7 @@ const settings = vi.hoisted(() => ({
 
 // Keep the actual useModels hook, its asynchronous load and shared cache. Only
 // its four external reads are fixtures; there is no browser/native transport.
-vi.mock("@session/services/apiAdapt", () => api);
+vi.mock("@session/services/apiAdapt/codex", () => api);
 vi.mock("@session/components/codex/stores", () => ({
   useCodexStore: Object.assign(
     (select: (state: { currentThreadId: string }) => unknown) =>

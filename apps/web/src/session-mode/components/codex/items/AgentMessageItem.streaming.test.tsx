@@ -15,7 +15,7 @@ vi.mock("../composer/v2/MessageReferenceActions", () => ({
   MessageReferenceActions: () => null,
 }));
 
-it("keeps active assistant output out of the Markdown parser until completion", () => {
+it("renders bounded live Markdown and switches to the final document without assistant actions while streaming", () => {
   const text = "**still streaming**\n\n```ts\nconst answer = 42;\n```";
   const { container, rerender } = render(
     <AgentMessageItem
@@ -29,7 +29,10 @@ it("keeps active assistant output out of the Markdown parser until completion", 
   expect(
     container.querySelector("[data-codex-streaming-text]")?.textContent,
   ).toBe(text);
-  expect(container.querySelector("[data-testid=markdown-renderer]")).toBeNull();
+  expect(
+    container.querySelector("[data-testid=markdown-renderer]")?.textContent,
+  ).toBe(text);
+  expect(container.querySelector(".codex-message-native-actions")).toBeNull();
 
   rerender(<AgentMessageItem text={text} threadId="thread" itemId="message" />);
 

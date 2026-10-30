@@ -6,7 +6,10 @@ import { isSecondaryPage } from "../../services/sessionPageHistory";
 import { listenInSessionMode } from "@session/session-dom";
 import { Component, lazy, Suspense, useEffect, useRef, type ReactNode } from "react";
 import type { ImperativePanelHandle } from "react-resizable-panels";
-import { AppSideBar, RightPanel } from "@session/components/layout";
+import { DeferredAppSidebar, DeferredRightPanel } from "./DeferredLayoutPanels";
+import { useWorkspaceGitStatus } from "./useWorkspaceGitStatus";
+import { useSessionNumberNavigation } from "@session/hooks/useSessionNumberNavigation";
+import { matchesSessionShortcut } from "@session/services/sessionKeyboardShortcuts";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -20,6 +23,7 @@ import {
 import { useIsMobile } from "@session/hooks/use-mobile";
 import { useEdgeSwipe } from "@session/hooks/useEdgeSwipe";
 import { useLayoutStore } from "@session/stores";
+import AgentView from "@session/components/agent/AgentView";
 import { DesktopToolDock } from "./DesktopToolDock";
 
 const SettingsView = lazy(
@@ -29,7 +33,6 @@ const PluginsView = lazy(
   () => import("@session/features/plugins/components/PluginsView"),
 );
 const AgentsMdView = lazy(() => import("@session/views/AgentsMdView"));
-const AgentView = lazy(() => import("@session/components/agent/AgentView"));
 const AutoMationsView = lazy(() =>
   import("../../features/automations").then((module) => ({
     default: module.AutoMationsView,
@@ -48,6 +51,8 @@ const clamp = (value: number, min: number, max: number) =>
 
 function LayoutContent({ mainContent }: { mainContent: React.ReactNode }) {
   useSubagentFamilySync();
+  useWorkspaceGitStatus();
+  useSessionNumberNavigation();
   const toolLayoutRef = useRef<HTMLDivElement>(null);
   const {
     isSidebarOpen,
@@ -67,8 +72,7 @@ function LayoutContent({ mainContent }: { mainContent: React.ReactNode }) {
   const rightPanelRef = useRef<ImperativePanelHandle>(null);
   const mainPanelRef = useRef<ImperativePanelHandle>(null);
   const isMobile = useIsMobile();
-  const mobileEditorOpen =
-    isMobile && isRightPanelVisible && openRightPanelTabs.includes("vscode");
+  const mobileToolsOpen = isMobile && isRightPanelVisible;
   // Focus mode hides the main agent thread so the right panel (diff/tasks/etc.)
   // can take the full width — useful when reviewing a diff or reading notes
   // without the agent chat competing for attention.
@@ -199,7 +203,7 @@ function LayoutContent({ mainContent }: { mainContent: React.ReactNode }) {
             <div
               className="session-dock-main h-full min-h-0"
               hidden={isFocusModeActive}
-              inert={isFocusModeActive || mobileEditorOpen}
+              inert={isFocusModeActive || mobileToolsOpen}
             >
               {mainContent}
             </div>
@@ -243,7 +247,7 @@ function LayoutContent({ mainContent }: { mainContent: React.ReactNode }) {
                 hidden={!isRightPanelVisible}
                 inert={!isRightPanelVisible}
               >
-                <RightPanel visible={isRightPanelVisible} />
+                <DeferredRightPanel visible={isRightPanelVisible} onClose={() => setRightPanelOpen(false)} />
               </div>
             </ResizablePanel>
           </>
@@ -296,7 +300,7 @@ export function AppLayout() {
         )
       )
         return;
-      if ((event.metaKey || event.ctrlKey) && event.key === ",") {
+      if (matchesSessionShortcut(event, "settings")) {
         event.preventDefault();
         setView("settings");
       }
@@ -342,7 +346,7 @@ export function AppLayout() {
           onOpenChange={setSidebarOpen}
           className="h-full min-h-0"
         >
-          <AppSideBar />
+          <DeferredAppSidebar />
           {/* Single layout component for both mobile and desktop.
               Keeping mainContent at a stable tree position prevents lazy views
               from unmounting/remounting when the viewport crosses the mobile breakpoint. */}

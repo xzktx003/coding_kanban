@@ -1,3 +1,4 @@
+vi.mock("./nativeOperationContext",()=>({readNativeOperationContext:async()=>({namespace:"private-fixture-native-domain",scopeToken:"a".repeat(64)})}));
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({
@@ -6,6 +7,9 @@ const api = vi.hoisted(() => ({
   threadGoalSet: vi.fn(),
 }));
 vi.mock("./apiAdapt", () => api);
+vi.mock("./apiAdapt/codex", () => api);
+vi.mock("./apiAdapt/git", () => api);
+vi.mock("./apiAdapt/skills", () => api);
 
 import { codexService, resetCodexRuntimeState } from "./codexService";
 import { useCodexStore, useConfigStore } from "../components/codex/stores";
@@ -32,6 +36,7 @@ function deferred<T>() {
 }
 
 beforeEach(() => {
+  for (let i=localStorage.length-1;i>=0;i--) { const key=localStorage.key(i); if(key?.startsWith("kanban.session.execution")) localStorage.removeItem(key); }
   vi.useFakeTimers();
   vi.resetAllMocks();
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -107,6 +112,7 @@ it("uses the complete captured creation config and workspace without activating 
     webSearchRequest: false,
     serviceTier: null,
   });
+  api.threadStart.mockResolvedValueOnce({...created,thread:{...created.thread,cwd:"/worktree"}});
   await codexService.threadStart({ captured, shouldActivate: () => false });
   expect(api.gitCreateWorktree.mock.calls[0][0]).toBe("/project");
   expect(api.threadStart.mock.calls[0][0]).toMatchObject({
@@ -143,4 +149,15 @@ it("captures an object approval policy by value before the original settings obj
     true,
   );
   expect(captured.config.approvalPolicy).not.toBe(policy);
+});
+it("refuses a worktree start whose acknowledged native cwd still points at the source",async()=>{
+ useConfigStore.setState({threadCwdMode:"worktree"});
+ await expect(codexService.threadStart()).rejects.toThrow(/工作目录.*核对/);
+ expect(useCodexStore.getState().threads.some(thread=>thread.id==="created")).toBe(false);
+});
+it("persists an unknown native creation and blocks a fresh captured start until that result is reconciled",async()=>{
+ api.threadStart.mockRejectedValueOnce(new Error("connection closed after write"));
+ await expect(codexService.threadStart()).rejects.toThrow();
+ await expect(codexService.threadStart()).rejects.toThrow(/核对.*重复创建/);
+ expect(api.threadStart).toHaveBeenCalledTimes(1);
 });

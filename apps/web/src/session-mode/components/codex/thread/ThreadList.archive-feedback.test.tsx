@@ -9,7 +9,7 @@ import { ThreadList } from "./ThreadList";
  * 聊天归档未成功. Our row action reported an untranslated English string, and
  * reported nothing at all on success, so an archive from the rail was silent.
  *
- * The menu item label itself stays English ("Archive"), matching the rest of the
+ * The menu label and feedback both use the approved Chinese workflow copy; the
  * row menu and the labels already pinned by ThreadList.usability.test.tsx and the
  * e2e specs; only the user-facing notices are localized here.
  *
@@ -74,7 +74,7 @@ async function archiveFromRow() {
     clientX: 10,
     clientY: 10,
   });
-  fireEvent.click(await screen.findByRole("menuitem", { name: "Archive" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: "归档" }));
   return toast as unknown as {
     success: ReturnType<typeof vi.fn>;
     error: ReturnType<typeof vi.fn>;

@@ -1,3 +1,5 @@
+import { authHeaders, buildUrl } from "@session/hooks/runtime";
+import { captureCodexOperationScope, isCodexOperationScopeCurrent } from "./codexOperationScope";
 import { toast } from "sonner";
 import { useEditorStore } from "@session/stores/useEditorStore";
 import { useLayoutStore } from "@session/stores/useLayoutStore";
@@ -12,11 +14,13 @@ export async function openWorkspaceFileReference(
   onOpened?: (target: { root: string; path: string }) => void,
 ): Promise<boolean> {
   const own = ++navigationRevision;
+  const scope=captureCodexOperationScope(),identity=JSON.stringify([buildUrl("/workspace-files/resolve"),authHeaders()]);
   const before = useEditorStore.getState();
   const stillCurrent = () => {
     const current = useEditorStore.getState();
     return (
       own === navigationRevision &&
+      isCodexOperationScopeCurrent(scope) && identity===JSON.stringify([buildUrl("/workspace-files/resolve"),authHeaders()]) &&
       current.activeFile === before.activeFile &&
       current.revealLocation === before.revealLocation
     );

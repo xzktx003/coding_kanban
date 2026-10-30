@@ -39,7 +39,12 @@ export type ContentBlock =
   | { type: "image"; source: ImageSource };
 
 /** User message */
-export interface UserMessage {
+export interface ReadonlyHistoryMetadata {
+  truncated?: boolean;
+  historyDetail?: { itemId: string };
+  historyImages?: Array<{ index: number; mimeType: string; label?: string }>;
+}
+export interface UserMessage extends ReadonlyHistoryMetadata {
   type: "user";
   text?: string;
   content?: ContentBlock[];
@@ -59,7 +64,7 @@ export interface AssistantMessageInner {
 }
 
 /** Assistant message */
-export interface AssistantMessage {
+export interface AssistantMessage extends ReadonlyHistoryMetadata {
   type: "assistant";
   message: AssistantMessageInner;
   parent_tool_use_id?: string;
@@ -117,6 +122,12 @@ export interface PermissionRequestMessage {
   /** Whether "always allow" targets project settings or session memory (only one shown) */
   alwaysAllowTarget?: "project" | "session";
   resolved?: "allow" | "allow_always" | "allow_project" | "deny";
+  toolInputTruncated?: boolean;
+  inputAvailable?: boolean;
+  inputError?: string;
+  inputRevision?: string;
+  executionId?: string;
+  recoveryRuntimeInstance?: string;
 }
 
 /** Control cancel request (internal protocol) */

@@ -1,5 +1,5 @@
 import { ArrowLeft } from "lucide-react";
-import { ConversationMenu } from "../codex/composer/ConversationMenu";
+import { DeferredConversationMenu as ConversationMenu } from "../codex/composer/DeferredConversationMenu";
 import { useCodexStore } from "../codex/stores/useCodexStore";
 import { useLayoutStore } from "../../stores/useLayoutStore";
 import { secondaryPages } from "../../services/sessionPageHistory";

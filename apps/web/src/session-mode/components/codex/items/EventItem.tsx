@@ -1,3 +1,4 @@
+import { isTranscriptControlNotification } from "../presentation/transcriptControl";
 import { MessageTimestamp } from "./MessageTimestamp";
 import { SubagentEvent } from "@session/features/subagents/SubagentEvent";
 import { useMemo } from "react";
@@ -178,6 +179,7 @@ const EventItemBody = ({
       getDiffViewerProps={getDiffViewerProps}
     />
   );
+  if (isTranscriptControlNotification(event.method)) return null;
   switch (event.method) {
     case "model/rerouted":
       return <NativeModelReroutedNotice value={event.params} />;
@@ -266,6 +268,8 @@ const EventItemBody = ({
           return (
             <McpToolCallItem
               item={startedItem}
+              threadId={event.params.threadId}
+              turnId={event.params.turnId}
               termination={context?.renderTermination}
             />
           );
@@ -354,7 +358,13 @@ const EventItemBody = ({
         case "subAgentActivity":
           return <SubagentEvent root={event.params.threadId} item={item} />;
         case "mcpToolCall":
-          return <McpToolCallItem item={item} />;
+          return (
+            <McpToolCallItem
+              item={item}
+              threadId={event.params.threadId}
+              turnId={event.params.turnId}
+            />
+          );
         case "webSearch":
         case "imageView":
         case "imageGeneration":
@@ -389,12 +399,28 @@ const EventItemBody = ({
             !candidate.params.willRetry,
         );
       const failed = event.params.turn.status === "failed" && !alreadyShown;
-      const interrupted = event.params.turn.status === "interrupted";
-      if (aggregatedChanges.length === 0 && !failed && !interrupted)
+      const executionUnverified = context?.executionUnverified === true;
+      const interrupted =
+        event.params.turn.status === "interrupted" && !executionUnverified;
+      if (
+        aggregatedChanges.length === 0 &&
+        !failed &&
+        !interrupted &&
+        !executionUnverified
+      )
         return null;
 
       return (
         <div className="space-y-2">
+          {executionUnverified && (
+            <p
+              role="status"
+              className="text-xs text-muted-foreground"
+              data-turn-execution-unverified
+            >
+              正在核对轮次状态
+            </p>
+          )}
           {interrupted && (
             <Badge
               variant="destructive"

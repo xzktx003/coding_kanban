@@ -28,7 +28,7 @@ function rendererMemory(
   }
 }
 
-async function setup(page: Page, baseURL: string) {
+async function setup(page: Page, baseURL: string, warmFollowedSessions?: boolean) {
   const fixture = await installSessionUxFixture(page, 3);
   for (const thread of fixture.threads) {
     (thread as any).turns = Array.from({ length: 8 }, (_, i) => ({
@@ -66,32 +66,51 @@ async function setup(page: Page, baseURL: string) {
       json: { cards, initialized: true, revision: 1, sequence: 0 },
     }),
   );
-  await page.addInitScript((cards) => {
-    localStorage.setItem(
-      "kanban.session.agent-center-store",
-      JSON.stringify({
-        version: 5,
-        state: {
-          cards,
-          currentAgentCardId: "ux-0",
-          currentAgentCardKind: "codex",
-          cardsViewMode: "solo",
-          sharedTabsInitialized: true,
-        },
-      }),
-    );
-    localStorage.setItem(
-      "kanban.session.layout-storage",
-      JSON.stringify({
-        version: 0,
-        state: { isSidebarOpen: false, isRightPanelOpen: false, view: "agent" },
-      }),
-    );
-  }, cards);
+  await page.addInitScript(
+    ({ cards, warmFollowedSessions }) => {
+      // Undefined exercises a new device without a persisted retention choice.
+      // Do not seed false and mistake it for proof of the product default.
+      if (warmFollowedSessions !== undefined)
+        localStorage.setItem(
+          "kanban.session.settings-storage",
+          JSON.stringify({ version: 13, state: { warmFollowedSessions } }),
+        );
+      else if (localStorage.getItem("kanban.session.settings-storage") !== null)
+        throw new Error("Default-retention fixture requires empty settings storage");
+      (window as any).__idleMemoryInitialSettings = localStorage.getItem(
+        "kanban.session.settings-storage",
+      );
+      localStorage.setItem(
+        "kanban.session.agent-center-store",
+        JSON.stringify({
+          version: 5,
+          state: {
+            cards,
+            currentAgentCardId: "ux-0",
+            currentAgentCardKind: "codex",
+            cardsViewMode: "solo",
+            sharedTabsInitialized: true,
+          },
+        }),
+      );
+      localStorage.setItem(
+        "kanban.session.layout-storage",
+        JSON.stringify({
+          version: 0,
+          state: {
+            isSidebarOpen: false,
+            isRightPanelOpen: false,
+            view: "agent",
+          },
+        }),
+      );
+    },
+    { cards, warmFollowedSessions },
+  );
   const stream = await liveStream(page, baseURL);
   try {
     await page.goto("/?mode=session", { waitUntil: "domcontentloaded" });
-    await page.waitForFunction(async () => {
+    await expect.poll(() => page.evaluate(async () => {
       const path = "/src/session-mode/components/codex/stores/index.ts";
       const url =
         performance
@@ -101,7 +120,7 @@ async function setup(page: Page, baseURL: string) {
       return ["ux-0", "ux-1", "ux-2"].every(
         (id) => useCodexStore.getState().events[id]?.length,
       );
-    });
+    }), {timeout:45_000}).toBe(true);
     await expect(
       page.locator('[data-codex-transcript-shell="ux-0"]'),
     ).toBeVisible({ timeout: 45_000 });
@@ -121,11 +140,15 @@ async function setup(page: Page, baseURL: string) {
       const { useSessionAttentionStore } = await module(
         "/src/session-mode/stores/useSessionAttentionStore.ts",
       );
+      const { estimateTranscriptBytes } = await module(
+        "/src/session-mode/services/codexTranscriptMemoryBudget.ts",
+      );
       (window as any).__idleMemory = {
         codex: useCodexStore,
         approvals: useApprovalStore,
         drafts: useSessionDraftStore,
         attention: useSessionAttentionStore,
+        estimateTranscriptBytes,
       };
       useSessionDraftStore
         .getState()
@@ -161,6 +184,12 @@ async function snapshot(page: Page) {
       ),
       streaming: Object.keys(state.streamingAgentMessages),
       timing: state.turnTimingMap,
+      bodyBytes: Object.fromEntries(
+        Object.entries(state.events).map(([id, events]) => [
+          id,
+          w.estimateTranscriptBytes(events),
+        ]),
+      ),
       approvals: w.approvals.getState().pendingApprovals.length,
       draft: w.drafts.getState().drafts["memory-fixture-draft"]?.text,
       unread: w.attention.getState().receipts["codex:ux-1"],
@@ -192,148 +221,235 @@ async function observeAudioContexts(cdp: CDPSession) {
   return () => ({ created, active: active.size, peakActive });
 }
 
-test("invisible transcripts expire automatically while native completions and read-only reactivation survive", async ({
-  page,
-  context,
-  baseURL,
-}, info) => {
-  test.setTimeout(180_000);
-  const errors: string[] = [];
-  page.on("pageerror", (e) => errors.push(e.message));
-  const { fixture, stream } = await setup(page, baseURL!);
-  const cdp = await context.newCDPSession(page);
-  const audio = await observeAudioContexts(cdp);
-  const browserCdp = await context.browser()!.newBrowserCDPSession();
-  const started = Date.now(),
-    observations: unknown[] = [];
-  const rssSamplingErrors: RssSamplingError[] = [];
-  const observe = async (phase: string) => {
-    const heap = await cdp.send("Runtime.getHeapUsage");
-    const processes = await browserCdp.send("SystemInfo.getProcessInfo");
-    const memory = rendererMemory(
-      processes.processInfo,
-      rssSamplingErrors,
-      phase,
-    );
-    observations.push({
-      phase,
-      seconds: (Date.now() - started) / 1000,
-      heapBytes: heap.usedSize,
-      backingStorageBytes: heap.backingStorageSize,
-      ...memory,
-      rendererRssBytes: memory.rendererRssBytes ?? null,
-      rendererRssScope: "all-browser-renderers",
-      snapshot: await snapshot(page),
-    });
-  };
-  try {
-    // Absence before the initial read is not evidence of idle-body reclamation.
-    // Prove both background transcripts were populated before timing expiry.
-    for (const id of ["ux-1", "ux-2"])
-      await expect.poll(async () => (await snapshot(page)).counts[id]).toBeGreaterThan(0);
-    await observe("visible-and-background");
-    // Real clock and the normally mounted retention service, without calling its release function.
-    await expect
-      .poll(async () => (await snapshot(page)).counts["ux-1"], {
-        timeout: 75_000,
-      })
-      .toBeUndefined();
-    const cold = await snapshot(page);
-    await observe("dormant-body-expired");
-    expect(cold.counts["ux-0"]).toBeGreaterThan(0);
-    expect(cold.counts["ux-2"]).toBeUndefined();
-    expect(cold.approvals).toBe(1);
-    expect(cold.draft).toBe("keep my unsent draft");
-    const target = fixture.threads[1] as any;
-    const turn = {
-      id: "new-after-expiry",
-      status: "inProgress",
-      startedAt: Math.floor(Date.now() / 1000),
-      durationMs: null,
-      items: [] as any[],
-    };
-    target.turns.push(turn);
-    target.status = { type: "active", activeFlags: [] };
-    stream.emit(1, {
-      method: "turn/started",
-      params: { threadId: target.id, turn },
-    });
-    await expect
-      .poll(async () => (await snapshot(page)).timing[target.id]?.status)
-      .toBe("inProgress");
-    for (let i = 0; i < 40; i++)
-      stream.emit(2 + i, {
-        method: "item/agentMessage/delta",
-        params: {
-          threadId: target.id,
-          turnId: turn.id,
-          itemId: "latest-answer",
-          delta: "temporary text ".repeat(2000),
-        },
-      });
-    turn.status = "completed";
-    turn.items = [
-      {
-        type: "agentMessage",
-        id: "latest-answer",
-        text: "新的最终回复：休眠后仍能恢复",
-      },
-    ];
-    target.status = { type: "idle" };
-    stream.emit(42, {
-      method: "turn/completed",
-      params: { threadId: target.id, turn },
-    });
-    await expect
-      .poll(async () => (await snapshot(page)).timing[target.id]?.status)
-      .toBe("completed");
-    await expect
-      .poll(async () =>
-        (await snapshot(page)).unread?.completed?.some(
-          (r: any) => r.id === turn.id,
-        ),
-      )
-      .toBe(true);
-    await page.waitForTimeout(1500);
-    await expect.poll(() => audio().active, { timeout: 35_000 }).toBe(0);
-    expect(audio().created).toBeGreaterThan(0);
-    expect((await snapshot(page)).counts[target.id]).toBeUndefined();
-    expect((await snapshot(page)).streaming).not.toContain(target.id);
-    await select(page, target.id);
-    await expect(
-      page.getByText("新的最终回复：休眠后仍能恢复", { exact: true }),
-    ).toBeVisible();
-    expect((await snapshot(page)).draft).toBe("keep my unsent draft");
-    expect(
-      fixture.calls.filter((c) =>
-        /\/(resume|start|interrupt|submit)$/.test(c.path),
-      ),
-    ).toEqual([]);
-    expect(errors).toEqual([]);
-    await observe("read-only-reactivated");
-  } finally {
-    writeFileSync(
-      info.outputPath("idle-memory-observations.json"),
-      JSON.stringify(
-        {
-          boundary:
-            "Natural heap samples and all renderer RSS in this isolated browser; no forced GC or reload",
-          observations,
-          errors,
+for (const warm of [undefined, true, false])
+  test(
+    warm === undefined
+      ? "default no-persisted-choice keeps recent pages warm then pressure reclaims invisible bodies while native completions and read-only reactivation survive"
+      : warm
+        ? "bounded recent pages stay warm then pressure reclaims invisible bodies while native completions and read-only reactivation survive"
+        : "device-local opt-out restores sixty-second physical release while native completions and read-only reactivation survive",
+    async ({ page, context, baseURL }, info) => {
+      const expectsWarm = warm !== false;
+      test.setTimeout(210_000);
+      const errors: string[] = [];
+      page.on("pageerror", (e) => errors.push(e.message));
+      const { fixture, stream } = await setup(page, baseURL!, warm);
+      const cdp = await context.newCDPSession(page);
+      const audio = await observeAudioContexts(cdp);
+      const browserCdp = await context.browser()!.newBrowserCDPSession();
+      const started = Date.now(),
+        observations: unknown[] = [];
+      const rssSamplingErrors: RssSamplingError[] = [];
+      let retentionPolicy:
+        | { actualWarm: boolean; initialSettings: string | null }
+        | undefined;
+      const observe = async (phase: string) => {
+        const heap = await cdp.send("Runtime.getHeapUsage");
+        const processes = await browserCdp.send("SystemInfo.getProcessInfo");
+        const memory = rendererMemory(
+          processes.processInfo,
           rssSamplingErrors,
-        },
-        null,
-        2,
-      ),
-    );
-    await browserCdp.detach();
-    await cdp.detach();
-    await stream.close();
-  }
-});
+          phase,
+        );
+        observations.push({
+          phase,
+          seconds: (Date.now() - started) / 1000,
+          heapBytes: heap.usedSize,
+          backingStorageBytes: heap.backingStorageSize,
+          ...memory,
+          rendererRssBytes: memory.rendererRssBytes ?? null,
+          rendererRssScope: "all-browser-renderers",
+          snapshot: await snapshot(page),
+        });
+      };
+      try {
+        retentionPolicy = await page.evaluate(async () => {
+          const path = "/src/session-mode/stores/settings/useSettingsStore.ts";
+          const { useSettingsStore } = await import(
+            performance
+              .getEntriesByType("resource")
+              .findLast((entry) => new URL(entry.name).pathname === path)?.name ??
+              path
+          );
+          return {
+            actualWarm: useSettingsStore.getState().warmFollowedSessions,
+            initialSettings: (window as any).__idleMemoryInitialSettings,
+          };
+        });
+        expect(retentionPolicy.actualWarm).toBe(expectsWarm);
+        if (warm === undefined)
+          expect(retentionPolicy.initialSettings).toBeNull();
+        else
+          expect(
+            JSON.parse(retentionPolicy.initialSettings!).state
+              .warmFollowedSessions,
+          ).toBe(warm);
+        // Absence before the initial read is not evidence of idle-body reclamation.
+        // Prove both background transcripts were populated before timing expiry.
+        for (const id of ["ux-1", "ux-2"])
+          await expect
+            .poll(async () => (await snapshot(page)).counts[id])
+            .toBeGreaterThan(0);
+        await observe("visible-and-background");
+        let pressureSequence = 0;
+        if (expectsWarm) {
+          // Resource-sufficient followed pages stay warm beyond the former grace.
+          // Keep real time, normal lifecycle and actual body preconditions: no fake
+          // timers, direct release call or forced GC can masquerade as reclamation.
+          await page.waitForTimeout(120_000);
+          for (const id of ["ux-1", "ux-2"])
+            expect((await snapshot(page)).counts[id]).toBeGreaterThan(0);
+          await observe("resource-sufficient-warm-120s");
+          // Exercise the existing incoming-display-traffic pressure detector with
+          // actual completed-item EventSource snapshots. Live deltas are clipped and
+          // coalesced before this detector, so a burst of one live item is not a valid
+          // pressure precondition. Every frame remains below the 16 MiB ceiling.
+          for (let i = 0; i < 9; i++)
+            stream.emit(++pressureSequence, {
+              method: "item/completed",
+              params: {
+                threadId: "ux-0",
+                turnId: "pressure-probe",
+                item: {
+                  type: "agentMessage",
+                  id: "pressure-reply",
+                  text: "p".repeat(1024 * 1024),
+                },
+              },
+            });
+          const pressureTurn = {
+            id: "pressure-probe",
+            status: "completed",
+            startedAt: Math.floor(Date.now() / 1000),
+            durationMs: 1,
+            items: [
+              {
+                type: "agentMessage",
+                id: "pressure-reply",
+                text: "Bounded pressure probe complete",
+              },
+            ],
+          };
+          (fixture.threads[0] as any).turns.push(pressureTurn);
+          stream.emit(++pressureSequence, {
+            method: "turn/completed",
+            params: { threadId: "ux-0", turn: pressureTurn },
+          });
+        } else {
+          // A saved device opt-out uses the original real-time release.
+          // No injected traffic pressure, fake clock, GC or direct release call.
+          await expect
+            .poll(async () => (await snapshot(page)).counts["ux-1"], {
+              timeout: 75_000,
+            })
+            .toBeUndefined();
+        }
+        await expect
+          .poll(async () => (await snapshot(page)).counts["ux-1"], {
+            timeout: 15_000,
+          })
+          .toBeUndefined();
+        const cold = await snapshot(page);
+        await observe("dormant-body-expired");
+        expect(cold.counts["ux-0"]).toBeGreaterThan(0);
+        expect(cold.counts["ux-2"]).toBeUndefined();
+        expect(cold.approvals).toBe(1);
+        expect(cold.draft).toBe("keep my unsent draft");
+        const target = fixture.threads[1] as any;
+        const turn = {
+          id: "new-after-expiry",
+          status: "inProgress",
+          startedAt: Math.floor(Date.now() / 1000),
+          durationMs: null,
+          items: [] as any[],
+        };
+        target.turns.push(turn);
+        target.status = { type: "active", activeFlags: [] };
+        stream.emit(pressureSequence + 1, {
+          method: "turn/started",
+          params: { threadId: target.id, turn },
+        });
+        await expect
+          .poll(async () => (await snapshot(page)).timing[target.id]?.status)
+          .toBe("inProgress");
+        for (let i = 0; i < 40; i++)
+          stream.emit(pressureSequence + 2 + i, {
+            method: "item/agentMessage/delta",
+            params: {
+              threadId: target.id,
+              turnId: turn.id,
+              itemId: "latest-answer",
+              delta: "temporary text ".repeat(2000),
+            },
+          });
+        turn.status = "completed";
+        turn.items = [
+          {
+            type: "agentMessage",
+            id: "latest-answer",
+            text: "新的最终回复：休眠后仍能恢复",
+          },
+        ];
+        target.status = { type: "idle" };
+        stream.emit(pressureSequence + 42, {
+          method: "turn/completed",
+          params: { threadId: target.id, turn },
+        });
+        await expect
+          .poll(async () => (await snapshot(page)).timing[target.id]?.status)
+          .toBe("completed");
+        await expect
+          .poll(async () =>
+            (await snapshot(page)).unread?.completed?.some(
+              (r: any) => r.id === turn.id,
+            ),
+          )
+          .toBe(true);
+        await page.waitForTimeout(1500);
+        await expect.poll(() => audio().active, { timeout: 35_000 }).toBe(0);
+        expect(audio().created).toBeGreaterThan(0);
+        expect((await snapshot(page)).counts[target.id]).toBeUndefined();
+        expect((await snapshot(page)).streaming).not.toContain(target.id);
+        await select(page, target.id);
+        await expect(
+          page.getByText("新的最终回复：休眠后仍能恢复", { exact: true }),
+        ).toBeVisible();
+        expect((await snapshot(page)).draft).toBe("keep my unsent draft");
+        expect(
+          fixture.calls.filter((c) =>
+            /\/(resume|start|interrupt|submit)$/.test(c.path),
+          ),
+        ).toEqual([]);
+        expect(errors).toEqual([]);
+        await observe("read-only-reactivated");
+      } finally {
+        writeFileSync(
+          info.outputPath("idle-memory-observations.json"),
+          JSON.stringify(
+            {
+              boundary:
+                "Natural heap samples and all renderer RSS in this isolated browser; no forced GC or reload",
+              retentionPolicy: retentionPolicy && {
+                expectedWarm: expectsWarm,
+                ...retentionPolicy,
+              },
+              observations,
+              errors,
+              rssSamplingErrors,
+            },
+            null,
+            2,
+          ),
+        );
+        await browserCdp.detach();
+        await cdp.detach();
+        await stream.close();
+      }
+    },
+  );
 
 const soakMinutes = Number(process.env.SESSION_MEMORY_SOAK_MINUTES ?? 0);
-test("long-running native events keep dormant bodies empty with natural garbage collection", async ({
+test("long-running native events keep warm bodies bounded with natural garbage collection", async ({
   page,
   context,
   baseURL,
@@ -343,7 +459,8 @@ test("long-running native events keep dormant bodies empty with natural garbage 
     "Set SESSION_MEMORY_SOAK_MINUTES=30 for the real-time soak",
   );
   test.setTimeout((soakMinutes * 60 + 120) * 1000);
-  const { fixture, stream } = await setup(page, baseURL!);
+  // Preserve this historical optional-warm workload and its original thresholds.
+  const { fixture, stream } = await setup(page, baseURL!, true);
   const cdp = await context.newCDPSession(page);
   const audio = await observeAudioContexts(cdp);
   const browserCdp = await context.browser()!.newBrowserCDPSession();
@@ -441,7 +558,22 @@ test("long-running native events keep dormant bodies empty with natural garbage 
         audioContexts: audio(),
       });
       if (cycle % 40 >= 16 && cycle % 40 < 20 && Date.now() - start > 90_000) {
-        expect((await snapshot(page)).counts["ux-1"]).toBeUndefined();
+        // A resource-sufficient followed page is now deliberately warm. The
+        // separate real-pressure test retains the physical dormant-body/late
+        // event assertions; this unchanged soak workload verifies its bounded
+        // allocation with the original heap/RSS ceilings and GC windows.
+        const state = await snapshot(page);
+        expect(
+          Object.values(state.bodyBytes).every(
+            (bytes) => Number(bytes) <= 8 * 1024 * 1024,
+          ),
+        ).toBe(true);
+        expect(
+          Object.entries(state.bodyBytes).reduce(
+            (sum, [id, bytes]) => (id === "ux-0" ? sum : sum + Number(bytes)),
+            0,
+          ),
+        ).toBeLessThanOrEqual(16 * 1024 * 1024);
       }
       if (cycle % 30 === 0)
         console.log(

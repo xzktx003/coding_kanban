@@ -1,0 +1,24 @@
+import { expect, it, vi } from "vitest";
+const api = vi.hoisted(() => ({ fork: vi.fn() }));
+vi.mock("@session/services/codexService", () => ({ codexService: { threadFork: api.fork } }));
+vi.mock("@session/services/nativeOperationContext", () => ({ readNativeOperationContext: async () => ({ scopeToken: "fork-scope", namespace: "fork-domain" }) }));
+import { forkSlashLocal } from "./slashCommands";
+import { useCodexStore } from "../stores/useCodexStore";
+import { useAgentCenterStore } from "@session/stores/useAgentCenterStore";
+import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
+it("preserves a newly selected conversation when the original local fork completes late", async () => {
+  let finish!: (value: unknown) => void;
+  api.fork.mockReturnValue(new Promise(resolve => { finish = resolve; }));
+  useCodexStore.setState({ currentThreadId: "original" });
+  useWorkspaceStore.setState({ cwd: "/original-project" });
+  useAgentCenterStore.setState({ cards: [] });
+  const pending = forkSlashLocal("original");
+  useCodexStore.setState({ currentThreadId: "new-target" });
+  useWorkspaceStore.setState({ cwd: "/new-project" });
+  finish({ id: "forked", cwd: "/original-project" });
+  await pending;
+  expect(api.fork).toHaveBeenCalledWith("original", { activate: false, expectedScope: "fork-scope" });
+  expect(useCodexStore.getState().currentThreadId).toBe("new-target");
+  expect(useWorkspaceStore.getState().cwd).toBe("/new-project");
+  expect(useAgentCenterStore.getState().cards.some(card => card.id === "forked")).toBe(true);
+});

@@ -1,7 +1,7 @@
 import {
   mcpAuthChallenge,
   type NativeMcpAuthChallenge,
-} from "@agent-orchestrator/shared";
+} from "@agent-orchestrator/shared/codex-mcp-auth";
 type Prompt = { close: () => void };
 type Inventory = {
   data: Array<{

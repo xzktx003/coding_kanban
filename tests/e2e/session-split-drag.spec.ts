@@ -13,6 +13,15 @@ async function setup(page: Page, count = 3) {
   return fixture;
 }
 
+async function inputTarget(page: Page) {
+  return page.evaluate(async () => {
+    const { useCodexStore } = await import(
+      "/src/session-mode/components/codex/stores/index.ts"
+    );
+    return useCodexStore.getState().currentThreadId;
+  });
+}
+
 async function drag(page: Page, key: string, source: 'title' | 'project' = 'title', outside = 0) {
   const tab = page.locator(`[data-tab-key="${key}"]`).locator('..');
   const origin = tab.locator(source === 'title' ? '.session-identity-title' : '.session-identity-project');
@@ -39,14 +48,14 @@ test('dragging the only tab creates a usable empty group and preserves it on rel
   await drag(page, 'codex:ux-0');
   await expect(page.locator('[data-session-group]')).toHaveCount(2);
   await expect(page.locator('[data-tab-key="codex:ux-0"]')).toHaveCount(1);
-  await expect(page.locator('.session-input-target')).toContainText('中文会话 0');
+  expect(await inputTarget(page)).toBe("ux-0");
   await page.reload();
   await expect(page.locator('[data-session-group]')).toHaveCount(2);
   await page.locator('[data-session-group]').first().getByRole('button', { name: '新聊天', exact: true }).click();
   await expect(page.locator('.session-mode [contenteditable=true]')).toHaveCount(1);
   await page.getByRole('button', { name: '关闭空窗口组', exact: true }).click();
   await expect(page.locator('[data-session-group]')).toHaveCount(1);
-  await expect(page.locator('.session-input-target')).toContainText('中文会话 0');
+  expect(await inputTarget(page)).toBe("ux-0");
   expect(fixture.calls.some(call => /\/(turn\/start|stop|interrupt)$/.test(call.path))).toBe(false);
 });
 
@@ -125,7 +134,7 @@ test('the dragged tab follows the mouse without intercepting split targets', asy
   await expect(page.locator('[data-session-group]')).toHaveCount(2);
   await expect(floating).toHaveCount(0);
   await expect(page.locator('[data-pointer-source]')).toHaveCount(0);
-  await expect(page.locator('.session-input-target')).toContainText('中文会话 1');
+  expect(await inputTarget(page)).toBe("ux-1");
 });
 
 for (const cancel of ['Escape', 'blur'] as const) {
@@ -133,7 +142,7 @@ test(`${cancel}: canceling a drag over another group keeps the original input de
   await setup(page);
   await drag(page, 'codex:ux-2');
   await expect(page.locator('[data-session-group]')).toHaveCount(2);
-  const destination = await page.locator('.session-input-target').textContent();
+  const destination = await inputTarget(page);
   const body = (await page.locator('[data-session-group-body]').first().boundingBox())!;
   await page.locator('[data-tab-key="codex:ux-1"] .session-identity-title').hover();
   await page.mouse.down();
@@ -143,7 +152,7 @@ test(`${cancel}: canceling a drag over another group keeps the original input de
   else await page.evaluate(() => window.dispatchEvent(new Event('blur')));
   await page.mouse.up();
   await expect(page.locator('[data-session-group]')).toHaveCount(2);
-  await expect(page.locator('.session-input-target')).toHaveText(destination!);
+  expect(await inputTarget(page)).toBe(destination);
   await expect(page.locator('.session-tab-drag-preview')).toHaveCount(0);
 });
 }
@@ -160,7 +169,7 @@ for (const edge of ['left', 'right', 'top', 'bottom'] as const) {
     await page.mouse.move(x, y, { steps: 1 });
     await page.mouse.up();
     await expect(page.locator('[data-session-group]')).toHaveCount(2);
-    await expect(page.locator('.session-input-target')).toContainText('中文会话 1');
+    expect(await inputTarget(page)).toBe("ux-1");
     await page.screenshot({ path: testInfo.outputPath(`split-${edge}.png`), animations: 'disabled' });
   });
 }

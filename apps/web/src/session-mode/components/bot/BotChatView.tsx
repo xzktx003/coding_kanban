@@ -1,11 +1,9 @@
 import { CalendarClock, Settings } from 'lucide-react';
 import { useState } from 'react';
-import { useAcpEvents } from '@session/components/acp/useAcpEvents';
 import { Button } from '@session/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@session/components/ui/dialog';
 import { SidebarTrigger, useSidebar } from '@session/components/ui/sidebar';
 import { useTrafficLightConfig } from '@session/hooks';
-import { useAcpStore } from '@session/stores/useAcpStore';
 import { useBotUiStore } from '@session/stores/useBotUiStore';
 import { BotAvatar } from './BotAvatar';
 import { BotComposer } from './BotComposer';
@@ -23,7 +21,6 @@ import { useCreateBot } from './useCreateBot';
 /** The full-screen conversation with one bot. */
 export default function BotChatView() {
   const { bots, selectedBotId, connectionByBot } = useBotUiStore();
-  const connectionId = useAcpStore((s) => s.connectionId);
   const { newBot, setNewBot, creating, handleCreateBot } = useCreateBot();
   const { open } = useBotSession();
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -32,7 +29,6 @@ export default function BotChatView() {
   const showTrigger = isMobile ? !openMobile : !isSidebarOpen;
   const { needsTrafficLightOffset } = useTrafficLightConfig(isSidebarOpen);
 
-  useAcpEvents(connectionId);
 
   const bot = bots.find((b) => b.id === selectedBotId);
   useBotDragDrop(bot);

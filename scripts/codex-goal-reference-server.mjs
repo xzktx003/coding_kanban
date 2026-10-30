@@ -49,6 +49,8 @@ const files = new Set([
   "native-goal-reference.js",
   "native-goal-completion-reference.js",
   "native-goal-draft-reference.js",
+  "native-transcript.html",
+  "native-transcript-reference.js",
 ]);
 const expected = JSON.parse(
   await readFile(resolve(fixture, "reference-assets.json"), "utf8"),

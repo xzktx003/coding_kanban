@@ -6,7 +6,7 @@ const api = vi.hoisted(() => ({
   listConfigProviders: vi.fn().mockResolvedValue([]),
   listProviderPresets: vi.fn().mockResolvedValue([]),
 }));
-vi.mock("@session/services/apiAdapt", () => api);
+vi.mock("@session/services/apiAdapt/codex", () => api);
 it("reports model loading failure and permits a coalesced retry", async () => {
   api.listModels
     .mockRejectedValueOnce(new Error("offline"))

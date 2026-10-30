@@ -49,3 +49,12 @@ it("resolves protocol paths literally, including percent signs and location-like
   ])
     expect(resolveLiteralFilePath(value, "/a")).toBeNull();
 });
+
+it("resolves a bare filename with line and column without treating its extension as a URI scheme", () => {
+  expect(parseFileReference("source.ts:7:3", "/project")).toEqual({
+    path: "/project/source.ts",
+    line: 7,
+    column: 3,
+  });
+  expect(parseFileReference("javascript:alert(1)", "/project")).toBeNull();
+});

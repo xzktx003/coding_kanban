@@ -7,7 +7,7 @@ import { pathToFileURL } from "node:url";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
-/** Check adapters against the actual TS Fastify registration, never a route inventory. */
+/** Check adapters against actual TS Fastify registrations, never a route inventory. */
 const ADAPTER_DIR = __dirname;
 const ROOT = resolve(__dirname, "../../../../../..");
 const require = createRequire(import.meta.url);
@@ -15,6 +15,7 @@ interface AdapterRoute {
   file: string;
   method: "GET" | "POST";
   path: string;
+  target?: "gateway";
 }
 function adapterSources(): { file: string; content: string }[] {
   return readdirSync(ADAPTER_DIR)
@@ -60,7 +61,9 @@ function adapterRoutes(file: string, content: string): AdapterRoute[] {
     }
     return false;
   }
-  function pathOf(value: ts.Expression | undefined): string {
+  function pathOf(
+    value: ts.Expression | undefined,
+  ): Pick<AdapterRoute, "path" | "target"> {
     let literal: string | undefined;
     if (value && ts.isStringLiteralLike(value)) literal = value.text;
     else if (value && ts.isTemplateExpression(value)) {
@@ -72,14 +75,20 @@ function adapterRoutes(file: string, content: string): AdapterRoute[] {
       )
         literal = value.head.text;
     }
-    if (!literal?.startsWith("/api/"))
+    if (!literal?.startsWith("/"))
       throw new Error(
         `${file}: unresolved adapter endpoint ${value?.getText(source) ?? "<missing>"}`,
       );
     const pathname = literal.split("?", 1)[0];
-    return pathname.startsWith("/api/session/")
-      ? pathname.slice("/api/session".length)
-      : pathname;
+    // buildUrl prefixes relative gateway endpoints with /api/session. Legacy
+    // /api/* adapters are still forwarded to the independent runtime below.
+    if (!pathname.startsWith("/api/"))
+      return { path: `/api/session${pathname}`, target: "gateway" };
+    return {
+      path: pathname.startsWith("/api/session/")
+        ? pathname.slice("/api/session".length)
+        : pathname,
+    };
   }
   function visit(node: ts.Node) {
     if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
@@ -119,7 +128,7 @@ function adapterRoutes(file: string, content: string): AdapterRoute[] {
           }
         }
         const endpoint = node.arguments[name.startsWith("dual") ? 2 : 0];
-        routes.push({ file, method, path: pathOf(endpoint) });
+        routes.push({ file, method, ...pathOf(endpoint) });
         if (endpoint) checkedEndpoints.add(endpoint);
       }
     }
@@ -128,7 +137,10 @@ function adapterRoutes(file: string, content: string): AdapterRoute[] {
       : ts.isTemplateExpression(node)
         ? node.head.text
         : undefined;
-    if (literal?.startsWith("/api/") && !checkedEndpoints.has(node))
+    if (
+      (literal?.startsWith("/api/") || literal?.startsWith("/lifecycle/")) &&
+      !checkedEndpoints.has(node)
+    )
       throw new Error(`${file}: HTTP method unknown for ${literal}`);
     ts.forEachChild(node, visit);
   }
@@ -144,17 +156,21 @@ import childProcess from 'node:child_process';
 import {syncBuiltinESMExports} from 'node:module';
 import {readFileSync} from 'node:fs';
 const {createRuntime} = await import(process.argv[1]);
+const {registerSessionLifecycleRoutes} = await import(process.argv[2]);
+const {default: Fastify} = await import(process.argv[3]);
 const routes=JSON.parse(readFileSync(0,'utf8'));
 const deny=()=>{throw new Error('Route registration unexpectedly started a process or network request')};
 for(const key of ['spawn','spawnSync','exec','execSync','execFile','execFileSync','fork'])childProcess[key]=deny;
 syncBuiltinESMExports();
 globalThis.fetch=deny;
 const runtime=await createRuntime({dataHome:process.env.SESSION_DATA_HOME,instance:'adapter-route-contract',env:process.env});
+const gateway=Fastify({logger:false});
+registerSessionLifecycleRoutes(gateway,{origin:deny,fetch:deny,context:deny,followups:{inspect:deny,pause:deny}});
 try{
- await runtime.app.ready();
- if(runtime.app.server.listening)throw new Error('Route check must not bind a listener');
- process.stdout.write(JSON.stringify(routes.map(route=>({...route,registered:runtime.app.hasRoute({method:route.method,url:route.path})}))));
-}finally{await runtime.app.close()}
+ await Promise.all([runtime.app.ready(),gateway.ready()]);
+ if(runtime.app.server.listening||gateway.server.listening)throw new Error('Route check must not bind a listener');
+ process.stdout.write(JSON.stringify(routes.map(route=>({...route,registered:(route.target==='gateway'?gateway:runtime.app).hasRoute({method:route.method,url:route.path})}))));
+}finally{await Promise.all([runtime.app.close(),gateway.close()])}
 `;
 function registeredRoutes(
   routes: AdapterRoute[],
@@ -172,6 +188,12 @@ function registeredRoutes(
           REGISTERED_ROUTES,
           pathToFileURL(join(ROOT, "packages/session-runtime/src/server.ts"))
             .href,
+          pathToFileURL(
+            join(ROOT, "apps/server/src/routes/session-lifecycle.ts"),
+          ).href,
+          pathToFileURL(
+            require.resolve("fastify", { paths: [join(ROOT, "apps/server")] }),
+          ).href,
         ],
         {
           cwd: ROOT,
@@ -201,7 +223,7 @@ function registeredRoutes(
 }
 
 describe("api adapter routes", () => {
-  it("registers every adapter's actual HTTP method and path in the isolated TS runtime", () => {
+  it("registers every adapter's actual HTTP method and path in its isolated TS runtime or gateway", () => {
     const routes = adapterSources()
       .filter(({ file }) => file !== "shared.ts")
       .flatMap(({ file, content }) => adapterRoutes(file, content));
@@ -216,12 +238,36 @@ describe("api adapter routes", () => {
       method: "GET",
       path: "/health",
     });
+    expect(routes).toContainEqual({
+      file: "codex.ts",
+      method: "GET",
+      path: "/api/session/lifecycle/context",
+      target: "gateway",
+    });
+    expect(routes).toContainEqual({
+      file: "codex.ts",
+      method: "POST",
+      path: "/api/session/lifecycle/restore",
+      target: "gateway",
+    });
     const probes: AdapterRoute[] = [
       { file: "negative-method-probe", method: "GET", path: "/api/acp/prompt" },
       {
         file: "negative-route-probe",
         method: "POST",
         path: "/api/__missing_adapter_route",
+      },
+      {
+        file: "negative-gateway-method-probe",
+        method: "GET",
+        path: "/api/session/lifecycle/restore",
+        target: "gateway",
+      },
+      {
+        file: "negative-gateway-route-probe",
+        method: "POST",
+        path: "/api/session/lifecycle/__missing",
+        target: "gateway",
       },
     ];
     const checked = registeredRoutes([...routes, ...probes]);
@@ -230,7 +276,7 @@ describe("api adapter routes", () => {
     ).toEqual([]);
     expect(
       checked.slice(routes.length).map((route) => route.registered),
-    ).toEqual([false, false]);
+    ).toEqual([false, false, false, false]);
   }, 35_000);
 
   it("extracts both quote styles, generic helpers and query templates, and rejects dynamic paths", () => {
@@ -255,12 +301,37 @@ describe("api adapter routes", () => {
       ["GET", "/health"],
       ["POST", "/api/settings"],
     ]);
+    expect(
+      adapterRoutes(
+        "fixture.ts",
+        "getJson('/lifecycle/context'); postJson('/lifecycle/restore', {});",
+      ),
+    ).toEqual([
+      {
+        file: "fixture.ts",
+        method: "GET",
+        path: "/api/session/lifecycle/context",
+        target: "gateway",
+      },
+      {
+        file: "fixture.ts",
+        method: "POST",
+        path: "/api/session/lifecycle/restore",
+        target: "gateway",
+      },
+    ]);
     expect(() =>
       adapterRoutes("fixture.ts", "postJson(endpoint, {});"),
     ).toThrow(/unresolved adapter endpoint/);
     expect(() =>
       adapterRoutes("fixture.ts", "unknownHttp('/api/missing');"),
     ).toThrow(/HTTP method unknown/);
+    expect(() =>
+      adapterRoutes("fixture.ts", "unknownHttp('/lifecycle/missing');"),
+    ).toThrow(/HTTP method unknown/);
+    expect(() =>
+      adapterRoutes("fixture.ts", "postJson(`/lifecycle/${action}`, {});"),
+    ).toThrow(/unresolved adapter endpoint/);
     expect(() =>
       adapterRoutes("fixture.ts", "fetch('/api/missing', {...options});"),
     ).toThrow(/unresolved fetch method/);

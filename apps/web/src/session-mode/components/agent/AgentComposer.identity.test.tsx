@@ -15,12 +15,12 @@ vi.mock("@session/components/cc/composer", () => ({
     <div data-testid="cc-sender">{targetLabel}</div>
   ),
 }));
-vi.mock("@session/components/codex/composer", () => ({
+vi.mock("@session/components/codex/composer/Composer", () => ({
   Composer: ({ targetLabel }: any) => (
     <div data-testid="codex-sender">{targetLabel}</div>
   ),
 }));
-vi.mock("../common", () => ({ WorkspaceSwitcher: () => null }));
+vi.mock("../common/WorkspaceSwitcher", () => ({ WorkspaceSwitcher: () => null }));
 vi.mock("../../hooks/useActiveSessionProject", () => ({
   useActiveSessionProject: () => ({
     path: "/fixture/project",
@@ -28,7 +28,7 @@ vi.mock("../../hooks/useActiveSessionProject", () => ({
   }),
 }));
 
-test("ACP input identifies the actual named session even when a Codex tab remains selected", () => {
+test("ACP input identifies the actual named session even when a Codex tab remains selected", async () => {
   useAcpStore.setState({
     active: true,
     agentId: "fixture",
@@ -47,7 +47,7 @@ test("ACP input identifies the actual named session even when a Codex tab remain
     },
   });
   render(<AgentComposer />);
-  expect(screen.getByText("正在处理的 ACP 任务")).toBeTruthy();
+  expect(await screen.findByText("正在处理的 ACP 任务")).toBeTruthy();
   expect(screen.queryByText("不应发送的旧标签")).toBeNull();
   act(() => useAcpStore.getState().setSessionId("next-session"));
   expect(screen.getByText("下一个 ACP 任务")).toBeTruthy();
@@ -69,7 +69,7 @@ test("a Claude preference cannot route the focused Codex tab into a hidden Claud
   expect(screen.getByTestId("codex-sender")).toBeTruthy();
   expect(screen.queryByTestId("cc-sender")).toBeNull();
 });
-test("a Codex preference cannot route the focused Claude tab into a remembered Codex thread", () => {
+test("a Codex preference cannot route the focused Claude tab into a remembered Codex thread", async () => {
   useAcpStore.getState().reset();
   useAcpStore.setState({ active: false });
   useAgentSettingsStore.setState({ selectedAgent: "codex" });
@@ -82,7 +82,7 @@ test("a Codex preference cannot route the focused Claude tab into a remembered C
   useCCStore.setState({ activeSessionId: "focused-claude" });
   useCodexStore.setState({ currentThreadId: "hidden-codex" });
   render(<AgentComposer />);
-  expect(screen.getByTestId("cc-sender")).toBeTruthy();
+  expect(await screen.findByTestId("cc-sender")).toBeTruthy();
   expect(screen.queryByTestId("codex-sender")).toBeNull();
 });
 

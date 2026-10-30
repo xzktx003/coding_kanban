@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { sessionRuntimeStatus } from "./session-runtime-status.mjs";
+import { sessionRuntimeStatus, readOwnedAgentActivity } from "./session-runtime-status.mjs";
 const binary = "/fixture/bin/runtime";
 function fake({ instance = "owned", changed = false } = {}) {
   return {
@@ -92,4 +92,14 @@ test("TS status verifies executable plus entrypoint and compares the complete JS
         })
       : `${process.execPath}\0/other/main.js\0`;
   assert.equal((await sessionRuntimeStatus(options)).binaryState, "unknown");
+});
+test("owned Agent health preserves validated counts only; missing or malformed providers remain unknown", async () => {
+  const counts={cc:{connections:1,activeTurns:1,pendingRequests:0},acp:{connections:2,activePrompts:0,pendingRequests:1,uncertainSessions:1}};
+  const projected=readOwnedAgentActivity({...counts,transcript:"private",cc:{...counts.cc,text:"private"}});
+  assert.deepEqual(projected,counts);
+  for(const value of [undefined,{}, {...counts,acp:null},{...counts,cc:{...counts.cc,connections:-1}},{...counts,acp:{...counts.acp,uncertainSessions:"0"}}])
+    assert.equal(readOwnedAgentActivity(value),undefined);
+  const options=fake();options.fetcher=async()=>({ok:true,json:async()=>({status:"ok",instance:"owned",codexBackend:"shared-daemon",ownedAgents:counts})});
+  const result=await sessionRuntimeStatus(options);
+  assert.deepEqual(result.ownedAgents,counts);assert.equal(result.codexBackend,"shared-daemon");
 });

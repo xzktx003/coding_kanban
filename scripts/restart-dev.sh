@@ -433,11 +433,29 @@ resolve_mkcert_ca_cert() {
 }
 
 main() {
-  if [[ "${1:-}" == '--help' || "${1:-}" == '-h' ]]; then
-    printf '%s\n' 'Usage: pnpm dev:restart' 'Build shared and the enabled session runtime, then restart only this repository frontend/backend.' 'Existing session runtime and Agents are preserved. Use pnpm session:status to inspect readiness.'
-    return 0
-  fi
-  if (( $# > 0 )); then log "Unknown argument: $1"; return 1; fi
+  local restart_runtime=0
+  local runtime_args=()
+  while (( $# > 0 )); do
+    case "$1" in
+      --help|-h)
+        printf '%s\n' \
+          'Usage: pnpm dev:restart [--restart-runtime]' \
+          'Build shared and the enabled session runtime, then restart only this repository frontend/backend.' \
+          'The existing session runtime is reused while tasks or unknown activity protect it. --restart-runtime explicitly replaces the verified owned runtime; its owned Claude/ACP connections and legacy private Codex tasks may end.' \
+          'The shared official daemon is never stopped or restarted; independent Codex CLI processes are not signaled.'
+        return 0
+        ;;
+      --restart-runtime)
+        restart_runtime=1
+        ;;
+      *)
+        log "Unknown argument: $1"
+        return 1
+        ;;
+    esac
+    shift
+  done
+  if (( restart_runtime )); then runtime_args+=(--restart-runtime); fi
   validate_startup || return 1
   # Fail before touching existing listeners if installation or compilation fails.
   node "${ROOT_DIR}/scripts/prepare-dev.mjs" || return 1
@@ -537,7 +555,7 @@ main() {
 
   # A reused runtime keeps serving the previous build, so replace it here and
   # let the next request start the new one.
-  node "${ROOT_DIR}/scripts/session-runtime-replace.mjs" || log 'Session runtime replacement skipped; see the message above.'
+  node "${ROOT_DIR}/scripts/session-runtime-replace.mjs" "${runtime_args[@]}" || log 'Session runtime replacement skipped; see the message above.'
   if [[ "${SESSION_MODE_ENABLED:-1}" != '0' ]]; then
     # Only /api/session/health starts the runtime; /api/health is terminal-only.
     wait_for_http 'session runtime' "${SERVER_URL}/api/session/health" 200 || true

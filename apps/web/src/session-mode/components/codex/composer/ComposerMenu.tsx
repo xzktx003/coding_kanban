@@ -12,7 +12,7 @@ import {
   PlusIcon,
   Target,
 } from "lucide-react";
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { ScreenshotPopover } from "@session/components/codex/composer/ScreenshotPopover";
 import { useCodexStore } from "@session/components/codex/stores";
@@ -36,6 +36,10 @@ import {
 } from "./mentions";
 import { RecordSkillDialog } from "./RecordSkillDialog";
 import { notifyNativeFilePickerError } from "@session/features/native-notifications/nativeFilePickerError";
+import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
+import { composerDrafts } from "./v2/drafts";
+import { OptionalSessionPanel } from "../../layout/OptionalSessionPanel";
+const ProjectReferencePicker = lazy(() => import("@session/features/files/ProjectReferencePicker").then((module) => ({ default: module.ProjectReferencePicker })));
 
 interface SelectFilesMenuItemProps {
   onFilesSelected?: (paths: string[]) => void;
@@ -79,7 +83,7 @@ export function SelectFilesMenuItem({
       onClick={handleSelectFiles}
     >
       <File className="w-4 h-4" />
-      <span>文件和文件夹</span>
+      <span>上传设备文件</span>
     </Button>
   );
 }
@@ -170,12 +174,16 @@ export function ComposerMenu({
   persistentMenu,
 }: ComposerMenuProps) {
   const threadId = useCodexStore((state) => state.currentThreadId);
-  const { webSearchRequest, setWebSearch } = useThreadModelSettings(threadId);
+  const { webSearchRequest, setWebSearch, permissions } = useThreadModelSettings(threadId);
   const { enabled: goalEnabled, setEnabled: setGoalEnabled } =
     useGoalDraft(owner);
   const { t, i18n } = useTranslation("composer");
   const [openState, setOpenState] = useState(false);
   const [recordOpen, setRecordOpen] = useState(false);
+  const [projectReference, setProjectReference] = useState<{ owner: string; root: string } | null>(null);
+  const workspaceRoot = useWorkspaceStore((state) => state.cwd);
+  const nativeRoot = useCodexStore((state) => state.threads.find((thread) => thread.id === threadId)?.cwd);
+  useEffect(() => { setProjectReference(null); }, [owner]);
   const [persistentTarget, setPersistentTarget] =
     useState<HTMLDivElement | null>(null);
   const parentMenuId = useId();
@@ -282,6 +290,8 @@ export function ComposerMenu({
               "justify-start gap-2 px-2 hover:bg-accent hover:text-accent-foreground transition-colors",
               webSearchRequest && "bg-blue-100 text-blue-900",
             )}
+            disabled={!!permissions}
+            title={permissions ? "网络策略由所选权限配置管理" : undefined}
             onClick={() => {
               setWebSearch(!webSearchRequest);
               setOpenState(false);
@@ -296,6 +306,21 @@ export function ComposerMenu({
             onFilesSelected={onFilesSelected}
             onAfterSelect={() => setOpenState(false)}
           />
+          <Button
+            type="button"
+            variant="ghost"
+            className="justify-start gap-2 px-2"
+            disabled={!(nativeRoot || workspaceRoot)}
+            onClick={() => {
+              const root = nativeRoot || workspaceRoot;
+              if (!root) return;
+              closeForAction();
+              setProjectReference({ owner, root });
+            }}
+          >
+            <File className="w-4 h-4" />
+            <span>引用项目文件/目录</span>
+          </Button>
           <Button
             type="button"
             variant="ghost"
@@ -356,6 +381,13 @@ export function ComposerMenu({
         parentMenuId,
       })}
       {recordOpen && <RecordSkillDialog onClose={() => setRecordOpen(false)} />}
+      {projectReference && projectReference.owner === owner && (
+        <OptionalSessionPanel label="项目文件引用" onClose={() => setProjectReference(null)} overlay>
+          <Suspense fallback={<div role="status" className="session-optional-panel-error session-optional-panel-overlay">正在读取项目文件…<button type="button" onClick={() => setProjectReference(null)}>取消打开</button></div>}>
+            <ProjectReferencePicker owner={projectReference.owner} root={projectReference.root} onSelect={(context) => composerDrafts.add(projectReference.owner, context)} onClose={() => setProjectReference(null)} />
+          </Suspense>
+        </OptionalSessionPanel>
+      )}
     </Popover>
   );
 }

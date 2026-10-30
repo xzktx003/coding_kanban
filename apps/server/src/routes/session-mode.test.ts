@@ -8,6 +8,22 @@ import { join } from "node:path";
 import { registerSessionModeRoutes } from "./session-mode.js";
 import type { VsCodeWebManager } from "../services/vscode-web-manager.js";
 
+test("a gateway without a lifecycle journal still verifies its in-memory write gate before forwarding Goal",async()=>{
+  const app=Fastify();let writes=0,scopeReads=0;
+  registerSessionModeRoutes(app,{origin:"http://127.0.0.1:1",fetch:async(url,init)=>{
+    if (new URL(String(url)).pathname === "/api/internal/codex/operation-context") {
+      assert.equal(init?.method,"GET");scopeReads++;
+      return Response.json({scope:"fixture-native-scope",namespace:"fixture-account-history"});
+    }
+    assert.equal(init?.method,"POST");writes++;
+    return Response.json({cleared:true});
+  }});
+  try {
+    const response=await app.inject({method:"POST",url:"/api/session/api/codex/thread/goal/clear",payload:{threadId:"exact-thread"}});
+    assert.equal(response.statusCode,200);assert.equal(response.json().cleared,true);assert.equal(writes,1);assert.equal(scopeReads,1);
+  }finally{await app.close();}
+});
+
 test("private editor companion uses the real listening gateway port and never waits during inject", async () => {
   const dataHome=await mkdtemp(join(tmpdir(),"kanban-host-listen-"));
   let prepare!: (paths:{extensionsDir:string;workspacesDir:string})=>Promise<void>;

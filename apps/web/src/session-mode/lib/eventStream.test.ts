@@ -1,8 +1,10 @@
 import { afterEach, expect, it, vi } from "vitest";
+import { useSessionSyncStore } from "../stores/useSessionSyncStore";
 vi.mock("@session/hooks/runtime", () => ({
   buildEventUrl: (path: string) => path,
 }));
 import {
+  isEventStreamConnected,
   openEventStream,
   reconcileEventStream,
   retryEventStream,
@@ -102,6 +104,120 @@ it("shares one browser connection across agent subscribers and releases it only 
     closeB();
   }
   expect(instances[0].close).toHaveBeenCalledOnce();
+});
+
+it("closes the active native EventSource offline and resumes from its cursor only when online", () => {
+  const instances: Array<{
+    url: string;
+    readyState: number;
+    onopen: (() => void) | null;
+    onmessage: ((event: { data: string }) => void) | null;
+    onerror: (() => void) | null;
+    close: ReturnType<typeof vi.fn>;
+  }> = [];
+  class FakeSource {
+    readyState = 0;
+    onopen: (() => void) | null = null;
+    onmessage: ((event: { data: string }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    close = vi.fn(() => {
+      this.readyState = 2;
+    });
+    constructor(public url: string) {
+      instances.push(this);
+    }
+  }
+  vi.stubGlobal("EventSource", FakeSource);
+  const received = vi.fn();
+  const stop = openEventStream({ onEvent: received });
+  try {
+    instances[0].readyState = 1;
+    instances[0].onopen?.();
+    instances[0].onmessage?.({
+      data: JSON.stringify({ seq: 44, event: "codex:notification", payload: {} }),
+    });
+    expect(isEventStreamConnected()).toBe(true);
+
+    window.dispatchEvent(new Event("offline"));
+    expect(instances[0].close).toHaveBeenCalledOnce();
+    expect(isEventStreamConnected()).toBe(false);
+    expect(useSessionSyncStore.getState().connection).toBe("reconnecting");
+    expect(instances).toHaveLength(1);
+
+    window.dispatchEvent(new Event("online"));
+    expect(instances).toHaveLength(2);
+    expect(instances[1].url).toContain("/api/events?view=chat&since=44");
+    window.dispatchEvent(new Event("online"));
+    expect(instances).toHaveLength(2);
+    instances[1].readyState = 1;
+    instances[1].onopen?.();
+    expect(isEventStreamConnected()).toBe(true);
+    expect(received).toHaveBeenCalledTimes(1);
+  } finally {
+    stop();
+  }
+});
+
+it("removes online/offline listeners when the final subscriber leaves", () => {
+  class FakeSource {
+    onopen: (() => void) | null = null;
+    close = vi.fn();
+    constructor(public url: string) {}
+  }
+  vi.stubGlobal("EventSource", FakeSource);
+  const add = vi.spyOn(window, "addEventListener");
+  const remove = vi.spyOn(window, "removeEventListener");
+  const stop = openEventStream({ onEvent: vi.fn() });
+  const offline = add.mock.calls.find(([type]) => type === "offline")?.[1];
+  const online = add.mock.calls.find(([type]) => type === "online")?.[1];
+  stop();
+  expect(offline).toBeDefined();
+  expect(online).toBeDefined();
+  expect(remove).toHaveBeenCalledWith("offline", offline);
+  expect(remove).toHaveBeenCalledWith("online", online);
+});
+it("waits for online before creating the first native stream", () => {
+  const instances: Array<{ url: string; close: ReturnType<typeof vi.fn> }> = [];
+  class FakeSource {
+    close = vi.fn();
+    constructor(public url: string) { instances.push(this); }
+  }
+  vi.stubGlobal("EventSource", FakeSource);
+  vi.stubGlobal("navigator", { onLine: false });
+  useSessionSyncStore.setState({ connection: "connected" });
+  const stop = openEventStream({ onEvent: vi.fn() });
+  try {
+    expect(instances).toHaveLength(0);
+    expect(useSessionSyncStore.getState().connection).toBe("reconnecting");
+    window.dispatchEvent(new Event("online"));
+    expect(instances).toHaveLength(1);
+    expect(instances[0].url).toContain("view=chat");
+  } finally {
+    stop();
+  }
+});
+it("clears the stale cursor on a runtime restart while offline without connecting early", () => {
+  const instances: Array<{ url: string; close: ReturnType<typeof vi.fn>; onmessage: ((event: { data: string }) => void) | null }> = [];
+  class FakeSource {
+    onmessage: ((event: { data: string }) => void) | null = null;
+    close = vi.fn();
+    constructor(public url: string) { instances.push(this); }
+  }
+  vi.stubGlobal("EventSource", FakeSource);
+  const stop = openEventStream({ onEvent: vi.fn() });
+  try {
+    instances[0].onmessage?.({ data: JSON.stringify({ seq: 87, event: "codex:notification", payload: {} }) });
+    window.dispatchEvent(new Event("offline"));
+    window.dispatchEvent(new Event("session-runtime-restarted"));
+    expect(instances).toHaveLength(1);
+    expect(instances[0].close).toHaveBeenCalledOnce();
+    window.dispatchEvent(new Event("online"));
+    expect(instances).toHaveLength(2);
+    expect(instances[1].url).toContain("/api/events?view=chat");
+    expect(instances[1].url).not.toContain("since=");
+  } finally {
+    stop();
+  }
 });
 it("routes acp-message frames to acp subscribers without leaking codex frames", () => {
   const instances: FakeSource[] = [];
@@ -267,11 +383,17 @@ it("pauses oversized stream failures without replaying or repairing in a loop", 
   try {
     instances[0].onopen();
     instances[0].listeners.get("session-projection-error")?.();
+    expect(useSessionSyncStore.getState().connectionError).toContain(
+      "任务状态待核对",
+    );
     instances[0].onerror();
     await vi.advanceTimersByTimeAsync(60_000);
     expect(instances[0].close).toHaveBeenCalledOnce();
     expect(instances).toHaveLength(1);
     expect(resync).not.toHaveBeenCalled();
+    window.dispatchEvent(new Event("offline"));
+    window.dispatchEvent(new Event("online"));
+    expect(instances).toHaveLength(1);
     reconcileEventStream();
     expect(instances).toHaveLength(1);
     retryEventStream();

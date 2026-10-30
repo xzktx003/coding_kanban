@@ -96,6 +96,11 @@ export async function liveStream(page: Page, baseURL: string) {
     raw: (data: string) => {
       write(`data: ${data}\n\n`);
     },
+    named: (event: string, data: unknown) => {
+      if (!/^[a-z][a-z0-9-]{0,63}$/.test(event))
+        throw new Error("Invalid fixture SSE event");
+      write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    },
     envelope: (seq: number, event: string, payload: unknown) => {
       write(`data: ${JSON.stringify({ seq, event, payload })}\n\n`);
     },

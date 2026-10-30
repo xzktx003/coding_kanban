@@ -1,5 +1,5 @@
 import {
-  sessionPortalContainer,
+  useSessionPortalContainer,
   useSessionInteractionVisible,
   isSessionInteractionVisible,
   useSessionPortalDocument,
@@ -23,9 +23,10 @@ function DropdownMenuPortal({
   // A menu opened inside the independent plan window belongs to that window's
   // own root; portalling it back into the opener leaves the popup with no menu.
   const ownerDocument = useSessionPortalDocument();
+  const container = useSessionPortalContainer(ownerDocument ?? undefined);
   return (
     <DropdownMenuPrimitive.Portal
-      container={sessionPortalContainer(ownerDocument ?? undefined)}
+      container={container}
       data-slot="dropdown-menu-portal"
       {...props}
     />
@@ -50,21 +51,14 @@ function DropdownMenuContent({
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Content>) {
   const ownerDocument = useSessionPortalDocument();
+  const container = useSessionPortalContainer(ownerDocument ?? undefined);
   const interactionVisible = useSessionInteractionVisible();
-  // Radix's own fence cleanup can lose a race when one menu hands over to a
-  // sibling in the same document, so release it once no menu is left open.
-  React.useEffect(
-    () => () => releaseUnusedPointerFence(ownerDocument ?? undefined),
-    [ownerDocument],
-  );
   // The owner window has its own visibility; the opener's hidden state must not
   // blank a menu that window is showing.
   if (!interactionVisible && !ownerDocument) return null;
 
   return (
-    <DropdownMenuPrimitive.Portal
-      container={sessionPortalContainer(ownerDocument ?? undefined)}
-    >
+    <DropdownMenuPrimitive.Portal container={container}>
       <DropdownMenuPrimitive.Content
         data-slot="dropdown-menu-content"
         onCloseAutoFocus={(event) => {
@@ -80,9 +74,28 @@ function DropdownMenuContent({
           className,
         )}
         {...props}
-      />
+      >
+        <DropdownMenuFenceCleanup ownerDocument={ownerDocument ?? undefined} />
+        {props.children}
+      </DropdownMenuPrimitive.Content>
     </DropdownMenuPrimitive.Portal>
   );
+}
+
+function DropdownMenuFenceCleanup({
+  ownerDocument,
+}: {
+  ownerDocument?: Document;
+}) {
+  // The wrapper remains mounted while Radix Presence removes the actual
+  // content. Run after that content's cleanup, not only on wrapper unmount.
+  React.useEffect(
+    () => () => {
+      queueMicrotask(() => releaseUnusedPointerFence(ownerDocument));
+    },
+    [ownerDocument],
+  );
+  return null;
 }
 
 function DropdownMenuGroup({

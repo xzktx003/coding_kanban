@@ -14,8 +14,10 @@ const api = vi.hoisted(() => ({
   acpStop: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("@session/services/apiAdapt/acp", () => api);
-vi.mock("@session/session-dom", () => ({
+vi.mock("@session/session-dom", async(importOriginal) => ({
+  ...await importOriginal<typeof import("@session/session-dom")>(),
   useAgentInteractionVisible: () => true,
+  useSessionInteractionVisible:()=>true,
 }));
 vi.mock("./useAcpAgents", () => ({
   useAcpAgents: () => [
@@ -46,13 +48,14 @@ import {
 test("automatic ACP connection associates the restored new-chat text and attachments with the created identity", async () => {
   const cwd = "/draft-project";
   const source = sessionDraftKey("acp", null, cwd, "draft-agent");
-  const target = sessionDraftKey("acp", "created-acp", cwd, "draft-agent");
+  const target = sessionDraftKey("acp", "created-history", cwd, "draft-agent");
   useWorkspaceStore.setState({ cwd });
   useAcpStore.setState({
     active: true,
     agentId: "draft-agent",
     connectionId: null,
     sessionId: null,
+    historySessionId:null,
     connecting: false,
     running: false,
   });
@@ -67,12 +70,13 @@ test("automatic ACP connection associates the restored new-chat text and attachm
   api.acpStart.mockResolvedValue({
     connectionId: "created-connection",
     sessionId: "created-acp",
+    historySessionId:"created-history",
     initialize: {
       agentInfo: { name: "fixture" },
       agentCapabilities: {},
       authMethods: [],
     },
-    session: { sessionId: "created-acp" },
+    session: { sessionId: "created-acp",historySessionId:"created-history" },
   });
   render(
     <div className="session-mode">
@@ -104,6 +108,7 @@ test("native history restoration blocks sending and automatic connection while p
     agentId: "draft-agent",
     connectionId: null,
     sessionId: null,
+    historySessionId:null,
     connecting: false,
     running: false,
     sessionTransition: { version: 99, label: "正在恢复会话…" },
@@ -142,6 +147,7 @@ test("a delayed automatic connection cannot adopt the wrong Agent or move its dr
     agentId: "draft-agent",
     connectionId: null,
     sessionId: null,
+    historySessionId:null,
     connecting: false,
     running: false,
     sessionTransition: null,
@@ -188,13 +194,14 @@ test("a late prompt error cannot mutate a different connection sharing the same 
     agentId: "draft-agent",
     connectionId: "old-connection",
     sessionId: "same-session",
+    historySessionId:"same-history",
     sessionCwd: cwd,
     entries: [],
   });
   useSessionDraftStore
     .getState()
     .setText(
-      sessionDraftKey("acp", "same-session", cwd, "draft-agent"),
+      sessionDraftKey("acp", "same-history", cwd, "draft-agent"),
       "original prompt",
     );
   let reject!: (reason: Error) => void;
@@ -235,6 +242,7 @@ test("browsing another project cannot send into a native session rooted elsewher
     agentId: "draft-agent",
     connectionId: "connection",
     sessionId: "native-project-session",
+    historySessionId:"native-project-history",
     sessionCwd: "/native-project",
   } as any);
   useSessionDraftStore
@@ -242,7 +250,7 @@ test("browsing another project cannot send into a native session rooted elsewher
     .setText(
       sessionDraftKey(
         "acp",
-        "native-project-session",
+        "native-project-history",
         "/native-project",
         "draft-agent",
       ),
@@ -271,4 +279,38 @@ test("browsing another project cannot send into a native session rooted elsewher
   expect(
     screen.getByRole("button", { name: "发送消息" }).hasAttribute("disabled"),
   ).toBe(true);
+});
+
+test("two connections with the same agent, cwd and native s1 keep independent drafts",async()=>{
+ const cwd="/same-project";useWorkspaceStore.setState({cwd});useSessionDraftStore.setState({drafts:{}});useAcpStore.getState().reset();
+ useAcpStore.setState({active:true,agentId:"draft-agent",connectionId:"connection-A",sessionId:"s1",historySessionId:"acph_A",sessionCwd:cwd,running:false});
+ const view=render(<div className="session-mode"><AcpComposer/></div>);
+ fireEvent.change(screen.getByRole("textbox"),{target:{value:"draft A"}});
+ act(()=>useAcpStore.setState({connectionId:"connection-B",sessionId:"s1",historySessionId:"acph_B"}));
+ expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("");
+ fireEvent.change(screen.getByRole("textbox"),{target:{value:"draft B"}});
+ act(()=>useAcpStore.setState({connectionId:"connection-A",sessionId:"s1",historySessionId:"acph_A"}));
+ expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("draft A");
+ expect(readDraft(sessionDraftKey("acp","acph_B",cwd,"draft-agent")).text).toBe("draft B");view.unmount();
+});
+
+test("legacy native-only text is kept separate until explicitly imported into the captured source owner",async()=>{
+ const cwd="/legacy-draft";useWorkspaceStore.setState({cwd});useAcpStore.getState().reset();useSessionDraftStore.setState({drafts:{}});
+ useAcpStore.setState({active:true,agentId:"draft-agent",connectionId:"A",sessionId:"s1",historySessionId:"acph_A",sessionCwd:cwd});
+ const legacy=sessionDraftKey("acp","s1",cwd,"draft-agent");useSessionDraftStore.getState().setText(legacy,"saved legacy text");
+ const view=render(<div className="session-mode"><AcpComposer/></div>);
+ expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("");expect(readDraft(legacy).text).toBe("saved legacy text");
+ fireEvent.click(screen.getByRole("button",{name:"找回旧版草稿"}));fireEvent.click(screen.getByRole("button",{name:"确认导入当前会话"}));
+ await waitFor(()=>expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("saved legacy text"));
+ expect(readDraft(legacy).text).toBe("");view.unmount();
+});
+
+
+test("readonly history without a connection neither auto-starts an Agent nor sends the saved draft",async()=>{
+ useAcpStore.getState().reset();const cwd="/readonly-project";useWorkspaceStore.setState({cwd});
+ useAcpStore.setState({active:true,agentId:"draft-agent",connectionId:null,sessionId:null,inheritedHistory:{sessionId:"old-source",agentId:"draft-agent",title:"Old",cwd,viewOnly:true}});
+ const key=sessionDraftKey("acp",null,cwd,"draft-agent");useSessionDraftStore.getState().setText(key,"preserved text");api.acpStart.mockClear();api.acpPrompt.mockClear();
+ const view=render(<div className="session-mode"><AcpComposer/></div>);await act(async()=>{});
+ expect(api.acpStart).not.toHaveBeenCalled();expect(screen.getByRole("button",{name:"发送消息"}).hasAttribute("disabled")).toBe(true);
+ fireEvent.keyDown(screen.getByRole("textbox"),{key:"Enter"});expect(api.acpPrompt).not.toHaveBeenCalled();expect(readDraft(key).text).toBe("preserved text");view.unmount();
 });

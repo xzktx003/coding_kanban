@@ -1,6 +1,6 @@
 import { createRoot } from "react-dom/client";
 import { useState } from "react";
-import { BrowserProjects } from "./features/ProjectSelector";
+import { BrowserProjects } from "./features/ProjectSelector/BrowserProjects";
 import { useWorkspaceStore } from "./stores/useWorkspaceStore";
 import { readWithDeadline } from "./services/sessionReadQueue";
 import {

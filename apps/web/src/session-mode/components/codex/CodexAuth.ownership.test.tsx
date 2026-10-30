@@ -278,3 +278,27 @@ it("authoritative own failure unlocks login; a foreign failure leaves own code a
       .disabled,
   ).toBe(false);
 });
+
+it("revokes the displayed device code and a late acknowledgement when paired credentials change on the same endpoint", async () => {
+  const { usePairingStore } = await import("@session/stores/usePairingStore");
+  usePairingStore.setState({
+    selectedHost: "same-host",
+    desktops: [
+      { host: "same-host", port: 3000, token: "old-device", name: "fixture" },
+    ],
+  });
+  const authenticated = vi.fn();
+  render(<CodexAuth onAuthenticated={authenticated} />);
+  await start();
+  act(() =>
+    usePairingStore.setState({
+      desktops: [
+        { host: "same-host", port: 3000, token: "new-device", name: "fixture" },
+      ],
+    }),
+  );
+  expect(screen.queryByText("FIXTURE")).toBeNull();
+  await completed("own-login");
+  expect(authenticated).not.toHaveBeenCalled();
+  expect(api.post).not.toHaveBeenCalled();
+});

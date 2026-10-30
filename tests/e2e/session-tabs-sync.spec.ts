@@ -202,7 +202,15 @@ test("desktop and phone share followed order, retain independent reading state a
       s.getState().addAgentCard({ kind: "codex", id: "ux-3", cwd: "/fixture" });
     });
     await expect.poll(async () => (await state(phone)).pending).toBe(1);
-    await expect(phone.getByText("同步待重试", { exact: true })).toBeVisible();
+    // On phone the shared-list sync indicator is intentionally under More;
+    // its desktop toolbar button is not mounted at this breakpoint.
+    await phone.getByRole("button", { name: "更多功能", exact: true }).click();
+    const syncStatus = phone.getByRole("menuitem", { name: /同步待重试/ });
+    await expect(syncStatus).toBeVisible();
+    await expect(syncStatus).toHaveAttribute(
+      "aria-label",
+      "同步待重试：1 项修改等待同步确认",
+    );
     await desktop.evaluate(async () => {
       const { useAgentCenterStore: s } = await import(
         performance

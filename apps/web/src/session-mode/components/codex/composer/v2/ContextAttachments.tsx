@@ -1,6 +1,6 @@
 import { newSessionEditId } from "@session/services/sessionEditIdentity";
-import { useState } from "react";
-import { FileText, Image, Quote, X, Pencil, RotateCcw } from "lucide-react";
+import { useEffect,useRef,useState } from "react";
+import { FileText, Folder, Image, Quote, X, Pencil, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import type { ComposerContext } from "@agent-orchestrator/shared";
 import { readTextFile } from "@session/services/apiAdapt/filesystem";
@@ -13,6 +13,7 @@ import { composerDrafts, useComposerDraft } from "./drafts";
 import { ComposerSheet } from "./ComposerSheet";
 import { offerUndo } from "./UndoNotice";
 import { readWithDeadline } from "@session/services/sessionReadQueue";
+import { refreshedProjectContext } from "@session/features/files/contextReferenceUpdate";
 
 async function readContextFile(path: string) {
   try {
@@ -59,7 +60,9 @@ export function ContextAttachments({
   const { contexts } = useComposerDraft(owner);
   const [panel, setPanel] = useState<string | null>(null),
     [checking, setChecking] = useState(false),
-    [changed, setChanged] = useState<Record<string, string>>({});
+    [changed, setChanged] = useState<Record<string, ComposerContext>>({});
+  const currentOwner=useRef(owner);currentOwner.current=owner;const checkingRequest=useRef<AbortController|null>(null);
+  useEffect(()=>{setPanel(null);setChanged({});setChecking(false);return()=>checkingRequest.current?.abort();},[owner]);
   const selected = contexts.find((c) => c.id === panel);
   const count = contexts.length + images.attachments.length;
   const remove = (c: ComposerContext) => {
@@ -74,13 +77,10 @@ export function ContextAttachments({
     if (!c.path) return;
     setChecking(true);
     try {
-      const all = await readContextFile(c.path);
-      const text = c.range
-        ? all
-            .split(/\r?\n/)
-            .slice(c.range.start - 1, c.range.end)
-            .join("\n")
-        : all;
+      const controller=new AbortController();checkingRequest.current?.abort();checkingRequest.current=controller;
+      const updated=c.workspaceRoot?await readWithDeadline(signal=>refreshedProjectContext(c,signal),15000,controller.signal):await (async()=>{const all=await readContextFile(c.path!);const text=c.range?all.split(/\r?\n/).slice(c.range.start-1,c.range.end).join("\n"):all;if(text.length>180000)throw new Error("引用内容过长，请重新选择片段。");return {...c,text};})();
+      if(controller.signal.aborted||currentOwner.current!==owner)return;
+      const text=updated.text;
       if (text === c.text) {
         setChanged((s) => {
           const next = { ...s };
@@ -88,11 +88,11 @@ export function ContextAttachments({
           return next;
         });
         toast.success("源文件内容未变化");
-      } else setChanged((s) => ({ ...s, [c.id]: text }));
+      } else setChanged((s) => ({ ...s, [c.id]: updated }));
     } catch (e) {
-      toast.error(String(e));
+      if(currentOwner.current===owner&&!checkingRequest.current?.signal.aborted)toast.error(String(e));
     } finally {
-      setChecking(false);
+      if(currentOwner.current===owner)setChecking(false);
     }
   }
   const details = (c: ComposerContext) => (
@@ -125,20 +125,19 @@ export function ContextAttachments({
             disabled={checking}
             onClick={() => void checkFile(c)}
           >
-            {checking ? "正在检查…" : "检查源文件更新"}
+            {checking ? "正在检查…" : c.sourceKind === "directory" ? "检查目录清单更新" : "检查源文件更新"}
           </button>
         )}
       </div>
       {changed[c.id] !== undefined && (
         <div role="status" className="session-context-warning">
-          源文件已变化；本次仍引用已保存的快照。
+          {c.sourceKind === "directory" ? "目录清单" : "源文件"}已变化；本次仍引用已保存的快照。
           <button
             type="button"
             onClick={() => {
               const next = {
-                ...c,
+                ...changed[c.id],
                 id: newSessionEditId(),
-                text: changed[c.id],
               };
               composerDrafts.replace(owner, c.id, next);
               setPanel(next.id);
@@ -206,10 +205,10 @@ export function ContextAttachments({
             <div className="session-context-chip" key={c.id}>
               <button
                 type="button"
-                aria-label={`查看上下文 ${c.name} ${c.range ? `L${c.range.start}–${c.range.end}` : c.kind === "paste" ? `${c.text.split(/\r?\n/).length} 行 · 完整内容` : c.kind === "quote" ? "回答引用" : "文件快照"}`}
+                aria-label={`查看上下文 ${c.name} ${c.range ? `L${c.range.start}–${c.range.end}` : c.kind === "paste" ? `${c.text.split(/\r?\n/).length} 行 · 完整内容` : c.kind === "quote" ? "回答引用" : c.sourceKind === "directory" ? "目录引用" : "文件快照"}`}
                 onClick={() => setPanel(c.id)}
               >
-                {c.kind === "quote" ? <Quote /> : <FileText />}
+                {c.kind === "quote" ? <Quote /> : c.sourceKind === "directory" ? <Folder /> : <FileText />}
                 <span>
                   <strong>{c.name}</strong>
                   <small>
@@ -219,7 +218,7 @@ export function ContextAttachments({
                         ? `${c.text.split(/\r?\n/).length} 行 · 完整内容`
                         : c.kind === "quote"
                           ? "回答引用"
-                          : "文件快照"}
+                          : c.sourceKind === "directory" ? "目录引用" : "文件快照"}
                   </small>
                 </span>
               </button>
@@ -247,7 +246,7 @@ export function ContextAttachments({
         <ComposerSheet
           title={selected?.name ?? "附件与上下文"}
           description="内容快照会随本次消息提交，切换会话时独立保留。"
-          onClose={() => setPanel(null)}
+          onClose={() => {setPanel(null);setChanged({});checkingRequest.current?.abort();}}
         >
           {images.storageError && (
             <p role="alert">
@@ -285,6 +284,13 @@ export function ContextAttachments({
                         重试
                       </button>
                     )}
+                    <button type="button" disabled={item.status !== "ready"} onClick={() => {
+                      setPanel(null);
+                      onAnnotate(item);
+                    }}>
+                      <Pencil />
+                      标注图片
+                    </button>
                     <button type="button" onClick={() => removeImage(item.id)}>
                       移除
                     </button>
@@ -297,7 +303,7 @@ export function ContextAttachments({
                 <section key={c.id}>
                   <button
                     type="button"
-                    aria-label={`查看上下文 ${c.name} ${c.range ? `L${c.range.start}–${c.range.end}` : c.kind === "paste" ? `${c.text.split(/\r?\n/).length} 行 · 完整内容` : c.kind === "quote" ? "回答引用" : "文件快照"}`}
+                    aria-label={`查看上下文 ${c.name} ${c.range ? `L${c.range.start}–${c.range.end}` : c.kind === "paste" ? `${c.text.split(/\r?\n/).length} 行 · 完整内容` : c.kind === "quote" ? "回答引用" : c.sourceKind === "directory" ? "目录引用" : "文件快照"}`}
                     onClick={() => setPanel(c.id)}
                   >
                     <FileText />

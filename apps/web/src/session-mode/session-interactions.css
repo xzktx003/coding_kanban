@@ -462,7 +462,7 @@
   pointer-events: auto;
 }
 .session-mode .session-tab-mobile-menu {
-  display: none;
+  display: flex;
   padding: 8px;
   flex-shrink: 0;
 }

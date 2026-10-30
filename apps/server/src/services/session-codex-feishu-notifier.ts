@@ -439,6 +439,7 @@ export class SessionCodexFeishuNotifier {
     return {
       sessionId: `session-codex:${pending.threadId}`,
       sessionModeThreadId: pending.threadId,
+      ...(typeof readResult?.sessionModeContext?.scope === "string" && typeof readResult?.sessionModeContext?.namespace === "string" ? { sessionModeScope: readResult.sessionModeContext.scope, sessionModeNamespace: readResult.sessionModeContext.namespace } : {}),
       displayName: displayName(thread, pending.threadId),
       agentKind: "codex",
       workingDirectory: workingDirectory(thread),

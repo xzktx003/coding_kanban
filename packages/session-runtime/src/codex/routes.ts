@@ -1,5 +1,9 @@
+import { registerCodexOperationRoutes } from "./operation-context.js";
+import { PluginMutations } from "./plugin-mutations.js";
 import { join } from "node:path";
 import { registerItemDetailChannel } from "./item-detail-channel.js";
+import { registerMcpAppRoutes } from "./mcp-apps.js";
+import { registerRealtimeRoutes } from "./realtime.js";
 import { getTomlStore } from "../config/toml-store.js";
 import { codexHome } from "./accounts.js";
 import { sanitizeCodexHistory } from "./projection.js";
@@ -12,6 +16,7 @@ import {
   type Json,
 } from "../core/json.js";
 import type { CodexService } from "./client.js";
+import { RpcError } from "../transport/rpc.js";
 import {
   boundedText,
   cancelLogin,
@@ -26,6 +31,26 @@ export function registerCodexRoutes(
   service: CodexService,
 ): void {
   registerItemDetailChannel(app, service.options);
+  registerMcpAppRoutes(app, service);
+  registerRealtimeRoutes(app, service);
+  registerCodexOperationRoutes(app,service);
+  const plugins = service.options.dataHome ? new PluginMutations({
+    home: service.options.dataHome,
+    context: () => service.operationContext(),
+    current: scope => service.isOperationScopeCurrent(scope),
+    call: (method, params, scope, beforeSend) => service.guardedCall(method, params, scope, beforeSend),
+  }) : undefined;
+  app.post("/api/codex/plugin/mutation", { bodyLimit: 12000 }, async (request,reply) => {
+    reply.header("cache-control","no-store");
+    if (!plugins) return reply.code(503).send({error:"Durable plugin operations are unavailable in this runtime",deliveryStage:"not-admitted"});
+    try { return await plugins.change(bodyObject(request.body)); }
+    catch(error) { return reply.code(error instanceof HttpError?error.statusCode:503).send({error:error instanceof Error?error.message:String(error),deliveryStage:"not-admitted"}); }
+  });
+  app.post("/api/codex/plugin/authentication", {bodyLimit:14000}, async(request,reply)=>{
+    reply.header("cache-control","no-store");
+    if(!plugins)throw new HttpError(503,"Scoped plugin authentication reads are unavailable");
+    return plugins.authentication(bodyObject(request.body));
+  });
   const post = (path: string, handler: (body: Json, signal?: AbortSignal) => Promise<Json>) =>
     app.post("/api/codex/" + path, async (request, reply) => {
       const controller = ["thread/goal/set", "thread/goal/clear", "thread/goal/clear-completed", "feedback/preflight"].includes(path) ? new AbortController() : undefined;
@@ -71,6 +96,15 @@ export function registerCodexRoutes(
     "thread/archive",
     "thread/unarchive",
     "thread/loaded/list",
+    "thread/settings/update",
+    "thread/readState/update",
+    "thread/queue/add",
+    "thread/queue/list",
+    "thread/queue/update",
+    "thread/queue/delete",
+    "thread/queue/reorder",
+    "thread/queue/start",
+    "permissionProfile/list",
     "thread/turns/list",
     "thread/items/list",
     "thread/unsubscribe",
@@ -111,13 +145,27 @@ export function registerCodexRoutes(
     "feedback/upload": "feedback/upload",
   });
   for (const [path, method] of Object.entries(methods))
-    post(path, (body, signal) =>
-      method === "skills/config/write"
-        ? getTomlStore(
-            join(codexHome(service.options.env ?? process.env), "config.toml"),
-          ).exclusive(() => service.call(method, body))
-        : service.call(method, body, signal ? { signal } : undefined),
-    );
+    post(path, async (body, signal) => {
+      try {
+        return (["thread/start","thread/fork"].includes(method)&&object(body).expectedScope!==undefined)
+          ? (()=>{const {expectedScope,...params}=object(body);if(typeof expectedScope!=="string"||!(/^[a-f0-9]{64}$/).test(expectedScope))throw new HttpError(400,"Invalid native creation scope");return service.guardedCall(method,params,expectedScope);})()
+          : method === "skills/config/write"
+          ? getTomlStore(
+              join(codexHome(service.options.env ?? process.env), "config.toml"),
+            ).exclusive(() => service.call(method, body))
+          : await service.call(method, body, signal ? { signal } : undefined);
+      } catch (error) {
+        // The archived daemon exposes this read-only failure as JSON-RPC
+        // -32600, without a structured archived code. Keep it unavailable;
+        // never turn it into an empty Goal that could authorize continuation.
+        if (method === "thread/goal/get" && error instanceof RpcError && error.code === -32600)
+          throw Object.assign(
+            new HttpError(409, "原生 Goal 状态暂不可用，不能推断为无活动 Goal"),
+            { code: "NATIVE_READ_UNAVAILABLE", nativeErrorCode: error.code },
+          );
+        throw error;
+      }
+    });
   app.get("/api/codex/model/list", () => service.raw("model/list", {}));
   app.get("/api/codex/account/rate-limits", () =>
     service.raw("account/rateLimits/read", null),
@@ -132,7 +180,7 @@ export function registerCodexRoutes(
   post("thread/access", (body) =>
     object(body).release === true
       ? service.ownership.release(thread(body))
-      : service.ownership.access(thread(body)),
+      : service.accessSnapshot(thread(body)),
   );
   post("thread/rollback", (body) => service.rollback(bodyObject(body)));
   post("thread/search-occurrences", (body) =>

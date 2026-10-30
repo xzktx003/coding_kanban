@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { navigateToAgentSession } from "@session/lib/agentNav";
 import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
-import { readThreadLink } from "@session/features/thread-workflows/model";
+import { readThreadLink } from "@session/features/thread-workflows/threadLinks";
 import { openThreadLink } from "@session/features/thread-workflows/threadLinkService";
 import { useThreadLinkStore } from "@session/features/thread-workflows/threadLinkStore";
 import { useSessionTabActions } from "./useSessionTabs";

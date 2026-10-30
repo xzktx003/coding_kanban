@@ -8,7 +8,40 @@ export type FollowupStatus =
   | "failed"
   | "uncertain"
   | "cancelled";
+export type NativeSteerReference =
+  | { type: "image" | "audio"; url: string }
+  | { type: "localImage" | "localAudio"; path: string }
+  | { type: "mention" | "skill"; name: string; path: string };
+/** Display provenance for an accepted in-turn supplement. Never a native item or pending work. */
+export interface NativeSteerReceipt {
+  sourceId: string;
+  operationId: string;
+  clientId: string;
+  threadId: string;
+  turnId: string;
+  scope?: string;
+  namespace?: string;
+  createdAt: number;
+  status: "accepted";
+  /** Unique among this namespace's durable display sources, never a native CAS guarantee. */
+  nativeIdentityUnique?: boolean;
+  text: string;
+  images: string[];
+  contexts?: ComposerContext[];
+  mentions?: NativeInputMention[];
+  /** Exact non-text native references for queued supplements from another client. */
+  nativeReferences?: NativeSteerReference[];
+}
+export interface NativeSteerReceiptPage {
+  data: NativeSteerReceipt[];
+  nextCursor: string | null;
+}
 export interface FollowupMessage {
+  authority?: "native" | "legacy";
+  nativeQueuedSubmissionId?: string;
+  nativeClientUserMessageId?: string;
+  /** Acceptance metadata only; never evidence that a queued item executed. */
+  receiptOnly?: boolean;
   id: string;
   threadId: string;
   text: string;
@@ -25,6 +58,12 @@ export interface FollowupMessage {
   fingerprint: string;
 }
 export interface FollowupThread {
+  authority?: "native";
+  operation?: {
+    id: string;
+    status: "accepted" | "rejected" | "unknown";
+    error?: string;
+  };
   undo?: {
     token: string;
     kind: "delete" | "edit";
@@ -47,6 +86,7 @@ export interface FollowupThread {
   };
 }
 export interface FollowupSubmit {
+  expectedScope?: string;
   /** Explicit new input after a displayed failure; never resumes older queued work. */
   recoverAfterError?: boolean;
   id: string;
@@ -60,7 +100,8 @@ export interface FollowupSubmit {
   expectedTurnId?: string;
 }
 export type FollowupAction =
-  | { type: "undo"; token: string }
+  | { type: "migrate"; id: string; confirmThreadSettings: true }
+  | { type: "undo"; token: string; confirmExecution?: true }
   | {
       type: "delete" | "retry" | "steer";
       id: string;

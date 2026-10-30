@@ -1,4 +1,5 @@
 import { useSessionAttentionStore } from "@session/stores/useSessionAttentionStore";
+import { claudeSessionMatchesEvent,noteClaudeEvent } from "@session/services/claudeConnectionIdentity";
 import { hasCCGlobalBridge } from "@session/hooks/useCCBackgroundEvents";
 import { listen } from "@tauri-apps/api/event";
 import { useEffect } from "react";
@@ -79,7 +80,8 @@ export function useCCSessionListener({
 
     const handleMessage = (message: CCMessage) => {
       const msgSessionId = (message as { session_id?: string }).session_id;
-      if (msgSessionId && msgSessionId !== targetSessionId) return;
+      if (msgSessionId && !claudeSessionMatchesEvent(targetSessionId,msgSessionId)) return;
+      noteClaudeEvent(targetSessionId);
       if (message.type === "result" && !message.is_error)
         useSessionAttentionStore
           .getState()
@@ -155,7 +157,7 @@ export function useCCPermissionListener({
         toolInput,
         alwaysAllowTarget,
       } = payload;
-      if (evtSessionId !== targetSessionId) {
+      if (!claudeSessionMatchesEvent(targetSessionId,evtSessionId)) {
         if (!sessionId) {
           console.warn(
             "[CCSession] Ignoring permission request for inactive session",
@@ -177,6 +179,7 @@ export function useCCPermissionListener({
         alwaysAllowTarget,
         toolInput,
       } as CCMessage;
+      noteClaudeEvent(targetSessionId);
 
       if (!isDesktopTauri() && hasCCGlobalBridge()) return;
       if (sessionId) {

@@ -57,6 +57,10 @@ test("structured sidebar keyboard, error retry and dangerous-action confirmation
       return;
     }
     let json: unknown = {};
+    if (path === "/api/session/lifecycle/context") {
+      await route.fulfill({ json: { scopeToken: "list-native-scope", namespace: "list-native-namespace" } });
+      return;
+    }
     if (path.endsWith("/plugin/installed")) json = { marketplaces: [] };
     else if (path.endsWith("/read-directory")) json = [];
     else if (path.endsWith("/git/status")) json = { entries: [] };
@@ -164,7 +168,7 @@ test("structured sidebar keyboard, error retry and dangerous-action confirmation
     .filter({ hasText: "中文会话 1 ·" })
     .first();
   await expect(
-    otherRow.getByRole("button", { name: "Archive thread", exact: true }),
+    otherRow.getByRole("button", { name: "会话操作", exact: true }),
   ).toHaveCSS("opacity", "0");
   await row.press("Enter");
   await expect
@@ -176,7 +180,8 @@ test("structured sidebar keyboard, error retry and dangerous-action confirmation
   const count = await page.evaluate(
     () => (window as any).__fixtureSelections.length,
   );
-  await row.getByRole("button", { name: "重命名会话" }).focus();
+  await row.getByRole("button", { name: "会话操作", exact: true }).click();
+  await page.getByRole("menuitem", { name: "重命名", exact: true }).focus();
   await page.keyboard.press("Enter");
   await expect(page.getByRole("dialog")).toBeVisible();
   await page.keyboard.press("Control+n");
@@ -185,7 +190,7 @@ test("structured sidebar keyboard, error retry and dangerous-action confirmation
   ).toBe(count);
   await page.keyboard.press("Escape");
   await row.click({ button: "right" });
-  await page.getByRole("menuitem", { name: "Delete", exact: true }).click();
+  await page.getByRole("menuitem", { name: "删除", exact: true }).click();
   await expect(page.getByRole("alertdialog")).toBeVisible();
   expect(deleted).toBe(0);
   await page.getByRole("button", { name: "取消", exact: true }).click();
@@ -198,7 +203,7 @@ test("structured sidebar keyboard, error retry and dangerous-action confirmation
     ),
   );
   await row.click({ button: "right" });
-  await page.getByRole("menuitem", { name: "Fork", exact: true }).click();
+  await page.getByRole("menuitem", { name: "分叉聊天", exact: true }).click();
   await expect
     .poll(() =>
       page.evaluate(async () => {
@@ -228,26 +233,24 @@ test("structured sidebar keyboard, error retry and dangerous-action confirmation
     path: ".dev-runtime/session-ui-upgrade/structured-list-desktop.png",
   });
   await page.setViewportSize({ width: 900, height: 720 });
-  await expect(page.locator(".session-agent-header")).toContainText(
-    "新分支会话",
-  );
+  await expect(page.locator('[role="tab"][data-tab-key="codex:ui-new-fork"]')).toContainText("新分支会话");
   await page.screenshot({
     path: ".dev-runtime/session-ui-upgrade/structured-list-narrow.png",
   });
   await page.setViewportSize({ width: 390, height: 844 });
-  await page
-    .locator(".session-agent-header")
-    .getByRole("button", { name: /sidebar/i })
-    .click();
+  await page.getByRole("button", { name: "展开项目列表", exact: true }).click();
   const mobileRow = page
     .locator(".session-mode [role=button]")
     .filter({ hasText: "中文会话 0 ·" })
     .first();
   await expect(mobileRow).toBeVisible();
   await expect(
-    mobileRow.getByRole("button", { name: "重命名会话" }),
+    mobileRow.getByRole("button", { name: "会话操作", exact: true }),
   ).toBeVisible();
-  await mobileRow.getByRole("button", { name: "重命名会话" }).click();
+  await mobileRow
+    .getByRole("button", { name: "会话操作", exact: true })
+    .click();
+  await page.getByRole("menuitem", { name: "重命名", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
   const box = await dialog.boundingBox();

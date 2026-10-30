@@ -12,10 +12,39 @@ export type NativeContentState = {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
+// Official writerConflict copy from VSIX 26.51007.21434. The webview renders
+// the active locale, so an English-only match misses zh-CN after reconnect.
+const NATIVE_WRITER_LOCK_NOTICES = [
+  {
+    title: "This is open in another app",
+    description: "Close it there to continue here.",
+    retry: "Retry",
+  },
+  {
+    title: "已在另一个应用中打开",
+    description: "请先在那边关闭会话，才能在这里继续。",
+    retry: "重试",
+  },
+  {
+    title: "此對話已在另一個應用程式中開啟",
+    description: "請先在該處關閉，然後在此處繼續。",
+    retry: "重試",
+  },
+  {
+    title: "已在另一個應用程式中開啟",
+    description: "請先在該處關閉，才能在此處繼續。",
+    retry: "重試",
+  },
+] as const;
+
 function hasNativeWriterLock(root: HTMLElement | null): boolean {
   if (!root) return false;
+  const retries = new Set<string>(
+    NATIVE_WRITER_LOCK_NOTICES.map((notice) => notice.retry),
+  );
   for (const button of root.querySelectorAll("button")) {
-    if (button.textContent?.trim() !== "Retry") continue;
+    const label = button.textContent?.trim();
+    if (!label || !retries.has(label)) continue;
     for (
       let scope = button.parentElement, depth = 0;
       scope && scope !== root && depth < 8;
@@ -31,8 +60,12 @@ function hasNativeWriterLock(root: HTMLElement | null): boolean {
         if (value.length > 256) continue;
         copy += value;
         if (
-          copy.includes("This is open in another app") &&
-          copy.includes("Close it there to continue here.")
+          NATIVE_WRITER_LOCK_NOTICES.some(
+            (notice) =>
+              label === notice.retry &&
+              copy.includes(notice.title) &&
+              copy.includes(notice.description),
+          )
         )
           return true;
       }
@@ -246,12 +279,7 @@ export function observeNativeContent(
       lastState = key;
       onState?.(state);
     }
-    if (
-      root &&
-      conversationId &&
-      !lockWatchExpired &&
-      observedLockRoot !== root
-    ) {
+    if (root && conversationId && observedLockRoot !== root) {
       stopLockWatch();
       observedLockRoot = root;
       lockObserver.observe(root, {
@@ -259,12 +287,22 @@ export function observeNativeContent(
         characterData: true,
         subtree: true,
       });
-      lockWatchDeadline = view.setTimeout(() => {
-        lockWatchDeadline = null;
-        lockWatchExpired = true;
-        if (!lastValue?.blockedByOtherApp) stopLockWatch();
-      }, 30_000);
-    } else if (lockWatchExpired && observedLockRoot && !blockedByOtherApp)
+      // A quiet composer can drop the character watch after 30s. An active
+      // writer lock must keep it: reconnect can surface the official notice
+      // long after the first conversation identity arrives.
+      if (!lockWatchExpired && !blockedByOtherApp) {
+        lockWatchDeadline = view.setTimeout(() => {
+          lockWatchDeadline = null;
+          lockWatchExpired = true;
+          if (!lastValue?.blockedByOtherApp) stopLockWatch();
+        }, 30_000);
+      }
+    } else if (
+      lockWatchExpired &&
+      observedLockRoot &&
+      !blockedByOtherApp &&
+      !lastValue?.blockedByOtherApp
+    )
       stopLockWatch();
     // The native first send can replace the entire blank composer portal.
     // Keep structural observation until the real conversation identity exists;
