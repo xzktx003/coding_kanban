@@ -13,7 +13,7 @@ import {
   deliveredClientIds,
   acknowledgeDeliveryEchoes,
 } from "../stores/useCodexDeliveryStore";
-import { memoryHistoryWindows } from "./sessionMemoryHistory";
+import { clearMemoryHistoryWindow } from "./sessionMemoryHistory";
 import {
   trackCodexTranscript,
   trackedCodexTranscripts,
@@ -76,7 +76,7 @@ function knownTranscriptIds() {
 
 function pruneThreadTranscript(id: string, dormant = false) {
   cancelCodexHistoryRead(id);
-  memoryHistoryWindows.delete(id);
+  clearMemoryHistoryWindow(id);
   if (!dormant) forgetCodexTranscript(id);
   cachedTranscriptBaselines.delete(id);
   cachedTranscriptTimings.delete(id);

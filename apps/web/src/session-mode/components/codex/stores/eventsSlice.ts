@@ -44,6 +44,30 @@ function observeGoal(state: CodexStore, threadId: string, goal: ThreadGoal) {
   };
 }
 
+function tokenUsageState(
+  state: CodexStore,
+  threadId: string,
+  data: ThreadTokenUsage,
+) {
+  const previous = state.tokenUsageMap[threadId];
+  const sameBreakdown = (
+    left: ThreadTokenUsage["total"],
+    right: ThreadTokenUsage["total"],
+  ) =>
+    Object.keys(left).length === Object.keys(right).length &&
+    (Object.keys(right) as Array<keyof ThreadTokenUsage["total"]>).every(
+      (key) => left[key] === right[key],
+    );
+  if (
+    previous &&
+    previous.modelContextWindow === data.modelContextWindow &&
+    sameBreakdown(previous.total, data.total) &&
+    sameBreakdown(previous.last, data.last)
+  )
+    return state;
+  return { tokenUsageMap: { ...state.tokenUsageMap, [threadId]: data } };
+}
+
 function appendTextSegments(
   segments: string[],
   current: string,
@@ -97,6 +121,13 @@ export const createEventsSlice: StateCreator<
     const visibleEvent = withoutToolTranscriptEvent(event);
     if (!visibleEvent) return;
     event = visibleEvent;
+    // These statistics already have their own store; they never produce a row.
+    if (event.method === "thread/tokenUsage/updated") {
+      const usage = event.params.tokenUsage;
+      set((state) => tokenUsageState(state, threadId, usage));
+      // Continue lifecycle bookkeeping (for example clearing a retry notice);
+      // appendTranscriptEvent excludes this metadata from the transcript.
+    }
     // Goal state is lifecycle metadata, never a retained transcript body. The
     // revision still advances for identical observations so older reads lose.
     if (event.method === "thread/goal/updated") {
@@ -233,6 +264,8 @@ export const createEventsSlice: StateCreator<
 
       let threadStatusMap = state.threadStatusMap;
       if (event.method === "thread/status/changed") {
+        // A native same-value confirmation also invalidates older in-flight
+        // activity reads. Preserve this authority identity without a new row.
         threadStatusMap = {
           ...threadStatusMap,
           [threadId]: event.params.status,
@@ -483,12 +516,7 @@ export const createEventsSlice: StateCreator<
   },
 
   setTokenUsage: (threadId: string, data: ThreadTokenUsage) => {
-    set((state: CodexStore) => ({
-      tokenUsageMap: {
-        ...state.tokenUsageMap,
-        [threadId]: data,
-      },
-    }));
+    set((state) => tokenUsageState(state, threadId, data));
   },
 
   setGoal: (threadId: string, goal: ThreadGoal) => {

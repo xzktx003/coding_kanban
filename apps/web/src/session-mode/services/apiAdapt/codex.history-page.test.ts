@@ -1,3 +1,9 @@
+import {
+  clearMemoryHistoryWindow,
+  memoryHistoryWindows,
+  MEMORY_HISTORY_RESTART_CURSOR,
+  MEMORY_ITEM_CURSOR,
+} from "../sessionMemoryHistory";
 import { afterEach, expect, it, vi } from "vitest";
 import { threadRead } from "./codex";
 afterEach(() => vi.unstubAllGlobals());
@@ -206,4 +212,101 @@ it("recovers a released item window inside one long-running turn with bounded it
     sortDirection: "desc",
     cursor: null,
   });
+});
+
+it.each(["native", "restart", "item"])(
+  "does not resurrect a reading pin after return to latest during %s recovery",
+  async (kind) => {
+    const id = `late-${kind}`;
+    clearMemoryHistoryWindow(id);
+    let finish!: (response: Response) => void;
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockImplementationOnce(
+          () =>
+            new Promise<Response>((resolve) => {
+              finish = resolve;
+            }),
+        )
+        .mockImplementation(() =>
+          Promise.resolve(
+            new Response(
+              JSON.stringify({
+                data: [turn("anchor"), turn("older")],
+                nextCursor: null,
+              }),
+            ),
+          ),
+        ),
+    );
+    const cursor =
+      kind === "native"
+        ? "page2"
+        : kind === "restart"
+          ? MEMORY_HISTORY_RESTART_CURSOR + "anchor"
+          : MEMORY_ITEM_CURSOR +
+            encodeURIComponent(
+              JSON.stringify({ turnId: "old", beforeItemId: "anchor" }),
+            );
+    const pending = threadRead({ threadId: id, recent: true, cursor });
+    clearMemoryHistoryWindow(id);
+    finish(
+      new Response(
+        JSON.stringify({
+          data:
+            kind === "item"
+              ? [
+                  {
+                    turnId: "old",
+                    item: {
+                      id: "anchor",
+                      type: "agentMessage",
+                      text: "anchor",
+                    },
+                  },
+                  {
+                    turnId: "old",
+                    item: { id: "older", type: "agentMessage", text: "body" },
+                  },
+                ]
+              : [turn("anchor"), turn("older")],
+          nextCursor: null,
+        }),
+      ),
+    );
+    const result = await pending;
+    expect(result.thread.turns.length).toBeGreaterThan(0);
+    expect(result.historyPage?.earlier).toBe(true);
+    expect(memoryHistoryWindows.has(id)).toBe(false);
+  },
+);
+
+it("preserves concurrent new reading pages while rejecting an old reading response", async () => {
+  const id = "interleaved-reading";
+  clearMemoryHistoryWindow(id);
+  const finishes: Array<(response: Response) => void> = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          finishes.push(resolve);
+        }),
+    ),
+  );
+  const old = threadRead({ threadId: id, recent: true, cursor: "old" });
+  clearMemoryHistoryWindow(id);
+  const first = threadRead({ threadId: id, recent: true, cursor: "first" });
+  const second = threadRead({ threadId: id, recent: true, cursor: "second" });
+  const reply = (name: string) =>
+    new Response(JSON.stringify({ data: [turn(name)], nextCursor: "next" }));
+  finishes[1]!(reply("first"));
+  await first;
+  finishes[0]!(reply("stale"));
+  expect((await old).thread.turns[0]?.id).toBe("stale");
+  finishes[2]!(reply("second"));
+  await second;
+  expect([...memoryHistoryWindows.get(id)!]).toEqual(["first", "second"]);
 });

@@ -36,3 +36,24 @@ it("retains the original custom TSRX grammar and registry aliases", async () => 
     await highlight("<div>text</div>", "xml"),
   );
 });
+
+it("renders oversized named fences as escaped text without expanding syntax spans", async () => {
+  const code = 'const value = {text: "<tag>&"};\n'.repeat(1800);
+  const html = await highlight(code, "typescript");
+  expect(html).not.toContain("<span");
+  expect(html).toContain("&lt;tag&gt;&amp;");
+  const node = document.createElement("code");
+  node.innerHTML = html;
+  expect(node.textContent).toBe(code);
+});
+
+it("does not auto-detect all native grammars for a large unlabelled fence", async () => {
+  const code = 'const value = {name: "testing", data: [1, 2, 3]};\n'.repeat(
+    220,
+  );
+  const html = await highlight(code, "");
+  expect(html).not.toContain("<span");
+  const node = document.createElement("code");
+  node.innerHTML = html;
+  expect(node.textContent).toBe(code);
+});

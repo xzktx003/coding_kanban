@@ -4,6 +4,7 @@ import {
   type ReactNode,
   createContext,
   lazy,
+  memo,
   Suspense,
   useContext,
   useEffect,
@@ -221,7 +222,7 @@ function applyExpandedList(kind: Extract<FormatKind, "ol" | "ul" | "check">) {
   toast.message(kind === "check" ? "已切换核对清单" : `已设置为${name}列表`);
 }
 
-export function ConversationMenu({
+export const ConversationMenu = memo(function ConversationMenu({
   threadId,
   draftOwner,
   composerRef,
@@ -1854,4 +1855,4 @@ export function ConversationMenu({
       {supplemental && <DeferredConversationDialog label="会话命令" onClose={() => setSupplemental(null)}><SupplementalCommandDialog key={`${supplemental.kind}:${supplemental.threadId}`} kind={supplemental.kind} threadId={supplemental.threadId} targetScope={supplemental.scope} onClose={() => setSupplemental(null)} /></DeferredConversationDialog>}
     </SelectedActionContext.Provider>
   );
-}
+});

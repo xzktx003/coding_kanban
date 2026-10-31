@@ -1,12 +1,13 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { fireEvent, render } from "@testing-library/react";
+import { act, fireEvent, render } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { ThreadUserNavigationRail } from "./ThreadWorkflowToolbar";
 import { useThreadWorkflowActions } from "./actions";
 import { useThreadWorkflowStore } from "./delivery";
 
+const railWork = vi.hoisted(() => ({ labels: 0 }));
 vi.mock("./service", () => ({ downloadThreadMarkdown: vi.fn() }));
 // This suite asserts geometry rather than copy, so it stubs i18n instead of
 // booting a catalog. `t` echoes its key with any interpolation appended, which
@@ -15,8 +16,10 @@ vi.mock("./service", () => ({ downloadThreadMarkdown: vi.fn() }));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     i18n: { language: "zh-CN" },
-    t: (key: string, vars?: Record<string, unknown>) =>
-      vars ? `${key}:${Object.values(vars).join(",")}` : key,
+    t: (key: string, vars?: Record<string, unknown>) => {
+      if (key === "userMessageNavigation.jumpAriaLabel") railWork.labels++;
+      return vars ? `${key}:${Object.values(vars).join(",")}` : key;
+    },
   }),
 }));
 
@@ -444,4 +447,283 @@ it("does not pop a preview card when a scrub is released", () => {
   ).toBe("0");
   // … and no card is showing.
   expect(document.querySelector(".codex-user-rail-preview")).toBeNull();
+});
+
+it("skips unchanged long-rail work when streaming parents recreate the same visible-turn set", () => {
+  let reads = 0;
+  const messages = rows(1000).map((row) => ({
+    ...row,
+    get role() {
+      reads++;
+      return "user" as const;
+    },
+  }));
+  const onNavigate = vi.fn();
+  const view = render(
+    <ThreadUserNavigationRail
+      rows={messages}
+      onNavigate={onNavigate}
+      activeTurnIds={new Set(["turn-999"])}
+    />,
+  );
+  const initial = reads;
+  for (let i = 0; i < 10; i++)
+    view.rerender(
+      <ThreadUserNavigationRail
+        rows={messages}
+        onNavigate={onNavigate}
+        activeTurnIds={new Set(["turn-999"])}
+      />,
+    );
+  expect(
+    document.querySelectorAll("[data-thread-user-message-navigation-item-id]")
+      .length,
+  ).toBeLessThanOrEqual(100);
+  expect(reads).toBe(initial);
+  view.rerender(
+    <ThreadUserNavigationRail
+      rows={messages}
+      onNavigate={onNavigate}
+      activeTurnIds={new Set(["turn-998"])}
+    />,
+  );
+  fireEvent.scroll(rail()!, { target: { scrollTop: 9500 } });
+  expect(
+    document
+      .querySelector('[data-thread-user-message-navigation-item-id="item-998"]')
+      ?.getAttribute("aria-current"),
+  ).toBe("true");
+  expect(
+    document
+      .querySelector('[data-thread-user-message-navigation-item-id="item-999"]')
+      ?.getAttribute("aria-current"),
+  ).toBeNull();
+});
+
+it("does not rebuild markers when reasoning recreates workflow rows and navigation callbacks", () => {
+  const users = rows(600);
+  let latestNavigation = vi.fn();
+  const project = (revision: number) => [
+    ...users.map((user) => ({ ...user })),
+    { ...userRow(601), role: "assistant" as const, text: `reply ${revision}` },
+  ];
+  const view = render(
+    <ThreadUserNavigationRail
+      rows={project(0)}
+      onNavigate={latestNavigation}
+      activeTurnIds={new Set(["turn-599"])}
+    />,
+  );
+  const initial = railWork.labels;
+  for (let index = 1; index <= 10; index++) {
+    latestNavigation = vi.fn();
+    view.rerender(
+      <ThreadUserNavigationRail
+        rows={project(index)}
+        onNavigate={latestNavigation}
+        activeTurnIds={new Set(["turn-599"])}
+      />,
+    );
+  }
+  expect(railWork.labels).toBe(initial);
+  expect(
+    document.querySelectorAll("[data-thread-user-message-navigation-item-id]")
+      .length,
+  ).toBeLessThanOrEqual(100);
+  fireEvent.click(
+    document.querySelector(
+      '[data-thread-user-message-navigation-item-id="item-599"]',
+    )!,
+  );
+  expect(latestNavigation).toHaveBeenCalledWith(
+    expect.objectContaining({ itemId: "item-599", turnId: "turn-599" }),
+  );
+});
+
+it("updates stable markers when prompt identity changes and preserves navigation to the new prompt", () => {
+  const onNavigate = vi.fn();
+  const initial = rows(5);
+  const view = render(
+    <ThreadUserNavigationRail rows={initial} onNavigate={onNavigate} />,
+  );
+  const revised = initial.map((row, index) =>
+    index === 4
+      ? {
+          ...row,
+          rowId: "revised-row",
+          itemId: "revised-item",
+          turnId: "revised-turn",
+          text: "revised user prompt",
+        }
+      : { ...row },
+  );
+  view.rerender(
+    <ThreadUserNavigationRail
+      rows={revised}
+      onNavigate={onNavigate}
+      activeTurnIds={new Set(["revised-turn"])}
+    />,
+  );
+  expect(
+    document.querySelector(
+      '[data-thread-user-message-navigation-item-id="item-4"]',
+    ),
+  ).toBeNull();
+  const marker = document.querySelector(
+    '[data-thread-user-message-navigation-item-id="revised-item"]',
+  )!;
+  expect(marker.getAttribute("aria-current")).toBe("true");
+  fireEvent.click(marker);
+  expect(onNavigate).toHaveBeenCalledWith(revised[4]);
+});
+
+it("keeps a thousand-prompt rail bounded while scroll reaches first, middle and last original targets", () => {
+  const onNavigate = vi.fn();
+  render(
+    <ThreadUserNavigationRail rows={rows(1000)} onNavigate={onNavigate} />,
+  );
+  for (const index of [0, 500, 999]) {
+    fireEvent.scroll(rail()!, {
+      target: { scrollTop: Math.max(0, index * 10 - 100) },
+    });
+    const marker = document.querySelector(
+      `[data-thread-user-message-navigation-item-id="item-${index}"]`,
+    )!;
+    expect(marker).toBeTruthy();
+    fireEvent.click(marker);
+    expect(onNavigate).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        itemId: `item-${index}`,
+        turnId: `turn-${index}`,
+      }),
+    );
+    expect(
+      document.querySelectorAll("[data-thread-user-message-navigation-item-id]")
+        .length,
+    ).toBeLessThanOrEqual(100);
+  }
+});
+it("keeps Tab continuous across virtual windows and allows native exit at the actual first and last prompts", () => {
+  render(
+    <>
+      <button data-before>before</button>
+      <ThreadUserNavigationRail rows={rows(1000)} onNavigate={vi.fn()} />
+      <button data-after>after</button>
+    </>,
+  );
+  const marker = (index: number) =>
+    document.querySelector<HTMLElement>(
+      `[data-thread-user-message-navigation-item-id="item-${index}"]`,
+    )!;
+  marker(0).focus();
+  expect(fireEvent.keyDown(marker(0), { key: "Tab", shiftKey: true })).toBe(
+    true,
+  );
+  for (let index = 0; index < 100; index++) {
+    expect(fireEvent.keyDown(marker(index), { key: "Tab" })).toBe(false);
+    expect(document.activeElement).toBe(marker(index + 1));
+  }
+  fireEvent.scroll(rail()!, { target: { scrollTop: 9900 } });
+  marker(999).focus();
+  expect(fireEvent.keyDown(marker(999), { key: "Tab" })).toBe(true);
+  expect(fireEvent.keyDown(marker(999), { key: "Tab", shiftKey: true })).toBe(
+    false,
+  );
+  expect(document.activeElement).toBe(marker(998));
+  expect(
+    document.querySelectorAll("[data-thread-user-message-navigation-item-id]")
+      .length,
+  ).toBeLessThanOrEqual(100);
+});
+
+it("pins focused prompt identity synchronously when history prefixes are reclaimed or inserted", () => {
+  const original = rows(1000);
+  const onNavigate = vi.fn();
+  const view = render(
+    <ThreadUserNavigationRail rows={original} onNavigate={onNavigate} />,
+  );
+  fireEvent.scroll(rail()!, { target: { scrollTop: 5000 } });
+  const focused = document.querySelector<HTMLElement>(
+    '[data-thread-user-message-navigation-item-id="item-500"]',
+  )!;
+  act(() => focused.focus());
+  view.rerender(
+    <ThreadUserNavigationRail
+      rows={original.slice(200)}
+      onNavigate={onNavigate}
+    />,
+  );
+  expect(document.activeElement).toBe(focused);
+  expect(focused.isConnected).toBe(true);
+  expect(fireEvent.keyDown(focused, { key: "Tab" })).toBe(false);
+  expect(
+    document.activeElement?.getAttribute(
+      "data-thread-user-message-navigation-item-id",
+    ),
+  ).toBe("item-501");
+  const next = document.activeElement;
+  view.rerender(
+    <ThreadUserNavigationRail
+      rows={[{ ...userRow(2000), rowId: "inserted" }, ...original]}
+      onNavigate={onNavigate}
+    />,
+  );
+  expect(document.activeElement).toBe(next);
+  expect(fireEvent.keyDown(next!, { key: "Tab", shiftKey: true })).toBe(false);
+  expect(
+    document.activeElement?.getAttribute(
+      "data-thread-user-message-navigation-item-id",
+    ),
+  ).toBe("item-500");
+});
+
+it("suppresses a scrub's synthetic pointer click while preserving subsequent keyboard activation", () => {
+  const onNavigate = vi.fn();
+  render(<ThreadUserNavigationRail rows={rows(8)} onNavigate={onNavigate} />);
+  const first = document.querySelector(
+    '[data-thread-user-message-navigation-item-id="item-0"]',
+  )!;
+  const last = document.querySelector(
+    '[data-thread-user-message-navigation-item-id="item-3"]',
+  )!;
+  fireEvent.pointerDown(first, { pointerId: 1 });
+  document.elementFromPoint = () => last;
+  fireEvent.pointerMove(rail()!, { pointerId: 1 });
+  fireEvent.pointerUp(rail()!, { pointerId: 1 });
+  expect(onNavigate).toHaveBeenCalledTimes(1);
+  fireEvent.click(last, { detail: 1 });
+  expect(onNavigate).toHaveBeenCalledTimes(1);
+  // A captured pointer click can target nav, leaving the suppression flag set.
+  fireEvent.pointerDown(first, { pointerId: 2 });
+  fireEvent.pointerMove(rail()!, { pointerId: 2 });
+  fireEvent.pointerUp(rail()!, { pointerId: 2 });
+  expect(onNavigate).toHaveBeenCalledTimes(2);
+  fireEvent.click(last, { detail: 0 });
+  expect(onNavigate).toHaveBeenCalledTimes(3);
+});
+
+it("cancels an uncaptured press on leave while preserving captured scrubbing outside and back", () => {
+  const onNavigate = vi.fn();
+  render(<ThreadUserNavigationRail rows={rows(8)} onNavigate={onNavigate} />);
+  const nav = rail() as HTMLElement;
+  let captured = false;
+  Object.defineProperty(nav, "hasPointerCapture", { value: () => captured });
+  const capture = vi.fn(() => { captured = true; });
+  Object.defineProperty(nav, "setPointerCapture", { value: capture });
+  const marker = (index: number) => document.querySelector<HTMLElement>(`[data-thread-user-message-navigation-item-id="item-${index}"]`)!;
+  fireEvent.pointerDown(marker(0), { pointerId: 1 });
+  expect(capture).not.toHaveBeenCalled();
+  fireEvent.pointerLeave(nav, { pointerId: 1 });
+  document.elementFromPoint = () => marker(3);
+  fireEvent.pointerMove(nav, { pointerId: 1, buttons: 0 });
+  expect(onNavigate).not.toHaveBeenCalled();
+  fireEvent.pointerDown(marker(0), { pointerId: 2 });
+  fireEvent.pointerMove(nav, { pointerId: 2, buttons: 1 });
+  expect(capture).toHaveBeenCalledTimes(1);
+  expect(onNavigate).toHaveBeenLastCalledWith(expect.objectContaining({ itemId: "item-3" }));
+  fireEvent.pointerLeave(nav, { pointerId: 2 });
+  document.elementFromPoint = () => marker(5);
+  fireEvent.pointerMove(nav, { pointerId: 2, buttons: 1 });
+  expect(onNavigate).toHaveBeenCalledTimes(2);
+  expect(onNavigate).toHaveBeenLastCalledWith(expect.objectContaining({ itemId: "item-5" }));
 });

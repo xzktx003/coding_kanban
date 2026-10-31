@@ -12,7 +12,17 @@ import {
   PlusIcon,
   Target,
 } from "lucide-react";
-import { lazy, Suspense, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { ScreenshotPopover } from "@session/components/codex/composer/ScreenshotPopover";
 import { useCodexStore } from "@session/components/codex/stores";
@@ -163,6 +173,13 @@ export interface ComposerMenuProps {
   }) => ReactNode;
 }
 
+// PopoverContent owns the actual mount/exit/focus lifecycle. Constructing its
+// JSX through a child keeps closed menus out of ordinary draft renders while
+// preserving that lifecycle and all current props when the content is open.
+function ComposerMenuItems({ children }: { children: () => ReactNode }) {
+  return children();
+}
+
 export function ComposerMenu({
   owner,
   onImageFilesSelected,
@@ -188,12 +205,12 @@ export function ComposerMenu({
     useState<HTMLDivElement | null>(null);
   const parentMenuId = useId();
   const actionClosed = useRef(false);
-  const closeForAction = () => {
+  const closeForAction = useCallback(() => {
     actionClosed.current = true;
     setOpenState(false);
-  };
+  }, []);
   const { items } = useMentionItems();
-  const mentionItems = mentionsWithIcon(items);
+  const mentionItems = useMemo(() => mentionsWithIcon(items), [items]);
 
   const handleSelectImage = async () => {
     try {
@@ -267,113 +284,117 @@ export function ComposerMenu({
           if (actionClosed.current) event.preventDefault();
         }}
       >
-        <div className="flex flex-col gap-1">
-          <Button
-            type="button"
-            variant="ghost"
-            className="min-h-11 justify-start gap-2 px-2 hover:bg-accent hover:text-accent-foreground transition-colors"
-            onClick={handleSelectImage}
-          >
-            <ImageIcon className="w-4 h-4" />
-            <span>附加照片或视频</span>
-          </Button>
-          {actions?.(
-            () => setOpenState(false),
-            persistentMenu ? (
-              <div className="contents" ref={setPersistentTarget} />
-            ) : null,
-          )}
-          <Button
-            type="button"
-            variant="ghost"
-            className={cn(
-              "justify-start gap-2 px-2 hover:bg-accent hover:text-accent-foreground transition-colors",
-              webSearchRequest && "bg-blue-100 text-blue-900",
-            )}
-            disabled={!!permissions}
-            title={permissions ? "网络策略由所选权限配置管理" : undefined}
-            onClick={() => {
-              setWebSearch(!webSearchRequest);
-              setOpenState(false);
-            }}
-          >
-            <Globe className="w-4 h-4" />
-            <span className="flex-1 text-left">网络搜索</span>
-            {webSearchRequest && <Check className="w-4 h-4" />}
-          </Button>
+        <ComposerMenuItems>
+          {() => (
+            <div className="flex flex-col gap-1">
+              <Button
+                type="button"
+                variant="ghost"
+                className="min-h-11 justify-start gap-2 px-2 hover:bg-accent hover:text-accent-foreground transition-colors"
+                onClick={handleSelectImage}
+              >
+                <ImageIcon className="w-4 h-4" />
+                <span>附加照片或视频</span>
+              </Button>
+              {actions?.(
+                () => setOpenState(false),
+                persistentMenu ? (
+                  <div className="contents" ref={setPersistentTarget} />
+                ) : null,
+              )}
+              <Button
+                type="button"
+                variant="ghost"
+                className={cn(
+                  "justify-start gap-2 px-2 hover:bg-accent hover:text-accent-foreground transition-colors",
+                  webSearchRequest && "bg-blue-100 text-blue-900",
+                )}
+                disabled={!!permissions}
+                title={permissions ? "网络策略由所选权限配置管理" : undefined}
+                onClick={() => {
+                  setWebSearch(!webSearchRequest);
+                  setOpenState(false);
+                }}
+              >
+                <Globe className="w-4 h-4" />
+                <span className="flex-1 text-left">网络搜索</span>
+                {webSearchRequest && <Check className="w-4 h-4" />}
+              </Button>
 
-          <SelectFilesMenuItem
-            onFilesSelected={onFilesSelected}
-            onAfterSelect={() => setOpenState(false)}
-          />
-          <Button
-            type="button"
-            variant="ghost"
-            className="justify-start gap-2 px-2"
-            disabled={!(nativeRoot || workspaceRoot)}
-            onClick={() => {
-              const root = nativeRoot || workspaceRoot;
-              if (!root) return;
-              closeForAction();
-              setProjectReference({ owner, root });
-            }}
-          >
-            <File className="w-4 h-4" />
-            <span>引用项目文件/目录</span>
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            className="justify-start gap-2 px-2 hover:bg-accent hover:text-accent-foreground transition-colors"
-            onClick={() => {
-              setOpenState(false);
-              setRecordOpen(true);
-            }}
-          >
-            <PlusIcon className="w-4 h-4" />
-            <span>录制技能</span>
-          </Button>
-          {/* Screenshot button */}
-          <ScreenshotPopover
-            onScreenshotTaken={(path) => {
-              if (onImagesSelected) {
-                onImagesSelected([path]);
-              }
-              setOpenState(false);
-            }}
-          />
-          <Button
-            type="button"
-            variant="ghost"
-            className={cn(
-              "justify-start gap-2 px-2 hover:bg-accent hover:text-accent-foreground transition-colors",
-              goalEnabled && "bg-blue-50 text-blue-700",
-            )}
-            onClick={() => {
-              if (onGoal) onGoal();
-              else setGoalEnabled(true);
-              setOpenState(false);
-            }}
-          >
-            <Target className="w-4 h-4" />
-            <span className="flex-1 text-left">{t("goal")}</span>
-          </Button>
-          {mentionItems.length > 0 && (
-            <>
-              <Separator className="my-1" />
-              {mentionItems.map((item) => (
-                <MentionMenuItem
-                  key={item.key}
-                  item={item}
-                  onInsert={(text, mention) => {
-                    onInsertMention?.(text, mention);
-                    setOpenState(false);
-                  }}
-                />
-              ))}
-            </>
+              <SelectFilesMenuItem
+                onFilesSelected={onFilesSelected}
+                onAfterSelect={() => setOpenState(false)}
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                className="justify-start gap-2 px-2"
+                disabled={!(nativeRoot || workspaceRoot)}
+                onClick={() => {
+                  const root = nativeRoot || workspaceRoot;
+                  if (!root) return;
+                  closeForAction();
+                  setProjectReference({ owner, root });
+                }}
+              >
+                <File className="w-4 h-4" />
+                <span>引用项目文件/目录</span>
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                className="justify-start gap-2 px-2 hover:bg-accent hover:text-accent-foreground transition-colors"
+                onClick={() => {
+                  setOpenState(false);
+                  setRecordOpen(true);
+                }}
+              >
+                <PlusIcon className="w-4 h-4" />
+                <span>录制技能</span>
+              </Button>
+              {/* Screenshot button */}
+              <ScreenshotPopover
+                onScreenshotTaken={(path) => {
+                  if (onImagesSelected) {
+                    onImagesSelected([path]);
+                  }
+                  setOpenState(false);
+                }}
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                className={cn(
+                  "justify-start gap-2 px-2 hover:bg-accent hover:text-accent-foreground transition-colors",
+                  goalEnabled && "bg-blue-50 text-blue-700",
+                )}
+                onClick={() => {
+                  if (onGoal) onGoal();
+                  else setGoalEnabled(true);
+                  setOpenState(false);
+                }}
+              >
+                <Target className="w-4 h-4" />
+                <span className="flex-1 text-left">{t("goal")}</span>
+              </Button>
+              {mentionItems.length > 0 && (
+                <>
+                  <Separator className="my-1" />
+                  {mentionItems.map((item) => (
+                    <MentionMenuItem
+                      key={item.key}
+                      item={item}
+                      onInsert={(text, mention) => {
+                        onInsertMention?.(text, mention);
+                        setOpenState(false);
+                      }}
+                    />
+                  ))}
+                </>
+              )}
+            </div>
           )}
-        </div>
+        </ComposerMenuItems>
       </PopoverContent>
       {persistentMenu?.({
         triggerContainer: persistentTarget,

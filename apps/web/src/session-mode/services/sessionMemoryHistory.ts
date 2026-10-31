@@ -3,9 +3,32 @@ import type { CodexTranscriptBudgetResult } from "./codexTranscriptMemoryBudget"
 /** Local browser cursors are translated to passive native pagination, never sent as native cursors. */
 export const MEMORY_HISTORY_RESTART_CURSOR = "kanban-memory-reload:";
 export const memoryHistoryWindows = new Map<string, Set<string>>();
+// Opaque reading lifetimes, not request IDs: concurrent pages share one intent.
+// Eviction invalidates old captures; absent entries never match a default token.
+const readingIntents = new Map<string, object>();
+export function captureMemoryHistoryIntent(id: string): object {
+  let intent = readingIntents.get(id);
+  if (!intent) {
+    intent = {};
+    readingIntents.set(id, intent);
+    if (readingIntents.size > 50)
+      readingIntents.delete(readingIntents.keys().next().value!);
+  }
+  return intent;
+}
+export function clearMemoryHistoryWindows() {
+  memoryHistoryWindows.clear();
+  readingIntents.clear();
+}
+
 /** Bounded so a long reading session cannot pin history without limit. */
 export const MEMORY_HISTORY_WINDOW_TURNS = 400;
-export function pinMemoryHistoryPage(id: string, turnIds: string[]) {
+export function pinMemoryHistoryPage(
+  id: string,
+  turnIds: string[],
+  intent?: object,
+) {
+  if (intent !== undefined && readingIntents.get(id) !== intent) return;
   // Successive pages accumulate: replacing the window made each click evict
   // what the previous click recovered, so paging never made progress.
   const existing = memoryHistoryWindows.get(id);
@@ -19,7 +42,13 @@ export function pinMemoryHistoryPage(id: string, turnIds: string[]) {
   memoryHistoryWindows.delete(id);
   memoryHistoryWindows.set(id, merged);
   if (memoryHistoryWindows.size > 50)
-    memoryHistoryWindows.delete(memoryHistoryWindows.keys().next().value!);
+    clearMemoryHistoryWindow(memoryHistoryWindows.keys().next().value!);
+}
+
+/** Ending historical reading restores the normal live budget on the next governor pass. */
+export function clearMemoryHistoryWindow(id: string) {
+  readingIntents.delete(id);
+  memoryHistoryWindows.delete(id);
 }
 
 export const MEMORY_ITEM_CURSOR = "kanban-memory-items:";

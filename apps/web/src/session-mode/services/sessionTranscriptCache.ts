@@ -16,6 +16,7 @@ import {
 } from "../stores/useAgentCenterStore";
 import { openedSessions } from "./openedSessions";
 import {
+  clearMemoryHistoryWindow,
   MEMORY_HISTORY_RESTART_CURSOR,
   MEMORY_ITEM_CURSOR,
   transcriptBudgetRecoveryCursor,
@@ -487,6 +488,14 @@ export function getReadingPosition(key: string): ReadingPosition | undefined {
   }
 }
 export function saveReadingPosition(key: string, position: ReadingPosition) {
+  // A default/latest save can race a newly recovered history page. Only an
+  // actual away -> latest transition ends that page's reading protection.
+  if (
+    key.startsWith("codex:") &&
+    position.atBottom &&
+    getReadingPosition(key)?.atBottom === false
+  )
+    clearMemoryHistoryWindow(key.slice("codex:".length));
   try {
     localStorage.setItem(
       `kanban.session.read-position.${key}`,
