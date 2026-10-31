@@ -1,3 +1,4 @@
+import type { SessionRuntimeProtocol } from "../services/session-runtime-protocol.js";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -329,6 +330,7 @@ export function registerSessionFollowupRoutes(
     runtime?: FollowupRuntime;
     autoStart?: boolean;
     nativeQueue?: boolean;
+    protocol?: SessionRuntimeProtocol;
     /** Same admission gate as explicit lifecycle operations; never a native lock. */
     withWrite?: <T>(threadId: string, work: () => Promise<T>) => Promise<T>;
     completionNotifier?: Pick<
@@ -344,7 +346,9 @@ export function registerSessionFollowupRoutes(
     init: Promise<void> | undefined;
   let streamConnected = false,
     streamGeneration = 0;
+  let acquired = false;
   async function acquire() {
+    if (acquired) return;
     if (!options.file) return;
     await mkdir(dirname(options.file), { recursive: true, mode: 0o700 });
     if (lifetime.signal.aborted) throw new Error("消息队列服务已停止");
@@ -510,11 +514,41 @@ export function registerSessionFollowupRoutes(
       }
     },
   };
-  // A real runtime now uses the official persistent queue. The old file remains
-  // an explicit migration source; no timer dispatches its frozen submissions.
-  const queue = (options.nativeQueue ?? !options.runtime)
-    ? new NativeCodexFollowups(admittedRuntime, options.file)
-    : new CodexFollowups(admittedRuntime, options.file);
+  let queue!: NativeCodexFollowups | CodexFollowups;
+  let selecting: Promise<void> | undefined;
+  let legacyScope: string | undefined;
+  const assertLegacyScope = async (expected?: string) => {
+    if (!legacyScope) return;
+    const selected = await options.protocol!.read();
+    if (selected.backend !== "legacy-stdio" || selected.scopeToken !== legacyScope || (expected !== undefined && expected !== legacyScope))
+      throw new FollowupRejected("运行实例已变化，消息尚未发送，草稿已保留");
+  };
+  const selectQueue = async () => {
+    if (queue) return;
+    selecting ??= (async () => {
+      const selected = await options.protocol?.read();
+      await acquire();
+      acquired = true;
+      if (selected?.backend === "legacy-stdio") {
+        legacyScope = selected.scopeToken;
+        const legacyRuntime: FollowupRuntime = {
+          ...admittedRuntime, context: undefined, guardedCall: undefined,
+          call: async (method, params) => {
+            await assertLegacyScope();
+            return admittedRuntime.call(method, params);
+          },
+        };
+        const candidate = new CodexFollowups(legacyRuntime, options.file);
+        await candidate.recover("网关已更新，请确认原任务与队列后继续");
+        queue = candidate;
+      } else {
+        queue = (options.nativeQueue ?? !options.runtime)
+          ? new NativeCodexFollowups(admittedRuntime, options.file)
+          : new CodexFollowups(admittedRuntime, options.file);
+      }
+    })().catch(error => { selecting = undefined; throw error; });
+    await selecting;
+  };
   const dispatchSoon = () => {
     if (options.autoStart === false) return;
     void queue
@@ -528,7 +562,7 @@ export function registerSessionFollowupRoutes(
       return Promise.reject(new Error("消息队列服务已停止"));
     return (
       init ??
-      (init = acquire().catch((e) => {
+      (init = selectQueue().catch((e) => {
         init = undefined;
         throw e;
       }))
@@ -538,6 +572,8 @@ export function registerSessionFollowupRoutes(
   async function enqueue(input: unknown) {
     const data = submit(input);
     await ready();
+    if (legacyScope && data.expectedScope !== legacyScope) throw new FollowupRejected("运行服务范围已变化，消息尚未发送");
+    await assertLegacyScope(data.expectedScope);
     const result = await admit(data.threadId, () => queue.submit(data));
     dispatchSoon();
     return result;
@@ -561,6 +597,7 @@ export function registerSessionFollowupRoutes(
     },
   );
   app.get<{ Querystring: { threadId?: string; expectedScope?: string; cursor?: string; limit?: string } }>("/api/session/followups/steer-receipts", { errorHandler: followupErrorHandler }, async (request, reply) => {
+    await ready();
     if (!(queue instanceof NativeCodexFollowups)) return reply.code(409).send({ error: "旧运行服务不支持持久补充说明回执" });
     const threadId = id(request.query.threadId), limit = request.query.limit === undefined ? 30 : Number(request.query.limit);
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 30 || (request.query.cursor !== undefined && (typeof request.query.cursor !== "string" || request.query.cursor.length > 280))) invalid("补充说明分页参数无效");
@@ -581,11 +618,14 @@ export function registerSessionFollowupRoutes(
     if (!Number.isSafeInteger(data.revision) || data.revision < 0) invalid();
     const op = action(data.action);
     await ready();
+    if (legacyScope && data.expectedScope !== legacyScope) throw new FollowupRejected("运行服务范围已变化，操作尚未提交");
+    await assertLegacyScope(data.expectedScope);
     const result = await admit(threadId, () => queue instanceof NativeCodexFollowups ? queue.change(threadId, data.revision, op, data.expectedScope, runtime.context ? id(data.operationId) : data.operationId) : queue.change(threadId, data.revision, op));
     dispatchSoon();
     return result;
   });
   app.get<{ Querystring: { threadId?: string; operationId?: string; expectedScope?: string } }>("/api/session/followups/actions", { errorHandler: followupErrorHandler }, async (request, reply) => {
+    await ready();
     if (!(queue instanceof NativeCodexFollowups)) return reply.code(409).send({ error: "旧运行服务不支持官方队列操作回执" });
     await ready(); reply.header("cache-control", "no-store");
     return await queue.actionReceipt(id(request.query.threadId), id(request.query.operationId), request.query.expectedScope) ?? reply.code(404).send({ error: "尚未登记此队列操作" });
@@ -596,6 +636,8 @@ export function registerSessionFollowupRoutes(
     const threadId = id(data.threadId),
       turnId = id(data.turnId);
     await ready();
+    if (legacyScope && data.expectedScope !== legacyScope) throw new FollowupRejected("运行服务范围已变化，操作尚未提交");
+    await assertLegacyScope(data.expectedScope);
     if (queue instanceof NativeCodexFollowups) {
       if (runtime.context && (typeof data.expectedScope !== "string" || data.expectedScope.length > 512)) invalid("请先核对当前运行服务后再停止");
       await queue.stop(threadId, turnId, data.expectedScope);
@@ -622,9 +664,12 @@ export function registerSessionFollowupRoutes(
       if (!message(target[field]).trim()) invalid();
     if (target.title != null) message(target.title);
     await ready();
+    if (legacyScope && data.expectedScope !== legacyScope) throw new FollowupRejected("运行服务范围已变化，操作尚未提交");
+    await assertLegacyScope(data.expectedScope);
     return admit(threadId, () => queue instanceof NativeCodexFollowups ? queue.review(threadId, data.delivery, target, id(data.operationId), data.expectedScope) : queue.review(threadId, data.delivery, target));
   });
   app.get<{ Querystring: { threadId?: string; operationId?: string; expectedScope?: string } }>("/api/session/followups/review", { errorHandler: followupErrorHandler }, async (request, reply) => {
+    await ready();
     if (!(queue instanceof NativeCodexFollowups)) return reply.code(409).send({ error: "旧运行服务不支持持久审查回执" });
     const threadId = id(request.query.threadId), operationId = id(request.query.operationId);
     await ready(); reply.header("cache-control", "no-store");
@@ -731,16 +776,25 @@ export function registerSessionFollowupRoutes(
     clearTimeout(streamTimer);
     await options.completionNotifier?.close();
     await init?.catch(() => {});
-    await queue.drain();
+    await queue?.drain();
     lease?.stdin?.end();
     await leaseExit?.catch(() => {});
   });
-  return Object.assign(queue, {
+  return {
     enqueue,
+    submit: enqueue,
+    inspect: async (threadId: string) => { await ready(); return queue.inspect(threadId); },
+    tick: async () => { await ready(); return queue.tick(); },
+    observe: async (event: any) => { await ready(); return queue.observe(event); },
+    get: async (threadId: string) => { await ready(); return queue.get(threadId); },
+    recover: async (reason: string) => { await ready(); return queue.recover(reason); },
+    drain: async () => { await ready(); return queue.drain(); },
+    stop: async (threadId: string, turnId: string, scope?: string) => { await ready(); return queue instanceof NativeCodexFollowups ? queue.stop(threadId, turnId, scope) : queue.stop(threadId, turnId); },
     pause: async (threadId: string) => {
+      await ready();
       if (queue instanceof NativeCodexFollowups) return queue.pause(threadId);
       const state = await queue.inspect(threadId);
       await queue.change(threadId, state.revision, { type: "pause" });
     },
-  });
+  };
 }

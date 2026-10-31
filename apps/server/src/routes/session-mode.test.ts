@@ -11,6 +11,7 @@ import type { VsCodeWebManager } from "../services/vscode-web-manager.js";
 test("a gateway without a lifecycle journal still verifies its in-memory write gate before forwarding Goal",async()=>{
   const app=Fastify();let writes=0,scopeReads=0;
   registerSessionModeRoutes(app,{origin:"http://127.0.0.1:1",fetch:async(url,init)=>{
+    if (new URL(String(url)).pathname === "/health") return Response.json({status:"ok",instance:"fixture-modern",runtime:"typescript",codexBackend:"shared-daemon"});
     if (new URL(String(url)).pathname === "/api/internal/codex/operation-context") {
       assert.equal(init?.method,"GET");scopeReads++;
       return Response.json({scope:"fixture-native-scope",namespace:"fixture-account-history"});
@@ -62,7 +63,7 @@ test("session gateway mounts owner-verified host APIs without starting or resumi
       owner: { cwd, threadId: null, draftOwner: JSON.stringify(["codex", "", "new", cwd]) }, nonce: "nonce-a", editorKey: join(dataHome, "missing.code-workspace"),
     } });
     assert.equal(response.statusCode, 409); assert.match(response.json().message ?? response.json().error, /工作区/);
-    assert.deepEqual(requests, []);
+    assert.deepEqual(requests.filter(url => new URL(url).pathname !== "/health"), []);
   } finally { await app.close(); await rm(dataHome, { recursive: true, force: true }); }
 });
 
@@ -72,6 +73,7 @@ test("session gateway preserves JSON, query parameters and response status", asy
   registerSessionModeRoutes(app, {
     origin: "http://127.0.0.1:12345",
     fetch: async (url, init) => {
+      if (new URL(String(url)).pathname === "/health") return Response.json({status:"ok",instance:"fixture-modern",runtime:"typescript",codexBackend:"shared-daemon"});
       requests.push({ url: String(url), body: init?.body as string });
       return new Response(JSON.stringify({ thread: "one" }), {
         status: 201,

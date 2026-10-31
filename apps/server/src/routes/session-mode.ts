@@ -1,3 +1,4 @@
+import { createSessionRuntimeProtocol } from "../services/session-runtime-protocol.js";
 import { projectCodexChatValue, projectAuxiliaryChatEnvelope } from "@agent-orchestrator/shared";
 import { registerSessionItemDetail } from "./session-item-detail.js";
 import { registerSessionFollowupRoutes } from "./session-followups.js";
@@ -408,7 +409,9 @@ export function registerSessionModeRoutes(
       })
     : undefined;
   let lifecycle: ReturnType<typeof registerSessionLifecycleRoutes> | undefined;
+  const protocol = createSessionRuntimeProtocol(() => nativeRequest("/health"));
   const followups = registerSessionFollowupRoutes(app, {
+    protocol,
     origin: () => origin,
     fetch: fetchUpstream,
     file: options.attachmentRoot
@@ -439,7 +442,11 @@ export function registerSessionModeRoutes(
   lifecycle = registerSessionLifecycleRoutes(app, {
     file: options.attachmentRoot ? resolve(options.attachmentRoot, "..", "session-lifecycle.json") : undefined,
     origin: () => origin, fetch: fetchUpstream,
-    context: async () => { const context = await nativeContext(); return { scopeToken: context.scope, namespace: context.namespace, ...(context.daemonIdentity ? { daemonIdentity: context.daemonIdentity } : {}) }; },
+    context: async () => {
+      const selected = await protocol.read();
+      if (selected.backend === "legacy-stdio") return selected;
+      const context = await nativeContext(); return { scopeToken: context.scope, namespace: context.namespace, ...(context.daemonIdentity ? { daemonIdentity: context.daemonIdentity } : {}) };
+    },
     followups,
   });
   const management = registerSessionManagementRoutes(app, {
@@ -643,6 +650,16 @@ export function registerSessionModeRoutes(
       // A completed POST can therefore be abandoned before upstream headers.
       if (recentProvider || localHistoryTarget) reply.raw.once("close", goalReplyClosed);
       try {
+        let forwardedBody = request.body;
+        if (request.method === "POST" && ["/api/codex/thread/start", "/api/codex/start-thread"].includes(pathname)) {
+          const selected = await protocol.read();
+          if (selected.backend === "legacy-stdio") {
+            const body = request.body as Record<string, unknown>;
+            if (!body || body.expectedScope !== selected.scopeToken) throw Object.assign(new Error("运行实例已变化，消息尚未发送"), { statusCode: 409 });
+            const { expectedScope: _scope, ...nativeBody } = body;
+            forwardedBody = nativeBody;
+          }
+        }
         const recentRequest = recentProvider ? auxiliaryRecentRequest(recentProvider, suffix, request.body) : null;
         const forward = () => fetchUpstream(`${origin}${upstreamSuffix}`, {
           method: request.method,
@@ -652,7 +669,7 @@ export function registerSessionModeRoutes(
               : undefined,
           body:
             request.method === "POST"
-              ? JSON.stringify(request.body ?? {})
+              ? JSON.stringify(forwardedBody ?? {})
               : undefined,
           signal: controller.signal,
           redirect: "manual",
