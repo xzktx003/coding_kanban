@@ -339,10 +339,17 @@ for (const warm of [undefined, true, false])
           // A saved device opt-out uses the original real-time release.
           // No injected traffic pressure, fake clock, GC or direct release call.
           await expect
-            .poll(async () => (await snapshot(page)).counts["ux-1"], {
+            // Each consumer starts its own grace period. Both must expire
+            // within the original deadline; one expiry is not proof of both.
+            .poll(async () => {
+              const state = await snapshot(page);
+              return ["ux-1", "ux-2"].filter(
+                (id) => state.counts[id] !== undefined,
+              );
+            }, {
               timeout: 75_000,
             })
-            .toBeUndefined();
+            .toEqual([]);
         }
         await expect
           .poll(async () => (await snapshot(page)).counts["ux-1"], {

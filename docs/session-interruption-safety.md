@@ -90,3 +90,40 @@
 ## 开发依赖缓存的React过滤（2026-10-29）
 
 各Vite进程仍使用独立缓存身份。缓存位于.dev-runtime/vite-cache，React插件须同时排除该路径和原node_modules，避免已编译依赖重复Babel转换；不得排除整个.dev-runtime，隔离验收目录的应用源码仍需Fast Refresh。scripts/vite-react-cache.test.mjs执行实际插件过滤，tests/e2e/session-vite-optimizer.spec.mts验证真实LAN依赖响应及保留计数状态的源码HMR。文档连续性、代次检测和显式刷新要求不变，详见[会话体验验收](designs/session-mode-user-experience-acceptance-20261029.md)。
+
+
+## 2026-10-31：后台连接保留与返回自动续接
+
+用户明确希望切走网页后继续后台运行。现有会话 App 的 SSE 订阅独立于页面可见性，页面隐藏、最小化或切换工作模式不应主动关闭健康连接；已提交任务由服务端执行。正文回收和暂停不可见界面的只读轮询继续保留，不能为“保活”恢复无界正文、完整历史轮询或高频计时器。
+
+本轮补齐一个恢复缺口：浏览器暂停期间原生 EventSource 可进入 CLOSED，而 onerror 尚未交付，旧实现只监听 online 和错误重试，回到页面不立即重连。共享流增加 visibilitychange、pageshow、focus 唤醒；仅前台、在线、未被投影保护暂停且存在订阅者时，恢复缺失或 CLOSED 的流，继续携带原 since 游标。健康 OPEN 和尚在 CONNECTING 的候选均不替换；保留既有只读 repair，但不让其随即拆掉新连接。最后一个订阅者退出移除全部新增监听。
+
+投影超预算暂停与明确 offline 不能被焦点事件解除；旧代次及未知发送回执规则保持。没有新增任务启动、resume、interrupt、自动批准或自动刷新；没有修改正式运行服务或操作系统的休眠设置。
+
+红绿灯：三个前台唤醒单测在修复前均因第二连接未建立而失败；额外覆盖后台收事件、健康连接不替换、CONNECTING 不重复创建、离线/超限保持暂停、监听清理、错误退避唤醒后仅一次连接及只读 repair 保留。最终18项流单测通过。
+
+`tests/e2e/session-background-eventstream.spec.mts` 使用确切生产流模块、替换 URL/诊断/store 依赖的计数探针和 Chromium 原生 EventSource，经动态选择的 LAN HTTP 监听器（绑定0.0.0.0）验证：隐藏后12条有界事件到达且仅一条连接；静默关闭原生流后，每种唤醒都以 since=12 接回并收到第13条。三项修复前红灯、修复后绿灯，不截断或保留正文，不强制GC。它证明传输恢复，不能替代整应用或物理手机系统挂起；整应用另运行原后台/刷新、草稿、队列、零任务操作用例。
+
+复跑：`pnpm --filter web exec vitest run --config vitest.session.config.ts src/session-mode/lib/eventStream.test.ts`；浏览器执行上述新文件及 `session-background-interruption.spec.ts`、`session-network-memory.spec.mts`、`session-idle-memory.spec.ts`。复用正式前端时入口为当前配置的 **HTTPS https://10.30.0.28:8484，端口8484**，所有任务 API 由隔离夹具截获。
+
+关闭网页会结束浏览器连接；已接收的任务不依赖页面持续执行。手机锁屏、系统冻结/回收标签页期间，网页无法保证持续运行 JavaScript 或保持网络；此时依靠服务端执行与返回后的重放恢复。此修复不等于浏览器永久保活，也不改变既有长期RSS验收边界。
+
+
+### 用户补充的原生 remote compact 报错
+
+`Error running remote compact task: stream disconnected before completion: Transport error: network error: error decoding response body` 与网页 EventSource 的错误必须分开归因。[官方压缩说明](https://developers.openai.com/api/docs/guides/compaction)说明压缩通过模型服务端点完成；本机原生日志也定位到 `responses_retry.rs`，而不是网页解析器。
+
+2026-10-31只读核对 `~/.codex/logs_2.sqlite`：13条响应体解码网络警告属于 `xh2modelzoo_2` 的同一会话，其中8条为ContextLimit自动压缩（四组，每组最多两次），另5条为普通响应。压缩警告北京时间20:48:31/20:50:34、22:01:33/22:03:36、22:24:21/22:26:25、22:35:27/22:37:31；后三组在PreTurn，首组MidTurn。成对间隔123–124秒仅支持检查超时的方向，日志没有记录具体请求耗时、HTTP状态或解压算法，不能据此确定代理超时。
+
+活跃原生进程仍为Codex0.161.0，已安装CLI为0.165.0；版本差异不是已证实根因。原生进程继承远程HTTP代理，已有到代理的TCP连接；没有证据证明该远程代理依赖浏览器页面生命周期。相应原生日志窗口未发现取消/卸载标记，网关现有日志也没有10月31日的停止/中断/显式压缩请求；缺少记录不等于绝对排除了未记录操作。
+
+后台SSE续接修复不能描述为这个原生网络错误已修复。未更改代理、压缩阈值或重试次数，未在任务中途升级/重启原生进程，也未自动重发失败任务。必要网络对照仅访问自有TLS/压缩响应夹具，不携带账号或调用模型。
+
+
+本轮最终结果：流单测18项、前端类型检查通过；13项不同浏览器用例通过（原后台/刷新3、三种内存策略3、投影传输2、新原生后台续接3、审批/阅读恢复2），30分钟RSS默认跳过1项。首批内存opt-out用例在62.269秒仅等到ux-1释放便立即断言ux-2也已释放而失败；两个消费者有独立宽限期，现于原75秒截止内同时等待两者，原正文/审批/草稿断言及阈值均保持，复跑通过。生产回收策略没有改动，不能将初次失败隐去或增加超时门槛。
+
+自有TLS/gzip响应空闲130秒对照：直连130.020秒、经当前代理130.023秒均完整成功，无账号/模型调用。该结果不能证明实际模型端点全程可靠，但不支持把123–124秒警告间隔直接等同于该代理的通用120秒断流规则。测试证据位于忽略目录 `.dev-runtime/session-background-running-20261031/`；未重启PID3349013/3349174，后台恢复代码本地未提交。
+
+### 后续：原生压缩恢复已实测
+
+用户授权向原线程发送继续后，真实复现了原生压缩失败。经只读新版诊断和严格空闲窗口启用新原生客户端，原线程已完成压缩并恢复命令及子Agent执行；先前“尚未恢复”的结论由 [原会话恢复验收](session-remote-compaction-recovery.md) 更新。页面续接修复与此次运行进程/传输修复仍是两个独立改动，不将旧HTTP失败单独归因于代理或网页。

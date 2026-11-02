@@ -21,7 +21,14 @@ async function until(check: () => boolean | Promise<boolean>) {
   }
 }
 async function fixture(
-  options: { latest?: string; pending?: string; queued?: boolean } = {},
+  options: {
+    latest?: string;
+    pending?: string;
+    queued?: boolean;
+    legacy?: boolean;
+    contextError?: boolean;
+    replaceDuringHistory?: boolean;
+  } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "session-notification-gate-"));
   const stateFile = join(root, "codex-completion-notifications.json");
@@ -74,6 +81,7 @@ async function fixture(
     status: "idle",
     latest: options.latest ?? "one",
     phase: "final_answer",
+    instance: "fixture",
   };
   let stream: ReadableStreamDefaultController<Uint8Array> | undefined;
   let seq = 1;
@@ -96,10 +104,26 @@ async function fixture(
       const path = new URL(String(url)).pathname;
       const body = init?.body ? JSON.parse(String(init.body)) : {};
       calls.push({ path, body });
-      if (path === "/health") return Response.json({ instance: "fixture" });
-      if (path === "/api/internal/codex/operation-context") return Response.json({ scope: "notification-scope", namespace: "notification-namespace" });
-      if (path === "/api/codex/thread/queue/list") return Response.json({ data: [], nextCursor: null });
-      if (path === "/api/codex/thread/loaded/list") return Response.json({ data: [threadId], nextCursor: null });
+      if (path === "/health")
+        return Response.json({
+          status: "ok",
+          instance: state.instance,
+          ...(options.legacy
+            ? { capabilities: { codexOwnership: true } }
+            : { runtime: "typescript", codexBackend: "shared-daemon" }),
+        });
+      if (path === "/api/internal/codex/operation-context") {
+        if (options.legacy || options.contextError)
+          return new Response(null, { status: 404 });
+        return Response.json({
+          scope: "notification-scope",
+          namespace: "notification-namespace",
+        });
+      }
+      if (path === "/api/codex/thread/queue/list")
+        return Response.json({ data: [], nextCursor: null });
+      if (path === "/api/codex/thread/loaded/list")
+        return Response.json({ data: [threadId], nextCursor: null });
       if (path === "/api/events")
         return new Response(
           new ReadableStream({
@@ -131,7 +155,9 @@ async function fixture(
         });
       if (path === "/api/codex/thread/goal/get")
         return Response.json({ goal: null });
-      if (path === "/api/codex/thread/turns/list")
+      if (path === "/api/codex/thread/turns/list") {
+        if (options.replaceDuringHistory && body.itemsView === "full")
+          state.instance = "replacement";
         return Response.json({
           data:
             body.itemsView === "notLoaded"
@@ -142,6 +168,7 @@ async function fixture(
                 ],
           nextCursor: null,
         });
+      }
       throw new Error(`Unexpected runtime write or read: ${path}`);
     },
   });
@@ -234,6 +261,85 @@ test("gateway ignores interim commentary and sends the latest final result after
           c.path.endsWith("turns/list") && c.body.itemsView === "notLoaded",
       ),
     );
+  } finally {
+    await f.close();
+  }
+});
+
+// Regression: upgraded gateways must notify when intentionally retaining a legacy runtime.
+test("legacy completion sends once without calling unsupported account context or fabricating account scope", async () => {
+  const f = await fixture({ legacy: true });
+  try {
+    f.emit("turn/completed", "one");
+    await until(() => f.sent.length === 1);
+    assert.equal(f.sent[0].summary, "reply-one");
+    assert.equal(f.sent[0].sessionModeThreadId, threadId);
+    assert.equal(f.sent[0].sessionModeScope, undefined);
+    assert.equal(f.sent[0].sessionModeNamespace, undefined);
+    f.emit("turn/completed", "one");
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    assert.equal(f.sent.length, 1);
+    assert.equal(
+      f.calls.some((c) => c.path.includes("operation-context")),
+      false,
+    );
+    assert.equal(
+      f.calls.some((c) =>
+        /turn\/(start|steer|interrupt)|thread\/resume/.test(c.path),
+      ),
+      false,
+    );
+  } finally {
+    await f.close();
+  }
+});
+for (const options of [
+  { legacy: true, replaceDuringHistory: true },
+  { contextError: true },
+])
+  test(`notification refuses changed runtime or missing modern context ${JSON.stringify(options)}`, async () => {
+    const f = await fixture(options);
+    try {
+      f.emit("turn/completed", "one");
+      await until(() =>
+        f.calls.some((c) =>
+          options.contextError
+            ? c.path.includes("operation-context")
+            : c.body.itemsView === "full",
+        ),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      assert.equal(f.sent.length, 0);
+      assert.ok((await f.saved()).pending[`${threadId}:one`]);
+    } finally {
+      await f.close();
+    }
+  });
+
+test("legacy restores a pending completion without replaying the user's task", async () => {
+  const f = await fixture({ legacy: true, pending: "one" });
+  try {
+    await until(() => f.sent.length === 1);
+    await until(async () => !(await f.saved()).pending[`${threadId}:one`]);
+    assert.equal((await f.saved()).sent[`${threadId}:one`], true);
+    assert.equal(
+      f.calls.some((c) =>
+        /turn\/(start|steer|interrupt)|thread\/resume/.test(c.path),
+      ),
+      false,
+    );
+  } finally {
+    await f.close();
+  }
+});
+test("legacy completion still waits for unsent queue items", async () => {
+  const f = await fixture({ legacy: true, queued: true });
+  try {
+    f.emit("turn/completed", "one");
+    await until(() => f.calls.some((c) => c.path.endsWith("turns/list")));
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    assert.equal(f.sent.length, 0);
+    assert.ok((await f.saved()).pending[`${threadId}:one`]);
   } finally {
     await f.close();
   }

@@ -356,7 +356,12 @@ export function registerSessionModeRoutes(
           : undefined,
         readThread: async (threadId, turnId) => {
           if (!origin) throw new Error("会话服务尚未连接");
-          const before = await nativeContext();
+          const selected = await protocol.read();
+          // Legacy stdio owns its runtime, but cannot attest an account namespace.
+          // Its notification reads need runtime identity checks, not a fabricated
+          // native account scope or an unsupported operation-context request.
+          const before =
+            selected.backend === "legacy-stdio" ? undefined : await nativeContext();
           const request = async (path: string, body: unknown) => {
             const response = await fetchUpstream(
               `${origin}/api/codex/thread/${path}`,
@@ -388,9 +393,16 @@ export function registerSessionModeRoutes(
             if (!Array.isArray(page.data)) throw new Error("任务历史格式无效");
             const turn = page.data.find((turn: any) => turn.id === turnId);
             if (turn) {
-              const after = await nativeContext();
-              if (before.scope !== after.scope || before.namespace !== after.namespace) throw new Error("读取完成记录期间账号或运行范围已变化");
-              return { thread: { ...thread, turns: [turn] }, sessionModeContext: before };
+              await protocol.read(); // Reject a changed runtime even on legacy reads.
+              if (before) {
+                const after = await nativeContext();
+                if (before.scope !== after.scope || before.namespace !== after.namespace)
+                  throw new Error("读取完成记录期间账号或运行范围已变化");
+              }
+              return {
+                thread: { ...thread, turns: [turn] },
+                ...(before ? { sessionModeContext: before } : {}),
+              };
             }
             cursor = page.nextCursor ?? null;
             if (cursor !== null) {

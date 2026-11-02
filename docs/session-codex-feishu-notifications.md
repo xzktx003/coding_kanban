@@ -78,3 +78,18 @@
 隔离回归使用模拟 sender 和独立 outbox／队列，未发送真实飞书测试或模型任务。覆盖旧通知恢复时淘汰、暂停队列未清空、commentary 不误发、空闲后最终回复、Goal 身份／状态、门控／读取期间新轮次及微任务竞态、跨来源抢发和缓存隔离。既有去重／重试／回复续跑回归及真实 HTTP → SSE → EventSource 工具正文裁剪仍保留。
 
 本轮验证：`pnpm check` 通过；相关后端 157 项通过，`session-network-memory.spec.mts` 两项真实 HTTP/EventSource 回归通过。SSE 上游 100,669,814 bytes，浏览器普通事件 data 共 6,178 字符、单事件最大 317 字符；这证明工具正文裁剪仍生效，不是长期 renderer RSS 验收。本轮没有新增前端内存策略，也未将短测标成内存问题全部解决。
+
+
+## 2026-11-02：新版网关复用旧运行服务的通知恢复
+
+现场通知开关已开启、完成事件已进入 outbox，但读取最终回复时无条件请求 `/api/internal/codex/operation-context`。仍在运行的旧 stdio 服务返回空正文 404，网关报 `Unexpected end of JSON input`，通知持续 pending；健康检查成功不能证明支持新版账号范围接口。
+
+通知读取现在复用发送链路的严格运行协议选择：只有健康响应明确符合旧版身份及 `codexOwnership` 时走兼容读取；完整历史读取前后复核固定运行实例。旧版只提供运行身份，不伪造原生账号 namespace，通知绑定不附加假的账号授权。新版继续要求真实 operation-context，接口缺失或失败不降级；运行实例变化也保留 pending，不发送可能属于其他实例的结果。所有读取只读，不 resume/start/steer 用户任务。
+
+最新轮次、空闲状态、Goal、未发送队列、子 Agent 过滤和已有跨模式去重规则保持。通知修复不解除暂停队列、不扫描补发旧历史；已有合法 pending 按原通知器恢复。旧服务的飞书回复仍缺少新版账号授权能力，本次不绕过回复身份检查；通知成功不能代替回复续跑验收。
+
+回归：`pnpm --filter server exec tsx --test src/routes/session-mode.notifications.test.ts`，旧服务发送用例先失败、修复后通过，覆盖重复完成、pending 恢复、未完成队列阻拦、读取途中实例替换、新版接口 404 不降级。
+
+现场结算：仅刷新自有 Node 网关以加载修复，独立会话运行层 PID 3580847 与原生 Codex PID 3581008 保持；原 outbox 中一个仍满足完成条件的 pending 自动发送，sent 增加 1，并在现有绑定库找到该 thread/turn 的 1 条飞书投递回执，pending 清零。没有新增模型测试任务、清空去重记录或人工重发卡片。原网关退出受长连接排空阻塞，第二次仅向同一已核实网关 PID 发送 SIGTERM 后由现有 watcher 恢复；没有向进程组或运行层发送信号。
+
+验证：通知/发送兼容/队列/完成检查/回复单测合计 140 项通过，另外原生 HTTP 后台通知与可信卡片回复集成 2 项通过；后端 TypeScript 检查通过，独立只读审查无阻断项。两个 HTTP fixture 的 health 补齐真实新版协议标记，保留既有通知、回复和重启断言。旧版用例先红后绿；HTTP fixture 原先缺协议身份而失败，补齐 fixture 后转绿，没有放宽产品身份检查。

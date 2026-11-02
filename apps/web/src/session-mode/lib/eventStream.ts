@@ -206,6 +206,26 @@ function handleOnline() {
   timer = null;
   connect();
 }
+
+/** Keep healthy streams alive in the background. A browser may close one while
+ * suspended before delivering onerror; returning must not depend on that timer.
+ */
+function handleForeground() {
+  if (
+    document.visibilityState === "hidden" ||
+    paused ||
+    offline ||
+    !subscribers.size ||
+    navigator.onLine === false
+  )
+    return;
+  // OPEN and CONNECTING must survive repeated focus/pageshow notifications.
+  // CLOSED is the native EventSource readyState 2.
+  if (source && source.readyState !== 2) return;
+  // Preserve a pending read-only repair, but don't let it replace the new stream.
+  repairReconnectAt = Date.now();
+  connect();
+}
 /** One shared browser SSE connection avoids HTTP/1 connection exhaustion in grids. */
 export function openEventStream(subscriber: Subscriber): () => void {
   subscribers.add(subscriber);
@@ -213,6 +233,9 @@ export function openEventStream(subscriber: Subscriber): () => void {
     window.addEventListener("session-runtime-restarted", restart);
     window.addEventListener("offline", handleOffline);
     window.addEventListener("online", handleOnline);
+    document.addEventListener("visibilitychange", handleForeground);
+    window.addEventListener("pageshow", handleForeground);
+    window.addEventListener("focus", handleForeground);
     offline = false;
     if (typeof navigator !== "undefined" && navigator.onLine === false)
       handleOffline();
@@ -230,6 +253,9 @@ export function openEventStream(subscriber: Subscriber): () => void {
     window.removeEventListener("session-runtime-restarted", restart);
     window.removeEventListener("offline", handleOffline);
     window.removeEventListener("online", handleOnline);
+    document.removeEventListener("visibilitychange", handleForeground);
+    window.removeEventListener("pageshow", handleForeground);
+    window.removeEventListener("focus", handleForeground);
     if (timer) clearTimeout(timer);
     timer = null;
     source?.close();

@@ -403,3 +403,122 @@ it("pauses oversized stream failures without replaying or repairing in a loop", 
     vi.useRealTimers();
   }
 });
+
+it("keeps the healthy stream receiving while hidden and reuses it on return", () => {
+  const instances: any[] = [];
+  class Source {
+    readyState = 1;
+    onmessage: any;
+    onopen: any;
+    close = vi.fn();
+    constructor(public url: string) { instances.push(this); }
+  }
+  vi.stubGlobal("EventSource", Source);
+  const visible = vi.spyOn(document, "visibilityState", "get");
+  const receive = vi.fn();
+  const stop = openEventStream({ onEvent: receive });
+  try {
+    instances[0].onopen();
+    visible.mockReturnValue("hidden");
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.dispatchEvent(new Event("pagehide"));
+    instances[0].onmessage({ data: JSON.stringify({ seq: 75, event: "codex:notification", payload: {} }) });
+    expect(receive).toHaveBeenCalledOnce();
+    visible.mockReturnValue("visible");
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.dispatchEvent(new Event("pageshow"));
+    window.dispatchEvent(new Event("focus"));
+    expect(instances).toHaveLength(1);
+    expect(instances[0].close).not.toHaveBeenCalled();
+  } finally { stop(); visible.mockRestore(); }
+});
+
+it.each(["visibilitychange", "pageshow", "focus"])("recovers a silently closed stream on %s without waiting for an error timer", (event) => {
+  const instances: any[] = [];
+  class Source {
+    readyState = 0;
+    onmessage: any;
+    onopen: any;
+    close = vi.fn();
+    constructor(public url: string) { instances.push(this); }
+  }
+  vi.stubGlobal("EventSource", Source);
+  const visible = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+  const stop = openEventStream({ onEvent: vi.fn() });
+  try {
+    instances[0].readyState = 1;
+    instances[0].onopen();
+    instances[0].onmessage({ data: JSON.stringify({ seq: 81, event: "codex:notification", payload: {} }) });
+    // Browser lifecycle can close transport before JS receives onerror.
+    instances[0].readyState = 2;
+    (event === "visibilitychange" ? document : window).dispatchEvent(new Event(event));
+    expect(instances).toHaveLength(2);
+    expect(instances[1].url).toContain("view=chat&since=81");
+    window.dispatchEvent(new Event("focus"));
+    expect(instances).toHaveLength(2); // Do not replace the CONNECTING candidate.
+    stop();
+    instances[1].readyState = 2;
+    window.dispatchEvent(new Event("focus"));
+    expect(instances).toHaveLength(2); // Listener removed with the final consumer.
+  } finally { stop(); visible.mockRestore(); }
+});
+
+it("never wakes a hidden, explicitly offline or projection-paused stream", () => {
+  const instances: any[] = [];
+  class Source {
+    readyState = 1;
+    onopen: any;
+    listeners = new Map<string, () => void>();
+    close = vi.fn(() => { this.readyState = 2; });
+    addEventListener(type: string, cb: () => void) { this.listeners.set(type, cb); }
+    constructor(public url: string) { instances.push(this); }
+  }
+  vi.stubGlobal("EventSource", Source);
+  const visible = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+  const stop = openEventStream({ onEvent: vi.fn() });
+  try {
+    instances[0].readyState = 2;
+    window.dispatchEvent(new Event("focus"));
+    expect(instances).toHaveLength(1);
+    window.dispatchEvent(new Event("offline"));
+    visible.mockReturnValue("visible");
+    window.dispatchEvent(new Event("pageshow"));
+    expect(instances).toHaveLength(1);
+    window.dispatchEvent(new Event("online"));
+    expect(instances).toHaveLength(2);
+    instances[1].listeners.get("session-projection-error")!();
+    window.dispatchEvent(new Event("focus"));
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(instances).toHaveLength(2);
+    expect(useSessionSyncStore.getState().connection).toBe("paused");
+  } finally { stop(); visible.mockRestore(); }
+});
+
+it("wakes a pending backoff once while preserving its read-only resync", () => {
+  vi.useFakeTimers();
+  const instances: any[] = [];
+  class Source {
+    readyState = 0;
+    onopen: any;
+    onerror: any;
+    onmessage: any;
+    close = vi.fn();
+    constructor(public url: string) { instances.push(this); }
+  }
+  vi.stubGlobal("EventSource", Source);
+  const visible = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+  const resync = vi.fn();
+  const stop = openEventStream({ onEvent: vi.fn(), onResync: resync });
+  try {
+    instances[0].readyState = 1;
+    instances[0].onopen();
+    instances[0].onmessage({ data: JSON.stringify({ seq: 8, event: "codex:notification", payload: {} }) });
+    instances[0].onerror();
+    window.dispatchEvent(new Event("focus"));
+    expect(instances).toHaveLength(2);
+    expect(instances[1].url).toContain("since=8");
+    vi.advanceTimersByTime(1500);
+    expect(resync).toHaveBeenCalledOnce();
+    expect(instances).toHaveLength(2);
+  } finally { stop(); visible.mockRestore(); vi.useRealTimers(); }
+});

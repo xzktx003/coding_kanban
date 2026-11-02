@@ -188,3 +188,7 @@ Vite serve启用 `scripts/vite-external-sourcemaps.mjs`：已有transform map仍
 当前契约显式固定安装的Vite **7.3.1**，更新Vite后须先验证真实`.js`/`.map`、`?import`与时间戳query、ETag 304、HEAD、HMR后map/source内容，以及文档连续性和React性能留存保护，再更新版本门。命令：`node --test scripts/vite-external-sourcemaps.test.mjs scripts/vite-document-continuity.test.mjs scripts/vite-react-cache.test.mjs`。不兼容版本/缺少module graph明确失败，不恢复自动整页刷新。减少传输量不能代替三页真实输入的两秒验收。
 
 本期最小验证入口补齐 shared 的源码契约测试，并在 server/runtime 的 test glob 显式包含顶层 `src/*.test.ts`，防止 shell 不展开递归模式时漏掉只读适配通道测试。serve-only UI 基础组件直接使用已声明的 Radix tooltip/separator 包，保留实际组件语义而避免冷加载整个聚合入口；`scripts/vite-radix-imports.test.mjs`核对冷图、Tooltip函数身份与Separator标记。
+
+## 存活 Codex 版本与已安装 CLI 不一致
+
+安装CLI或构建成功不代表已存活原生进程已更新；健康200及旧运行层binaryState也不足以证明CLI版本一致。先通过实际原生initialize/userAgent和受控诊断确认，不能为升级隐式中断运行轮次。原服务缺少完整活动统计时必须保留unknown，并另行核对loaded线程、Goal、待交互、队列及确切自有子进程；共享daemon及其他工作树进程不在维护信号范围内。网关实例绑定在运行层更换后也须受控重建，不能用旧scope继续写。一次0.161 HTTP压缩失败→0.165 WebSocket恢复的完整窗口与证据见 [恢复验收](session-remote-compaction-recovery.md)。

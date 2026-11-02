@@ -49,7 +49,14 @@ test("session Codex completion sends from the backend without a browser and resu
   const runtime = createServer(async (request, response) => {
     const url = new URL(request.url!, "http://localhost");
     if (url.pathname === "/health")
-      return void response.end(JSON.stringify({ instance: "native-instance" }));
+      return void response.end(
+        JSON.stringify({
+          status: "ok",
+          instance: "native-instance",
+          runtime: "typescript",
+          codexBackend: "shared-daemon",
+        }),
+      );
     if (url.pathname === "/api/internal/codex/operation-context")
       return void response.end(
         JSON.stringify({
@@ -196,7 +203,14 @@ test("a trusted native completion card reply starts the original session once an
   const runtime = createServer(async (request, response) => {
     const url = new URL(request.url!, "http://localhost");
     if (url.pathname === "/health")
-      return void response.end(JSON.stringify({ instance: "reply-runtime" }));
+      return void response.end(
+        JSON.stringify({
+          status: "ok",
+          instance: "reply-runtime",
+          runtime: "typescript",
+          codexBackend: "shared-daemon",
+        }),
+      );
     if (url.pathname === "/api/internal/codex/operation-context")
       return void response.end(JSON.stringify({ scope, namespace }));
     if (url.pathname === "/api/events") {
