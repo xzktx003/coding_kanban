@@ -972,6 +972,204 @@ test("completion startup matching refuses ambiguous, resumed and non-Codex proce
     rmSync(f.root, { recursive: true, force: true });
   }
 });
+test("completion matching recovers the only rollout written after a bare resume", async () => {
+  const f = startupCompletionFixture();
+  try {
+    const selected = f.candidate("selected", f.started - 60 * 60 * 1000);
+    const stale = f.candidate("stale", f.started - 3 * 60 * 60 * 1000);
+    const staleAt = (f.started - 60 * 60 * 1000) / 1000;
+    utimesSync(stale, staleAt, staleAt);
+    f.candidate("subagent", f.started - 60 * 60 * 1000, { subagent: {} });
+    f.candidate("other-directory", Date.now(), "cli", "/workspace/other");
+    writeFileSync(
+      join(f.procRoot, "602", "cmdline"),
+      "/usr/local/bin/codex\0--resume\0",
+    );
+    const input = {
+      tmuxTarget: "%291",
+      workingDirectory: "/workspace/shared",
+    };
+    assert.equal(await f.locator.resolve(input), undefined);
+    assert.equal(
+      await f.locator.resolve({ ...input, readOnlyCompletion: true }),
+      "codex-selected",
+    );
+    assert.equal(selected.endsWith("selected.jsonl"), true);
+    writeFileSync(
+      join(f.procRoot, "602", "cmdline"),
+      "/usr/local/bin/codex\0fork\0",
+    );
+    assert.equal(
+      await f.locator.resolve({ ...input, readOnlyCompletion: true }),
+      undefined,
+    );
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("completion matching leaves two bare-resume writes unresolved", async () => {
+  const f = startupCompletionFixture();
+  try {
+    f.candidate("one", f.started - 2 * 60 * 60 * 1000);
+    f.candidate("two", f.started - 3 * 60 * 60 * 1000);
+    writeFileSync(
+      join(f.procRoot, "602", "cmdline"),
+      "/usr/local/bin/codex\0resume\0",
+    );
+    const input = {
+      tmuxTarget: "%291",
+      workingDirectory: "/workspace/shared",
+      readOnlyCompletion: true,
+    };
+    assert.equal(await f.locator.resolve(input), undefined);
+    assert.equal(
+      await f.locator.resolve({ ...input, readOnlyCompletion: false }),
+      undefined,
+    );
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("completion matching excludes sibling launches and threads owned by other live Codex processes", async () => {
+  const f = startupCompletionFixture();
+  try {
+    f.candidate("selected", f.started - 2 * 60 * 60 * 1000);
+    const born = f.candidate("born", Date.now() - 1000);
+    const siblingStart = Date.now() - 5_000;
+    const sibling = join(f.procRoot, "700");
+    mkdirSync(join(sibling, "task", "700"), { recursive: true });
+    writeFileSync(join(sibling, "task", "700", "children"), "");
+    writeFileSync(join(sibling, "cmdline"), "/usr/local/bin/codex\0--yolo\0");
+    exposeProcessWorkingDirectory(f.procRoot, 700, "/workspace/shared");
+    utimesSync(sibling, siblingStart / 1000, siblingStart / 1000);
+    writeFileSync(
+      join(f.procRoot, "602", "cmdline"),
+      "/usr/local/bin/codex\0resume\0",
+    );
+    const input = {
+      tmuxTarget: "%291",
+      workingDirectory: "/workspace/shared",
+      readOnlyCompletion: true as const,
+    };
+    assert.equal(await f.locator.resolve(input), "codex-selected");
+    assert.equal(born.endsWith("born.jsonl"), true);
+
+    const held = f.candidate("held", f.started - 4 * 60 * 60 * 1000);
+    const holder = join(f.procRoot, "703");
+    mkdirSync(join(holder, "task", "703"), { recursive: true });
+    writeFileSync(join(holder, "task", "703", "children"), "");
+    writeFileSync(join(holder, "cmdline"), "/usr/local/bin/codex\0--yolo\0");
+    exposeProcessWorkingDirectory(f.procRoot, 703, "/workspace/shared");
+    exposeOpenFile(f.procRoot, 703, held);
+    assert.equal(await f.locator.resolve(input), "codex-selected");
+
+    writeFileSync(
+      join(holder, "cmdline"),
+      "/usr/local/bin/codex\0resume\0codex-selected\0",
+    );
+    assert.equal(await f.locator.resolve(input), undefined);
+    assert.equal(
+      await f.locator.resolve({ ...input, readOnlyCompletion: false }),
+      undefined,
+    );
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("completion matching ignores rollout handles held only by Codex app-server", async () => {
+  const f = startupCompletionFixture();
+  try {
+    const selected = f.candidate("selected", f.started - 2 * 60 * 60 * 1000);
+    const stale = f.candidate("stale", f.started - 5 * 60 * 60 * 1000);
+    const staleAt = (f.started - 60 * 60 * 1000) / 1000;
+    utimesSync(stale, staleAt, staleAt);
+    writeFileSync(
+      join(f.procRoot, "602", "cmdline"),
+      "/usr/local/bin/codex\0resume\0",
+    );
+    const daemon = join(f.procRoot, "710");
+    mkdirSync(join(daemon, "task", "710"), { recursive: true });
+    writeFileSync(join(daemon, "task", "710", "children"), "");
+    writeFileSync(
+      join(daemon, "cmdline"),
+      "/usr/local/bin/codex\0app-server\0--listen\0unix://\0",
+    );
+    exposeOpenFile(f.procRoot, 710, selected);
+    const input = {
+      tmuxTarget: "%291",
+      workingDirectory: "/workspace/shared",
+      readOnlyCompletion: true as const,
+    };
+    assert.equal(await f.locator.resolve(input), "codex-selected");
+    assert.equal(
+      await f.locator.resolve({ ...input, readOnlyCompletion: false }),
+      undefined,
+    );
+
+    writeFileSync(join(daemon, "cmdline"), "/usr/local/bin/codex\0--yolo\0");
+    assert.equal(await f.locator.resolve(input), undefined);
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("completion matching gives concurrent bare resumes non-overlapping write windows", async () => {
+  const f = startupCompletionFixture();
+  try {
+    const now = Date.now();
+    const earlyStart = now - 10 * 60 * 1000;
+    const lateStart = now - 2 * 60 * 1000;
+    utimesSync(join(f.procRoot, "602"), earlyStart / 1000, earlyStart / 1000);
+    const early = f.candidate("early", earlyStart - 60 * 60 * 1000);
+    const late = f.candidate("late", earlyStart - 2 * 60 * 60 * 1000);
+    const ancient = f.candidate("ancient", earlyStart - 24 * 60 * 60 * 1000);
+    utimesSync(
+      early,
+      (now - 5 * 60 * 1000) / 1000,
+      (now - 5 * 60 * 1000) / 1000,
+    );
+    utimesSync(late, (now - 30 * 1000) / 1000, (now - 30 * 1000) / 1000);
+    utimesSync(
+      ancient,
+      (earlyStart - 60 * 60 * 1000) / 1000,
+      (earlyStart - 60 * 60 * 1000) / 1000,
+    );
+    writeFileSync(
+      join(f.procRoot, "602", "cmdline"),
+      "/usr/local/bin/codex\0resume\0",
+    );
+    const later = join(f.procRoot, "800");
+    mkdirSync(join(later, "task", "800"), { recursive: true });
+    writeFileSync(join(later, "task", "800", "children"), "");
+    writeFileSync(join(later, "cmdline"), "/usr/local/bin/codex\0--resume\0");
+    exposeProcessWorkingDirectory(f.procRoot, 800, "/workspace/shared");
+    utimesSync(later, lateStart / 1000, lateStart / 1000);
+    const earlyInput = {
+      tmuxTarget: "%291",
+      workingDirectory: "/workspace/shared",
+    };
+    const lateInput = {
+      tmuxTarget: "%292",
+      tmuxPaneProcessId: 800,
+      workingDirectory: "/workspace/shared",
+    };
+    assert.equal(await f.locator.resolve(earlyInput), undefined);
+    assert.equal(
+      await f.locator.resolve({ ...earlyInput, readOnlyCompletion: true }),
+      "codex-early",
+    );
+    assert.equal(
+      await f.locator.resolve({ ...lateInput, readOnlyCompletion: true }),
+      "codex-late",
+    );
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
 test("completion startup matching never uses outer rewritten timestamps or mtimes as thread birth", async () => {
   const f = startupCompletionFixture();
   try {

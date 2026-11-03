@@ -70,6 +70,14 @@ interface OpenSessionCandidate {
   subagent: boolean;
 }
 
+interface LiveCodexProcess {
+  args: string[];
+  cwd?: string;
+  heldSessionIds: ReadonlySet<string>;
+  processId: number;
+  startedAtMs: number | null;
+}
+
 interface CachedSessionCandidate {
   candidate: OpenSessionCandidate | null;
   ctimeMs: number;
@@ -182,6 +190,51 @@ function isCodexProcess(procRoot: string, processId: number): boolean {
   } catch {
     return false;
   }
+}
+
+function readProcessArguments(
+  procRoot: string,
+  processId: number,
+): string[] | null {
+  try {
+    return readFileSync(join(procRoot, String(processId), "cmdline"), "utf8")
+      .split("\0")
+      .filter(Boolean);
+  } catch {
+    return null;
+  }
+}
+
+function isCodexAppServer(args: readonly string[]): boolean {
+  return args.includes("app-server");
+}
+
+function isBareResumeArguments(args: readonly string[]): boolean {
+  if (args.includes("fork")) return false;
+  let sawResume = false;
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] !== "resume" && args[index] !== "--resume") continue;
+    sawResume = true;
+    for (const argument of args.slice(index + 1)) {
+      if (!argument.startsWith("-") && SESSION_ID_PATTERN.test(argument)) {
+        return false;
+      }
+    }
+  }
+  return sawResume;
+}
+
+function explicitResumeSessionIdFromArguments(
+  args: readonly string[],
+): string | null {
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] !== "resume" && args[index] !== "--resume") continue;
+    for (const argument of args.slice(index + 1)) {
+      if (argument.startsWith("-")) continue;
+      return SESSION_ID_PATTERN.test(argument) ? argument : null;
+    }
+  }
+  return null;
 }
 
 function readExplicitResumeSessionId(
@@ -804,6 +857,23 @@ export class CodexSessionLocator {
       }
     }
 
+    // Bare `codex resume` rewrites an older rollout and usually closes it, so
+    // creation-time matching cannot see it. Completion observation may use the
+    // single same-directory file written at or after startup. Never use that
+    // association for input routing, explicit resume IDs, or fork.
+    if (
+      input.readOnlyCompletion &&
+      normalizedDirectory &&
+      codexProcessIds.length > 0
+    ) {
+      const resumedSessionId = this.resolveBareResumeCompletion(
+        codexProcessIds,
+        normalizedDirectory,
+        sessionCandidates,
+      );
+      if (resumedSessionId) return resumedSessionId;
+    }
+
     // Shell snapshots can be regenerated and Codex can close rollout handles
     // between writes. For history display only, an exact registered ID remains
     // safe when the active pane still runs Codex and the rollout metadata
@@ -877,5 +947,164 @@ export class CodexSessionLocator {
     }
 
     return undefined;
+  }
+
+  private listLiveCodexProcesses(): LiveCodexProcess[] {
+    let names: string[];
+    try {
+      names = readdirSync(this.procRoot);
+    } catch {
+      return [];
+    }
+
+    const processes: LiveCodexProcess[] = [];
+    for (const name of names) {
+      if (!/^\d+$/.test(name)) continue;
+      const processId = Number(name);
+      if (!isCodexProcess(this.procRoot, processId)) continue;
+      const args = readProcessArguments(this.procRoot, processId);
+      if (!args) continue;
+      const cwd = readProcessWorkingDirectory(this.procRoot, processId);
+      processes.push({
+        args,
+        ...(cwd ? { cwd } : {}),
+        heldSessionIds: this.readHeldSessionIds(processId),
+        processId,
+        startedAtMs: readProcessStartTime(
+          this.procRoot,
+          processId,
+          this.clockTicksPerSecond,
+        ),
+      });
+    }
+    return processes;
+  }
+
+  private readHeldSessionIds(processId: number): Set<string> {
+    const sessionIds = new Set<string>();
+    let descriptors: string[];
+    try {
+      descriptors = readdirSync(join(this.procRoot, String(processId), "fd"));
+    } catch {
+      return sessionIds;
+    }
+
+    for (const descriptor of descriptors) {
+      let target: string;
+      try {
+        target = readlinkSync(
+          join(this.procRoot, String(processId), "fd", descriptor),
+        );
+      } catch {
+        continue;
+      }
+      if (
+        !target.endsWith(".jsonl") ||
+        !isPathInside(this.sessionsRoot, target)
+      ) {
+        continue;
+      }
+      const candidate = this.readCachedSessionCandidate(target);
+      if (candidate && !candidate.subagent) sessionIds.add(candidate.id);
+    }
+    return sessionIds;
+  }
+
+  private resolveBareResumeCompletion(
+    paneCodexProcessIds: readonly number[],
+    normalizedDirectory: string,
+    sessionCandidates: readonly OpenSessionCandidate[],
+  ): string | undefined {
+    // The shared app-server daemon keeps many rollout files open. Those
+    // descriptors are not a competing interactive session.
+    const live = this.listLiveCodexProcesses().filter(
+      (process) => !isCodexAppServer(process.args),
+    );
+    const bareProcesses = paneCodexProcessIds.flatMap((processId) => {
+      const process = live.find((entry) => entry.processId === processId);
+      return process && isBareResumeArguments(process.args) ? [process] : [];
+    });
+    if (bareProcesses.length === 0) return undefined;
+
+    const explicitSessionIds = new Set<string>();
+    const bornSessionIds = new Set<string>();
+    const bareStarts: { processId: number; startedAtMs: number }[] = [];
+    for (const process of live) {
+      const explicitSessionId = explicitResumeSessionIdFromArguments(
+        process.args,
+      );
+      if (explicitSessionId) explicitSessionIds.add(explicitSessionId);
+      if (
+        !process.cwd ||
+        resolve(process.cwd) !== normalizedDirectory ||
+        process.startedAtMs === null
+      ) {
+        continue;
+      }
+      if (isBareResumeArguments(process.args)) {
+        bareStarts.push({
+          processId: process.processId,
+          startedAtMs: process.startedAtMs,
+        });
+        continue;
+      }
+      if (
+        process.args.includes("resume") ||
+        process.args.includes("--resume")
+      ) {
+        continue;
+      }
+      for (const candidate of sessionCandidates) {
+        if (
+          candidate.createdAtMs !== undefined &&
+          candidate.createdAtMs >= process.startedAtMs - 1_000 &&
+          candidate.createdAtMs <=
+            process.startedAtMs + SHELL_SNAPSHOT_MATCH_WINDOW_MS
+        ) {
+          bornSessionIds.add(candidate.id);
+        }
+      }
+    }
+
+    const matching = new Set<string>();
+    let ambiguous = false;
+    for (const process of bareProcesses) {
+      if (process.startedAtMs === null) {
+        ambiguous = true;
+        break;
+      }
+      const nextStart = bareStarts.reduce<number | null>((nearest, other) => {
+        if (
+          other.processId === process.processId ||
+          other.startedAtMs <= process.startedAtMs!
+        ) {
+          return nearest;
+        }
+        return nearest === null || other.startedAtMs < nearest
+          ? other.startedAtMs
+          : nearest;
+      }, null);
+      const windowStart = process.startedAtMs - 1_000;
+      const windowEnd =
+        nextStart === null ? Number.POSITIVE_INFINITY : nextStart - 1_000;
+      const matched = sessionCandidates.filter(
+        (candidate) =>
+          candidate.mtimeMs >= windowStart &&
+          candidate.mtimeMs < windowEnd &&
+          !explicitSessionIds.has(candidate.id) &&
+          !bornSessionIds.has(candidate.id) &&
+          !live.some(
+            (other) =>
+              other.processId !== process.processId &&
+              other.heldSessionIds.has(candidate.id),
+          ),
+      );
+      if (matched.length > 1) {
+        ambiguous = true;
+        break;
+      }
+      if (matched.length === 1) matching.add(matched[0]!.id);
+    }
+    return !ambiguous && matching.size === 1 ? [...matching][0] : undefined;
   }
 }

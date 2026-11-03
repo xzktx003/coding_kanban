@@ -270,6 +270,7 @@
 
 - 顶栏折叠、文件浏览器布局、聚焦视图状态、侧边工具选择等 UI 状态保存在本地存储。
 - 飞书完成通知和回复续跑的独立开关及 `kanban` 发送模式保存在仓库本地 `.dev-runtime/feishu-notification-settings.json`，由后端原子写入且不包含接收者或凭证；该文件不进入 Git，并由所有浏览器共享。飞书消息与看板会话的短期绑定及事件去重信息另存为 `.dev-runtime/feishu-reply-bindings.json`，不保存通知正文或用户回复。
+- 终端 Codex 关闭后以无会话 ID 的 `codex resume` 或 `codex --resume` 恢复时，飞书完成观察仍能定位线程：同一目录恰有一份 rollout 在该进程启动后被写入，且没有被其他交互式 Codex 显式恢复、打开或另行创建。共享 `codex app-server` 长期打开的 rollout 句柄不算占用。多个无 ID resume 使用互不重叠的启动窗口；无法唯一确定时不发送。普通输入、审批、带会话 ID 的 resume 和 fork 保持原定位。
 - Codex 完成通知定位当前 tmux pane 的真实 Codex session，并从本机或已登记 SSH 目标的结构化记录读取原生 `task_complete`；每个真正结束的 `turn_id` 独立触发且只发送一次，即使两次人工提问间隔不足终端空闲阈值、卡片始终显示 running，也不会合并漏报。`node` 标记的本地 tmux Codex 在首轮 session 尚未创建、用户只编辑提示词或解析暂时失败时保持等待，不把 `running → idle` 降级成完成。Goal 模式的内部自动续轮先抑制通知，等待最终完成。通知使用飞书 Card 2.0，以完成态 header、项目/会话信息块和默认展开的完整输出面板承载最终 turn 的 `last_agent_message`；长正文按 Unicode 字符边界拆成多张卡片，每张使用独立幂等键。动态正文使用 Markdown，公式保留源码且不上传图片；元数据保留纯文本，正文 at/person 标签转义，避免意外提醒。初始旧记录只建立基线，明确的其他 Agent 仍保留终端完成边沿与摘要降级。
 - 本机 tmux 卡片缺少 pane 绑定时，只有该 tmux session 与已登记卡片一一对应、且只有一个合法 pane，才补齐 pane ID 并同步真实 Agent 命令。身份仍未确定时不把终端预览当成飞书任务完成正文；完成通知等待可验证的结构化记录。已明确绑定的普通 Shell 会话继续使用现有终端完成边沿。
 - 文件/VS Code 侧面板的拖动宽度只在 pointer release 时提交到 `file-browser-ui-state`；中间帧直接更新面板 DOM，刷新后仍恢复最后一次完成的宽度。

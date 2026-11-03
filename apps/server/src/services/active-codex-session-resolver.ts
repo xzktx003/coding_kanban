@@ -49,8 +49,9 @@ export async function resolveActiveCodexSessionId(
   const activeSessionId =
     await dependencies.codexSessionLocator.resolve(locatorInput);
   if (!activeSessionId && options.historyOnly) {
-    // History may display the unique thread born with the live Codex process.
-    // It remains read-only evidence and must not become an ordinary input target.
+    // History may display the unique thread born with the live Codex process,
+    // or the single rollout rewritten by a bare resume. It remains read-only
+    // evidence and must not become an ordinary input target.
     return dependencies.codexSessionLocator.resolve({
       ...locatorInput,
       ...(agentSession.agentSessionId
@@ -112,8 +113,9 @@ export async function verifyBoundCodexQueueThread(
     return false;
   }
 
-  // The locator's startup recovery requires a live Codex process and a unique
-  // creation-time match. Keep that read-only proof confined to card-bound queues.
+  // The locator's read-only recovery requires a live Codex process and either a
+  // unique creation-time match or the single rollout rewritten by a bare resume.
+  // Keep that proof confined to card-bound queues.
   const panes = await dependencies.codexSessionLocator.resolveTmuxPanes(
     tmuxSession,
     { readOnlyCompletion: true },
