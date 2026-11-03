@@ -768,7 +768,13 @@ export class CodexSessionLocator {
         .filter((sessionId): sessionId is string => Boolean(sessionId)),
     );
     const openCandidates = [...candidates.values()];
-    if (explicitResumeSessionIds.size === 0 && openCandidates.length > 0) {
+    // History display must not stop at an older rollout that is still open.
+    // A fresh process's own thread is selected after the directory scan.
+    if (
+      !input.readOnlyCompletion &&
+      explicitResumeSessionIds.size === 0 &&
+      openCandidates.length > 0
+    ) {
       return openCandidates.sort(
         (left, right) => right.mtimeMs - left.mtimeMs,
       )[0]?.id;
@@ -823,7 +829,7 @@ export class CodexSessionLocator {
       }
     }
 
-    if (openCandidates.length > 0) {
+    if (!input.readOnlyCompletion && openCandidates.length > 0) {
       return openCandidates.sort(
         (left, right) => right.mtimeMs - left.mtimeMs,
       )[0]?.id;
@@ -832,6 +838,22 @@ export class CodexSessionLocator {
     const sessionCandidateIds = new Set(
       sessionCandidates.map((candidate) => candidate.id),
     );
+
+    // A non-resume launch owns the thread created with that process. Decide
+    // this before shell snapshots or still-open older rollouts, which can
+    // belong to a previous instance in the same pane.
+    if (
+      input.readOnlyCompletion &&
+      normalizedDirectory &&
+      codexProcessIds.length > 0
+    ) {
+      const launchBorn = this.resolveUniqueLaunchBornSessionId(
+        codexProcessIds,
+        sessionCandidates,
+      );
+      if (launchBorn === "ambiguous") return undefined;
+      if (launchBorn) return launchBorn;
+    }
 
     // `codex resume` can close the rollout file between writes. In that case
     // directory recency is unsafe when several Codex processes share a cwd.
@@ -859,8 +881,11 @@ export class CodexSessionLocator {
 
     // Bare `codex resume` rewrites an older rollout and usually closes it, so
     // creation-time matching cannot see it. Completion observation may use the
-    // single same-directory file written at or after startup. Never use that
-    // association for input routing, explicit resume IDs, or fork.
+    // single same-directory file written at or after startup. A fresh Codex
+    // process instead owns the single thread born in its startup window.
+    // Either association is history-only: never use it for input routing,
+    // explicit resume IDs, or fork. An ambiguous launch must not fall through
+    // to the card's older registered history.
     if (
       input.readOnlyCompletion &&
       normalizedDirectory &&
@@ -872,13 +897,24 @@ export class CodexSessionLocator {
         sessionCandidates,
       );
       if (resumedSessionId) return resumedSessionId;
+      const launchBorn = this.resolveUniqueLaunchBornSessionId(
+        codexProcessIds,
+        sessionCandidates,
+      );
+      if (launchBorn === "ambiguous") return undefined;
+      if (launchBorn) return launchBorn;
+      if (explicitResumeSessionIds.size === 0 && openCandidates.length > 0) {
+        return openCandidates.sort(
+          (left, right) => right.mtimeMs - left.mtimeMs,
+        )[0]?.id;
+      }
     }
 
     // Shell snapshots can be regenerated and Codex can close rollout handles
     // between writes. For history display only, an exact registered ID remains
-    // safe when the active pane still runs Codex and the rollout metadata
-    // matches that pane's current directory. Never use this fallback for input
-    // routing or when another pane/process kind is active.
+    // safe when the active pane still runs Codex and no unique newer launch
+    // thread was found. Never use this fallback for input routing or when
+    // another pane/process kind is active.
     if (
       input.historySessionId &&
       normalizedDirectory &&
@@ -887,51 +923,16 @@ export class CodexSessionLocator {
       const registeredHistory = sessionCandidates.find(
         (candidate) => candidate.id === input.historySessionId,
       );
-      if (registeredHistory) return registeredHistory.id;
-    }
-
-    // Completion observation can recover the thread born with this live Codex
-    // process when it has neither a snapshot nor a held rollout. Use the
-    // immutable payload timestamp, not rewritten record times or recency.
-    // This weaker historical association is never enabled for input routing.
-    if (
-      input.readOnlyCompletion &&
-      normalizedDirectory &&
-      codexProcessIds.length > 0
-    ) {
-      const matching = new Set<string>();
-      let ambiguous = false;
-      for (const processId of codexProcessIds) {
-        let args: string[];
-        try {
-          args = readFileSync(
-            join(this.procRoot, String(processId), "cmdline"),
-            "utf8",
-          ).split("\0");
-        } catch {
-          continue;
-        }
-        if (args.some((arg) => ["resume", "fork", "--resume"].includes(arg)))
-          continue;
-        const started = readProcessStartTime(
-          this.procRoot,
-          processId,
-          this.clockTicksPerSecond,
-        );
-        if (started === null) continue;
-        const born = sessionCandidates.filter(
-          (candidate) =>
-            candidate.createdAtMs !== undefined &&
-            candidate.createdAtMs >= started - 1000 &&
-            candidate.createdAtMs <= started + SHELL_SNAPSHOT_MATCH_WINDOW_MS,
-        );
-        if (born.length > 1) {
-          ambiguous = true;
-          break;
-        }
-        if (born.length === 1) matching.add(born[0].id);
+      if (
+        registeredHistory &&
+        !this.freshLaunchPredates(
+          codexProcessIds,
+          registeredHistory,
+          input.readOnlyCompletion === true,
+        )
+      ) {
+        return registeredHistory.id;
       }
-      if (!ambiguous && matching.size === 1) return [...matching][0];
     }
 
     // Recent Codex builds append rollout JSONL through short-lived handles
@@ -941,11 +942,97 @@ export class CodexSessionLocator {
     if (
       normalizedDirectory &&
       codexProcessIds.length > 0 &&
-      sessionCandidates.length === 1
+      sessionCandidates.length === 1 &&
+      sessionCandidates[0] &&
+      !this.freshLaunchPredates(
+        codexProcessIds,
+        sessionCandidates[0],
+        input.readOnlyCompletion === true,
+      )
     ) {
-      return sessionCandidates[0]?.id;
+      return sessionCandidates[0].id;
     }
 
+    return undefined;
+  }
+
+
+  private freshLaunchPredates(
+    codexProcessIds: readonly number[],
+    candidate: OpenSessionCandidate,
+    readOnlyCompletion: boolean,
+  ): boolean {
+    if (!readOnlyCompletion || candidate.createdAtMs === undefined) {
+      return false;
+    }
+    for (const processId of codexProcessIds) {
+      let args: string[];
+      try {
+        args = readFileSync(
+          join(this.procRoot, String(processId), "cmdline"),
+          "utf8",
+        ).split("\0");
+      } catch {
+        continue;
+      }
+      if (
+        args.some((arg) =>
+          ["resume", "fork", "--resume", "app-server"].includes(arg),
+        )
+      ) {
+        continue;
+      }
+      const started = readProcessStartTime(
+        this.procRoot,
+        processId,
+        this.clockTicksPerSecond,
+      );
+      if (started !== null && candidate.createdAtMs < started - 1_000) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private resolveUniqueLaunchBornSessionId(
+    codexProcessIds: readonly number[],
+    sessionCandidates: readonly OpenSessionCandidate[],
+  ): string | "ambiguous" | undefined {
+    const matching = new Set<string>();
+    for (const processId of codexProcessIds) {
+      let args: string[];
+      try {
+        args = readFileSync(
+          join(this.procRoot, String(processId), "cmdline"),
+          "utf8",
+        ).split("\0");
+      } catch {
+        continue;
+      }
+      if (
+        args.some((arg) =>
+          ["resume", "fork", "--resume", "app-server"].includes(arg),
+        )
+      ) {
+        continue;
+      }
+      const started = readProcessStartTime(
+        this.procRoot,
+        processId,
+        this.clockTicksPerSecond,
+      );
+      if (started === null) continue;
+      const born = sessionCandidates.filter(
+        (candidate) =>
+          candidate.createdAtMs !== undefined &&
+          candidate.createdAtMs >= started - 1000 &&
+          candidate.createdAtMs <= started + SHELL_SNAPSHOT_MATCH_WINDOW_MS,
+      );
+      if (born.length > 1) return "ambiguous";
+      if (born.length === 1) matching.add(born[0].id);
+    }
+    if (matching.size > 1) return "ambiguous";
+    if (matching.size === 1) return [...matching][0];
     return undefined;
   }
 

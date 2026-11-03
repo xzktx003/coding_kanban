@@ -39,6 +39,7 @@ import { registerCodexTabsRoutes } from "./routes/codex-tabs.js";
 import { registerTerminalHttpMultiplexerRoutes } from "./routes/terminal-http-multiplexer.js";
 import { AgentSessionRegistry } from "./services/agent-session-registry.js";
 import {
+  rebindLocalCodexTranscripts,
   resolveActiveCodexSessionId,
   resolveCodexSessionIds,
   verifyBoundCodexQueueThread,
@@ -914,6 +915,10 @@ export function buildServer(options: BuildServerOptions = {}): {
     agentKindSyncInProgress = true;
     try {
       await tmuxAdapter.syncRegisteredAgentKinds();
+      await rebindLocalCodexTranscripts(registry.list().items, {
+        registry,
+        codexSessionLocator,
+      });
     } catch (error) {
       app.log.warn({ err: error }, "Failed to sync local tmux agent kinds");
     } finally {
