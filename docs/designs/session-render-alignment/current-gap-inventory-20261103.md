@@ -33,7 +33,7 @@
 | G21 | 文件/文件夹菜单 directory:false | **已改** | 标签改为“上传设备文件”；项目文件/目录独立入口 |
 | G22 | rail 全组合/banner 优先级 | 部分；待像素对照 | `ComposerRail` 存在；组合一致性未完整 E2E |
 | G23 | 图像额度失败无 image_gen 专卡 | **已修复** | `NativeGeneratedImages` 有 image_gen 额度卡 + 测试 |
-| G24 | 未知协议 fallback 显示技术 JSON | 待端到端复现 | hiddenMethods 是否覆盖 readState/thread 待查 |
+| G24 | 未知协议 fallback 显示技术 JSON | **已核对** | `hiddenMethods` 覆盖 `thread/*` 方法；未知 item 走 raw-JSON fallback（`threadRows.metadata.test` 绿）；真正未知协议方法的端到端触发仍属边界 |
 | G25 | bridge 把 outcome-unknown 当拒绝删 receipt | **已改进** | `sessionState.transitions.test` 区分 unknown 与 definite；默认 Session 不走该桥 |
 | G26 | 刷新/composer 收尾 ≤2s 验收 | 待宿主/性能 | 需独立宿主验证 |
 
@@ -50,7 +50,7 @@
 
 ## 三、仍属“宿主门控 / 需先验证能力”的候选（不做无条件开发）
 
-- CMP-36/37/38/39：主 composer 的 local/worktree 切换、worktree toggle、本地 environment、branch dropdown（官方 `ide-context`/`composer.toggleWorktreeMode`/`U:Qd`）。需确认当前 VSIX host 是否开放对应 flag。
+- CMP-36/37/38/39：主 composer 的 local/worktree 切换、worktree toggle、本地 environment、branch dropdown（官方 `ide-context`/`composer.toggleWorktreeMode`/`U:Qd`）。→ **真实会话已核对**：composer 呈现项目/本地目录/工作环境选择器且可交互（`ComposerFooterLabel.controls/collapse`、`AgentWorkspaceSelect` 等 12 测试绿）；branch 仅在会话绑定 git worktree 时显示。
 - G01（IDE 自动上下文）、G24（未知协议端到端复现）、G26（刷新 ≤2s 性能验收）。
 - CMP-51：Realtime voice（双向语音）——官方有 feature/auth/host 门控，默认不列为本地缺口。
 
@@ -67,3 +67,10 @@
 3. 极少量确实未闭合的交互细节（如 G05、G09、G22、G12 的 host/thread 分区）。
 
 因此原目标“逐个开发这些功能”在三分之二以上是“验收已实现功能”，只有宿主门控子集存在真实的“新开发”空间。
+
+## 六、本轮验收复核（2026-11-03）
+
+- 单测/组件测试通过：T52 Sources（11）、T05 commentary latest/all（21）、G25 bridge 投递分类（17）、CMP-36..39 composer 选择器（12）、G24 未知协议（`threadRows.metadata`）。
+- 真实会话验收：`https://10.30.0.26:8484`（当前账号、连接在线）确认 Sources 面板打开后保持打开并正确分组真实文件来源；composer 呈现项目/本地目录/工作环境/模型/权限选择器。
+- 夹具局限：scope 守卫面板（Sources/历史来源/命令详情/MCP App）会在 `codex:disconnected` 时关闭；而 E2E 夹具把 codex 连接表示为离线，故以夹具驱动的 panel E2E 不稳定。真实会话验收可避免该假象。
+- 仍宿主受阻：G01（IDE 自动上下文）、G26（刷新 ≤2s 性能）、CMP-51（实时语音）——需对应宿主能力。
