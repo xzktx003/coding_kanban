@@ -15,6 +15,7 @@ import {
   useComposerDraftStatus,
 } from "./v2/drafts";
 import { ContextAttachments, addFileContexts } from "./v2/ContextAttachments";
+import { contextForDelivery } from "./v2/selectionAnnotations";
 import { ComposerSheet } from "./v2/ComposerSheet";
 import { ComposerCommands } from "./v2/ComposerCommands";
 import { isLargePaste, insertAtSelection } from "./v2/content";
@@ -123,6 +124,11 @@ import { isSessionInteractionVisible } from "@session/session-dom";
 import { composerPrimaryAction, hasPendingComposerInput } from "./composerPrimaryAction";
 import { type BrowserDictationControl, type BrowserDictationPhase } from "@session/BrowserDictationButton";
 import { resumeInterruptedTurn, savedResumeReceipt, reconcileResumeReceipt, type ResumeReceipt } from "@session/services/resumeInterruptedTurn";
+import {
+  isBareContinuation,
+  PROVIDER_SAFETY_BLOCK_HINT,
+  threadBlockedByProviderSafety,
+} from "@session/services/providerSafetyBlock";
 import { captureCodexOperationScope, isCodexOperationScopeCurrent } from "@session/services/codexOperationScope";
 import { NativeQueueSettingsNotice } from "./NativeQueueSettingsNotice";
 import { ExecutionLocationPicker } from "@session/features/workspace-execution/ExecutionLocationPicker";
@@ -479,9 +485,10 @@ export function Composer({
     const text = goalCommand ?? inputValue.trim();
     const capturedContexts = composerDrafts.capture(owner);
     const submittedContexts = capturedContexts.contexts;
+    const deliveryContexts = submittedContexts.map(contextForDelivery);
     const submittedMentions = mentionDrafts.read(owner);
     const submittedPluginMentions = pluginInputDrafts.read(owner, text);
-    const completeText = composeContextText(text, submittedContexts);
+    const completeText = composeContextText(text, deliveryContexts);
     if (goalCommand === "" && !submittedContexts.length && !images.length) {
       setCollaborationMode("default");
       setGoalEnabled(true);
@@ -495,6 +502,18 @@ export function Composer({
       (!completeText && images.length === 0)
     )
       return;
+    if (
+      currentThreadId &&
+      isBareContinuation(completeText) &&
+      images.length === 0 &&
+      submittedContexts.length === 0 &&
+      threadBlockedByProviderSafety(
+        useCodexStore.getState().events[currentThreadId] ?? [],
+      )
+    ) {
+      toast.error(PROVIDER_SAFETY_BLOCK_HINT);
+      return;
+    }
     if (
       completeText.length > 200_000 ||
       submittedContexts.length > 32 ||
@@ -571,7 +590,7 @@ export function Composer({
           materialized = await materializeGoalDraft({
             objective: composeContextText(
               text,
-              submittedContexts.filter((context) => context.kind !== "paste"),
+              deliveryContexts.filter((context) => context.kind !== "paste"),
             ),
             pastedTexts: submittedContexts
               .filter((context) => context.kind === "paste")
@@ -694,7 +713,7 @@ export function Composer({
           running ? requestedMode : "queue",
           running ? (currentTurnId ?? undefined) : undefined,
           parameters,
-          submittedContexts,
+          deliveryContexts,
           [...submittedMentions, ...submittedPluginMentions],
           settingsCapture,
         );
@@ -832,7 +851,37 @@ export function Composer({
       data-draft-owner={owner}
     >
       {currentThreadId && <ModelChangeNotice threadId={currentThreadId} />}
-      <ComposerRail key={owner}>
+      <ComposerRail
+        key={owner}
+        owner={owner}
+        collapsedSummary={
+          deliveryNotice?.owner === owner ? deliveryNotice.text : undefined
+        }
+        status={
+          statusText && (
+            <span
+              className="session-native-composer-status"
+              role={
+                settingsError || contextStorageError || attachments.storageError || failedImage
+                  ? "alert"
+                  : "status"
+              }
+              title={statusText}
+            >
+              {statusText}
+              {threadInput.needsVerification && (
+                <button
+                  type="button"
+                  onClick={threadInput.recheck}
+                  disabled={threadInput.rechecking}
+                >
+                  重新核对
+                </button>
+              )}
+            </span>
+          )
+        }
+      >
         <RunningTurnChanges threadId={currentThreadId} />
         <ComposerRailItem visible={pendingQuestions.length > 0}>
           <button
@@ -881,13 +930,30 @@ export function Composer({
             />
           )}
         </ComposerRailItem>
+        <ComposerRailItem
+          visible={
+            !!currentThreadId &&
+            queueSnapshot.state.authority === "native" &&
+            queueSnapshot.state.items.some(
+              (item) => item.authority === "native" && item.status === "queued",
+            )
+          }
+        >
+          {currentThreadId && (
+            <NativeQueueSettingsNotice key={currentThreadId} threadId={currentThreadId} />
+          )}
+        </ComposerRailItem>
+        <ComposerRailItem visible={deliveryNotice?.owner === owner}>
+          {deliveryNotice?.owner === owner && (
+            <p
+              role="status"
+              className="session-composer-delivery-notice px-4 py-1 text-xs text-muted-foreground"
+            >
+              {deliveryNotice.text}
+            </p>
+          )}
+        </ComposerRailItem>
       </ComposerRail>
-      {currentThreadId && queueSnapshot.state.authority === "native" && queueSnapshot.state.items.some((item) => item.authority === "native" && item.status === "queued") && <NativeQueueSettingsNotice key={currentThreadId} threadId={currentThreadId} />}
-      {deliveryNotice?.owner === owner && (
-        <p role="status" className="session-composer-delivery-notice px-4 py-1 text-xs text-muted-foreground">
-          {deliveryNotice.text}
-        </p>
-      )}
       <DeferredSideChatPanel />
       {goalReplacement?.owner === owner && (
         <GoalConfirmation
@@ -1282,28 +1348,6 @@ export function Composer({
         <ExecutionLocationPicker owner={owner} disabled={sending || !!resuming[owner]} />
         {currentThreadId && <span className="truncate text-[11px] text-muted-foreground">用于新会话</span>}
       </div>
-      {statusText && (
-        <span
-          className="session-native-composer-status"
-          role={
-            settingsError || contextStorageError || attachments.storageError || failedImage
-              ? "alert"
-              : "status"
-          }
-          title={statusText}
-        >
-          {statusText}
-          {threadInput.needsVerification && (
-            <button
-              type="button"
-              onClick={threadInput.recheck}
-              disabled={threadInput.rechecking}
-            >
-              重新核对
-            </button>
-          )}
-        </span>
-      )}
       {detailsOwner === owner && (
         <ComposerSheet
           title="输入状态与消息队列"

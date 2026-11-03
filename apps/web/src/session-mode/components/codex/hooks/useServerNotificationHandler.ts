@@ -24,11 +24,12 @@ import { useSessionNameStore } from "../../../stores/useSessionNameStore";
 import { notifyDesktop } from "@session/lib/notify";
 import { isSessionModeActive } from "@session/session-dom";
 import { toast } from "sonner";
+import { isProviderSafetyBlock } from "@session/services/providerSafetyBlock";
 import { type RefObject, useCallback, useEffect, useRef } from "react";
 import type { ServerNotification } from "@session/bindings/ServerNotification";
 import type { AccountLoginCompletedNotification } from "@session/bindings/v2";
 import { useCodexStore } from "@session/components/codex/stores";
-import { allowSleep, preventSleep } from "@session/services/apiAdapt/codex";
+import { allowSleep, preventSleep, threadGoalSet } from "@session/services/apiAdapt/codex";
 import {
   appendStreamingTextPreview,
   compactCodexEventPayload,
@@ -486,6 +487,27 @@ export function useServerNotificationHandler(
               error,
             );
           });
+          if (
+            isProviderSafetyBlock(
+              payload.params.error.message,
+              payload.params.error.codexErrorInfo,
+            ) &&
+            useCodexStore.getState().goalMap?.[threadId]?.status === "active"
+          ) {
+            void threadGoalSet({ threadId, status: "paused" })
+              .then(() => {
+                toast.message(
+                  "模型服务商拒绝了这次请求，已暂停当前目标，避免它自己接着跑。",
+                );
+              })
+              .catch((error) => {
+                toast.error(
+                  error instanceof Error
+                    ? error.message
+                    : "暂停目标失败，请在目标卡片上手动暂停",
+                );
+              });
+          }
         }
 
         // Lifecycle cleanup also runs after a task leaves display membership.

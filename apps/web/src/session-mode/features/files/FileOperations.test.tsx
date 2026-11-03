@@ -158,9 +158,13 @@ test("workspace upload events only run for the current root and can be cancelled
   await waitFor(() => expect(capturedSignal).toBeTruthy());
 
   fireEvent.click(await screen.findByRole("button", { name: "取消上传" }));
-  expect(vi.mocked(uploadWorkspaceFile).mock.calls[0][4]?.signal?.aborted).toBe(true);
+  expect(vi.mocked(uploadWorkspaceFile).mock.calls[0][4]?.signal?.aborted).toBe(
+    true,
+  );
 
-  await waitFor(() => expect(screen.queryByRole("button", { name: "取消上传" })).toBeNull());
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "取消上传" })).toBeNull(),
+  );
   await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
   expect(uploadWorkspaceFile).toHaveBeenCalledWith(
     "/repo",
@@ -213,5 +217,35 @@ test("relative copying normalizes a project root with a trailing slash", async (
   fireEvent.click(screen.getByRole("button", { name: "复制相对路径" }));
   await waitFor(() =>
     expect(copyTextToClipboard).toHaveBeenCalledWith("src/file.txt"),
+  );
+});
+test("local relative paths use the visible directory rather than the filesystem root", async () => {
+  render(
+    <FileOperations
+      root="/"
+      displayRoot="/outside"
+      target={{ path: "/outside/notes.txt", isDir: false }}
+      action={null}
+      onAction={vi.fn()}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "复制相对路径" }));
+  await waitFor(() =>
+    expect(copyTextToClipboard).toHaveBeenCalledWith("notes.txt"),
+  );
+});
+test("relative paths to a resolved sibling directory retain their relationship to the visible folder", async () => {
+  render(
+    <FileOperations
+      root="/"
+      displayRoot="/project"
+      target={{ path: "/other/notes.txt", isDir: false }}
+      action={null}
+      onAction={vi.fn()}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "复制相对路径" }));
+  await waitFor(() =>
+    expect(copyTextToClipboard).toHaveBeenCalledWith("../other/notes.txt"),
   );
 });

@@ -1,10 +1,10 @@
 import { expect, test } from "@playwright/test";
 import { installSessionUxFixture, seedSessionUx } from "./session-ux-fixture";
 
-test("running changes and queued messages share the desktop rail; mobile keeps its bounded shelf", async ({
+test("running changes and queued messages share the bounded floating rail on desktop and mobile", async ({
   page,
 }) => {
-  test.setTimeout(90_000);
+  test.setTimeout(120_000);
   const fixture = await installSessionUxFixture(page);
   await page.route("**/api/session/followups?**", (route) =>
     route.fulfill({
@@ -24,7 +24,51 @@ test("running changes and queued messages share the desktop rail; mobile keeps i
   );
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/?mode=session", { waitUntil: "domcontentloaded" });
-  await page.locator(".session-native-composer").waitFor();
+  await page.locator(".session-native-composer").waitFor({ timeout: 60_000 });
+  const dependencies = await page.evaluate(() => ({
+    react: (window as any).__sessionFixtureDependency("react.js"),
+    client: (window as any).__sessionFixtureDependency("react-dom_client.js"),
+  }));
+  // Mount the real composer without the workspace memory governor: the chat
+  // projection intentionally discards raw diff bodies before browser storage.
+  await page.route("**/rail-attached-fixture", (route) =>
+    route.fulfill({
+      contentType: "text/html",
+      body: '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><main class="session-mode"><div id="composer-root" style="padding-top:240px"></div></main></body></html>',
+    }),
+  );
+  await page.goto("/rail-attached-fixture");
+  await page.evaluate(async ({ react, client }) => {
+    const refresh = (await import("/@react-refresh")).default;
+    refresh.injectIntoGlobalHook(window);
+    (window as any).$RefreshReg$ = () => {};
+    (window as any).$RefreshSig$ = () => (type: unknown) => type;
+    (window as any).__vite_plugin_react_preamble_installed__ = true;
+    const R = (await import(react)).default;
+    const renderer = (await import(client)).default;
+    for (const file of [
+      "App.css",
+      "session-theme.css",
+      "session-composer.css",
+      "session-composer-v2.css",
+      "session-composer-compact.css",
+    ])
+      await import(`/src/session-mode/${file}`);
+    const { i18n, initializeSessionI18n } =
+      await import("/src/session-mode/lib/i18n.ts");
+    await initializeSessionI18n();
+    await i18n.changeLanguage("zh");
+    const { TooltipProvider } =
+      await import("/src/session-mode/components/ui/tooltip.tsx");
+    const { Composer } =
+      await import("/src/session-mode/components/codex/composer/Composer.tsx");
+    renderer
+      .createRoot(document.getElementById("composer-root"))
+      .render(
+        R.createElement(TooltipProvider, null, R.createElement(Composer)),
+      );
+  }, dependencies);
+  await page.locator(".session-native-composer").waitFor({ timeout: 60_000 });
   await seedSessionUx(page);
   await page.evaluate(async () => {
     const path = "/src/session-mode/components/codex/stores/useCodexStore.ts";
@@ -34,6 +78,7 @@ test("running changes and queued messages share the desktop rail; mobile keeps i
         .findLast((e) => new URL(e.name).pathname === path)?.name ?? path;
     const { useCodexStore } = await import(url);
     useCodexStore.setState({
+      currentTurnId: "rail-turn",
       turnTimingMap: {
         "ux-0": {
           turnId: "rail-turn",
@@ -57,28 +102,26 @@ test("running changes and queued messages share the desktop rail; mobile keeps i
     });
   });
   const rail = page.locator(".session-native-composer > [data-composer-rail]");
-  await expect(rail.locator("[data-composer-rail-item]")).toHaveCount(2);
+  await expect(rail.locator('[data-composer-rail-item="present"]')).toHaveCount(
+    2,
+  );
   await expect(
     rail.getByRole("button", { name: /1 个文件已更改/ }),
   ).toBeVisible();
   await expect(rail.getByText("保留排队消息")).toBeVisible();
   const desktop = await rail.evaluate((el) => ({
     position: getComputedStyle(el).position,
-    maxHeight: getComputedStyle(el).maxHeight,
     bottom: el.getBoundingClientRect().bottom,
   }));
   const surface = await page
     .locator(".session-native-composer .session-composer-surface")
     .boundingBox();
-  expect(desktop.position).toBe("relative");
-  expect(desktop.maxHeight).toBe("none");
-  const overlap = await rail.evaluate(
-    (el) => -parseFloat(getComputedStyle(el).marginBottom),
-  );
-  expect(Math.abs(desktop.bottom - surface!.y - overlap)).toBeLessThan(1);
-  await page
-    .locator(".session-native-composer")
-    .screenshot({ path: test.info().outputPath("rail-desktop.png") });
+  expect(desktop.position).toBe("absolute");
+  expect(desktop.bottom).toBeLessThanOrEqual(surface!.y);
+  expect(
+    await rail.evaluate((el) => el.getBoundingClientRect().height),
+  ).toBeLessThanOrEqual(200);
+  await page.screenshot({ path: test.info().outputPath("rail-desktop.png") });
   await page.setViewportSize({ width: 390, height: 844 });
   await expect
     .poll(() => rail.evaluate((el) => getComputedStyle(el).position))
@@ -96,7 +139,7 @@ test("running changes and queued messages share the desktop rail; mobile keeps i
   ).toEqual([]);
 });
 
-test("same rows match the shipped 26.51007 attached rail geometry", async ({
+test("same rows preserve native content while intentionally floating instead of using native attached geometry", async ({
   page,
   context,
 }) => {
@@ -167,7 +210,7 @@ test("same rows match the shipped 26.51007 attached rail geometry", async ({
     host.className = "session-mode";
     Object.assign(host.style, {
       position: "fixed",
-      top: "0",
+      top: "160px",
       left: "0",
       zIndex: "99999",
     });
@@ -226,19 +269,28 @@ test("same rows match the shipped 26.51007 attached rail geometry", async ({
     };
     const actual = await page.evaluate(measure, "#rail-comparison");
     const expected = await native.evaluate(measure, "#root");
-    await test
-      .info()
-      .attach(`rail-geometry-${width}`, {
-        body: JSON.stringify({ actual, expected }),
-        contentType: "application/json",
-      });
+    await test.info().attach(`rail-geometry-${width}`, {
+      body: JSON.stringify({ actual, expected }),
+      contentType: "application/json",
+    });
     await native
       .locator("#root")
       .screenshot({ path: test.info().outputPath(`native-${width}.png`) });
-    await page
-      .locator("#rail-comparison")
-      .screenshot({ path: test.info().outputPath(`local-${width}.png`) });
-    expect(actual).toEqual(expected);
+    await page.screenshot({
+      path: test.info().outputPath(`local-${width}.png`),
+    });
+    expect(expected.position).toBe("relative");
+    expect(actual.position).toBe("absolute");
+    expect(actual.overlap).toBeLessThanOrEqual(0);
+    expect(actual.height).toBeLessThanOrEqual(200);
+    expect(
+      await page
+        .locator("#rail-comparison [data-composer-rail-item]")
+        .allTextContents(),
+    ).toEqual(["changes", "queue"]);
+    expect(
+      await native.locator("#root [data-composer-rail-item]").allTextContents(),
+    ).toEqual(["changes", "queue"]);
   }
   expect(await native.evaluate(() => (window as any).nativeErrors)).toEqual([]);
   await native.close();

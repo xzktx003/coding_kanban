@@ -1,4 +1,7 @@
-import { StreamingCodexMarkdown } from "../presentation/StreamingCodexMarkdown";
+import {
+  mayContainStreamingMarkdown,
+  StreamingCodexMarkdown,
+} from "../presentation/StreamingCodexMarkdown";
 import { memo, useEffect, useMemo, useRef } from "react";
 import { NativeHookStats } from "./NativeHookStats";
 import { NativeMemoryCitations } from "./NativeMemoryCitations";
@@ -55,6 +58,21 @@ export const AgentMessageItem = memo(function AgentMessageItem({
   const isWindowFocused = useWindowFocus();
   const inspection = useTranscriptInspection();
   const owner = useCodexContentOwner(threadId);
+  // The preview head stays immutable as more deltas arrive. Check it once so
+  // plain huge output keeps the existing lightweight memory path. A native
+  // directive or autolink can straddle two immutable 8Ki-character segments.
+  const renderPreviewHead = useMemo(
+    () =>
+      streamingPreview?.head.some(
+        (segment, index, head) =>
+          mayContainStreamingMarkdown(segment) ||
+          (index > 0 &&
+            mayContainStreamingMarkdown(
+              head[index - 1].slice(-32) + segment.slice(0, 32),
+            )),
+      ) ?? false,
+    [streamingPreview?.head],
+  );
   // Review directives use the final document. Live Markdown parses a bounded
   // tail and memoized stable blocks without joining the full streaming buffer.
   const review = useMemo(
@@ -86,10 +104,12 @@ export const AgentMessageItem = memo(function AgentMessageItem({
   return (
     <div
       className="codex-assistant group flex flex-col items-start w-full min-w-0"
+      data-message-author="assistant"
       data-phase={phase ?? undefined}
       data-streaming={streaming || undefined}
       data-owner-thread={threadId}
       data-owner-turn={turnId}
+      data-owner-item={itemId}
     >
       <div
         ref={contentRef}
@@ -97,14 +117,24 @@ export const AgentMessageItem = memo(function AgentMessageItem({
       >
         {streaming ? (
           <div
-            data-codex-streaming-text={streamingPreview ? "" : undefined}
+            data-codex-streaming-text
             className="whitespace-pre-wrap break-words leading-relaxed"
           >
-            {streamingPreview ? (
+            {(!streamingPreview || renderPreviewHead) && (
+              <StreamingCodexMarkdown
+                key={`${threadId ?? ""}:${turnId ?? ""}:${itemId ?? ""}`}
+                segments={streamingPreview?.head ?? streamingSegments}
+                current={streamingPreview ? "" : (streamingCurrent ?? text)}
+                threadId={threadId}
+                markContainer={false}
+              />
+            )}
+            {streamingPreview && (
               <>
-                {streamingPreview.head.map((segment, index) => (
-                  <span key={`head-${index}`}>{segment}</span>
-                ))}
+                {!renderPreviewHead &&
+                  streamingPreview.head.map((segment, index) => (
+                    <span key={`head-${index}`}>{segment}</span>
+                  ))}
                 <span data-codex-streaming-truncated>
                   {STREAMING_TEXT_PREVIEW_MARKER}
                 </span>
@@ -113,13 +143,6 @@ export const AgentMessageItem = memo(function AgentMessageItem({
                 ))}
                 {streamingPreview.tailCurrent}
               </>
-            ) : (
-              <StreamingCodexMarkdown
-                key={`${threadId ?? ""}:${turnId ?? ""}:${itemId ?? ""}`}
-                segments={streamingSegments}
-                current={streamingCurrent ?? text}
-                threadId={threadId}
-              />
             )}
           </div>
         ) : (

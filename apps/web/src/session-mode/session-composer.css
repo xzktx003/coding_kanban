@@ -47,7 +47,7 @@
   overflow-y: auto;
   overscroll-behavior: contain;
 }
-.session-mode .session-composer-editor [contenteditable] {
+.session-mode .session-composer-editor [contenteditable="true"] {
   min-height: 44px;
   font-size: 15px;
   line-height: 1.6;

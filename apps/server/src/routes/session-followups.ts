@@ -407,7 +407,7 @@ export function registerSessionFollowupRoutes(
       });
     });
   }
-  async function upstream(path: string, params?: unknown) {
+  async function upstream(path: string, params?: unknown, expectedScope?: string) {
     const origin = options.origin();
     if (!origin) throw new FollowupRejected("会话服务尚未连接");
     const response = await fetcher(origin + path, {
@@ -416,13 +416,34 @@ export function registerSessionFollowupRoutes(
       ...(params === undefined ? {} : { body: JSON.stringify(params) }),
       signal: AbortSignal.any([lifetime.signal, AbortSignal.timeout(15000)]),
     });
+    // A live runtime predating the public queue route returns Fastify's exact
+    // missing-route 404. Retry only that read through the older guarded raw
+    // call; a native method rejection must not be reinterpreted as success.
+    if (
+      response.status === 404 &&
+      path === "/api/codex/thread/queue/list" &&
+      expectedScope &&
+      /Route POST:\/api\/codex\/thread\/queue\/list not found/.test(await response.clone().text())
+    ) {
+      return upstream("/api/internal/codex/guarded-queue", {
+        expectedScope,
+        method: "thread/queue/list",
+        params,
+      });
+    }
     if (!response.ok) {
       let error = "请求失败";
       try {
         error = ((await response.json()) as any).error ?? error;
       } catch {}
-      if (response.status >= 500)
-        throw Object.assign(new Error(error), { upstreamStatus: response.status });
+      if (
+        response.status >= 500 ||
+        (response.status === 404 && path === "/api/internal/codex/operation-context")
+      )
+        throw Object.assign(new Error(error), {
+          upstreamStatus: response.status === 404 ? 503 : response.status,
+          statusCode: response.status,
+        });
       throw new FollowupRejected(error);
     }
     return response.json() as Promise<any>;
@@ -433,7 +454,10 @@ export function registerSessionFollowupRoutes(
       if (method === "thread/queue/restore") return upstream("/api/internal/codex/guarded-queue-restore", { expectedScope, ...params });
       if (method === "review/start") return upstream("/api/internal/codex/guarded-review", { expectedScope, ...params });
       if (method === "turn/interrupt") return upstream("/api/internal/codex/guarded-interrupt", { expectedScope, ...params });
-      if (method === "thread/resume") return upstream("/api/internal/codex/guarded-queue-load", { expectedScope, threadId: params.threadId });
+      if (method === "thread/resume") return upstream("/api/internal/codex/guarded-queue-load", { expectedScope, threadId: params.threadId }).catch((error: unknown) => {
+        console.error("[followup-resume]", error instanceof Error ? error.message : String(error));
+        throw error;
+      });
       return upstream("/api/internal/codex/guarded-queue", { expectedScope, method, params });
     },
     syncHolds: async (snapshot: { busy: boolean; threadIds: string[] }) => {
@@ -502,6 +526,12 @@ export function registerSessionFollowupRoutes(
       catch (error) { if (!entered) throw new FollowupRejected(error instanceof Error ? error.message : "会话正在归档"); throw error; }
     } } : {}),
     call: async (method, params) => {
+      if (method === "thread/queue/list" && !options.runtime) {
+        const context = await runtime.context?.();
+        if (typeof context?.scope !== "string" || !context.scope)
+          throw new Error("官方队列读取缺少当前运行范围");
+        return upstream("/api/codex/thread/queue/list", params, context.scope);
+      }
       if (!writeMethods.has(method) || typeof params.threadId !== "string")
         return runtime.call(method, params);
       let entered = false;
@@ -597,11 +627,11 @@ export function registerSessionFollowupRoutes(
     },
   );
   app.get<{ Querystring: { threadId?: string; expectedScope?: string; cursor?: string; limit?: string } }>("/api/session/followups/steer-receipts", { errorHandler: followupErrorHandler }, async (request, reply) => {
-    await ready();
-    if (!(queue instanceof NativeCodexFollowups)) return reply.code(409).send({ error: "旧运行服务不支持持久补充说明回执" });
     const threadId = id(request.query.threadId), limit = request.query.limit === undefined ? 30 : Number(request.query.limit);
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 30 || (request.query.cursor !== undefined && (typeof request.query.cursor !== "string" || request.query.cursor.length > 280))) invalid("补充说明分页参数无效");
-    await ready(); reply.header("cache-control", "no-store");
+    await ready();
+    reply.header("cache-control", "no-store");
+    if (!(queue instanceof NativeCodexFollowups)) return reply.code(409).send({ error: "旧运行服务不支持持久补充说明回执" });
     return queue.steerReceipts(threadId, request.query.expectedScope, request.query.cursor ?? null, limit);
   });
   app.post(
@@ -626,8 +656,8 @@ export function registerSessionFollowupRoutes(
   });
   app.get<{ Querystring: { threadId?: string; operationId?: string; expectedScope?: string } }>("/api/session/followups/actions", { errorHandler: followupErrorHandler }, async (request, reply) => {
     await ready();
+    reply.header("cache-control", "no-store");
     if (!(queue instanceof NativeCodexFollowups)) return reply.code(409).send({ error: "旧运行服务不支持官方队列操作回执" });
-    await ready(); reply.header("cache-control", "no-store");
     return await queue.actionReceipt(id(request.query.threadId), id(request.query.operationId), request.query.expectedScope) ?? reply.code(404).send({ error: "尚未登记此队列操作" });
   });
   app.post("/api/session/followups/stop", { errorHandler: followupErrorHandler }, async (request) => {
@@ -669,10 +699,10 @@ export function registerSessionFollowupRoutes(
     return admit(threadId, () => queue instanceof NativeCodexFollowups ? queue.review(threadId, data.delivery, target, id(data.operationId), data.expectedScope) : queue.review(threadId, data.delivery, target));
   });
   app.get<{ Querystring: { threadId?: string; operationId?: string; expectedScope?: string } }>("/api/session/followups/review", { errorHandler: followupErrorHandler }, async (request, reply) => {
-    await ready();
-    if (!(queue instanceof NativeCodexFollowups)) return reply.code(409).send({ error: "旧运行服务不支持持久审查回执" });
     const threadId = id(request.query.threadId), operationId = id(request.query.operationId);
-    await ready(); reply.header("cache-control", "no-store");
+    await ready();
+    reply.header("cache-control", "no-store");
+    if (!(queue instanceof NativeCodexFollowups)) return reply.code(409).send({ error: "旧运行服务不支持持久审查回执" });
     return (await queue.reviewReceipt(threadId, operationId, request.query.expectedScope)) ?? reply.code(404).send({ error: "尚未登记此审查操作" });
   });
   let timer: ReturnType<typeof setTimeout> | undefined,

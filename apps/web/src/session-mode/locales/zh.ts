@@ -504,6 +504,8 @@ export const zh = {
     workingFor: "已处理 {{time}}",
     workedFor: "用时 {{time}}",
     workActivity: "工作过程",
+    waitingForOutput:
+      "暂未显示本轮过程或回复；可能仍在处理，也可能出现连接延迟。",
     readFiles_other: "读取了 {{count}} 个文件",
     ranCommands_other: "执行了 {{count}} 条命令",
     listedFolders_other: "列出了 {{count}} 个目录",

@@ -40,6 +40,7 @@ export class SessionApiError extends Error {
 export function isExplicitRequestRejection(error: unknown): boolean {
   return (
     error instanceof SessionApiError &&
+    error.code !== "FOLLOWUP_READ_UNAVAILABLE" &&
     error.deliveryStage !== "outcome-unknown" &&
     (error.deliveryStage === "not-admitted" ||
       [400, 401, 403, 404, 405, 409, 422].includes(error.status))

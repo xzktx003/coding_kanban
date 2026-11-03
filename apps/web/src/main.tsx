@@ -25,6 +25,12 @@ function syncAppViewportMetrics() {
     return;
   }
 
+  // The phone terminal keeps a stable page height. Letting the software
+  // keyboard shrink --app-height makes the page and IME fight for focus.
+  if (document.body.classList.contains("mobile-terminal-route")) {
+    return;
+  }
+
   document.documentElement.style.setProperty(
     "--app-height",
     `${Math.round(viewportHeight)}px`,

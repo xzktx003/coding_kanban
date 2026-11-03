@@ -193,3 +193,31 @@ test("resolveShellStartupEnv falls back to interactive startup for plain sh", as
 
   assert.deepEqual(invokedArgs.slice(0, 2), ["-i", "-c"]);
 });
+
+test("resolveShellStartupEnv rejects a login shell that never returns", async () => {
+  await assert.rejects(
+    () =>
+      resolveShellStartupEnv(
+        {
+          HOME: "/tmp/demo-home",
+          SHELL: "/bin/zsh",
+        },
+        {
+          marker: "__TEST_ENV__",
+          shellPath: "/bin/zsh",
+          timeoutMs: 20,
+          execFileImpl: (_file, _args, options, callback) => {
+            assert.equal(options.timeout, 20);
+            const signal = options.signal;
+            assert.ok(signal);
+            signal.addEventListener(
+              "abort",
+              () => callback(new Error("shell startup aborted"), "", ""),
+              { once: true },
+            );
+          },
+        },
+      ),
+    /shell startup aborted/,
+  );
+});

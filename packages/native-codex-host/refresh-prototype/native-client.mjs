@@ -186,7 +186,10 @@ export function createNativeClient({
       throw new Error("Native request pending byte limit exceeded");
     input.write(line);
   };
-  const request = async (method, params, { beforeSend } = {}) => {
+  const request = async (method, params, { beforeSend, timeoutMs: requestTimeoutMs } = {}) => {
+    const limit = requestTimeoutMs ?? timeoutMs;
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 60000)
+      throw new Error("invalid native request limits");
     await connection.ready;
     if (ended) throw new Error("Native connection already closed");
     if (
@@ -208,7 +211,7 @@ export function createNativeClient({
             { code: "NATIVE_RECEIPT_UNKNOWN" },
           ),
         );
-      }, timeoutMs);
+      }, limit);
       timer.unref();
       pending.set(id, { resolve, reject, timer, beforeSend });
       try {

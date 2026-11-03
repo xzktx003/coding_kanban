@@ -152,7 +152,6 @@ test("opaque daemon identity survives Kanban runtime/client replacement but not 
 test("an endpoint rebind during account verification cannot return a late daemon identity", async (t) => {
   const f = await fixture(t),
     service = f.client("kanban-held-context");
-  await service.operationContext();
   const held = f.holdAccount(),
     pending = service.operationContext();
   await held.waiting;

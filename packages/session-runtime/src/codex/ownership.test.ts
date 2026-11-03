@@ -371,6 +371,37 @@ test("external writers and forbidden child input are rejected before the mutatio
   assert.ok(f.calls.some(c => c.method === "turn/interrupt"));
 });
 
+test("an explicit send retries an unloaded thread after a stale external conflict", async () => {
+  const f = fixture();
+  const owner = new Ownership(f.raw, { sharedDaemon: true });
+  f.state.blocked = true;
+  await assert.rejects(
+    owner.call("turn/start", { threadId: "t", input: ["original"] }),
+    /SESSION_OWNED_ELSEWHERE/,
+  );
+  f.state.blocked = false;
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await owner.call("turn/start", { threadId: "t", input: ["retry"] });
+  assert.equal((await owner.access("t")).state, "owned");
+  assert.equal(f.calls.filter((call) => call.method === "thread/resume").length, 2);
+});
+
+test("an unloaded external thread is reconciled back to readonly without sending a release", async () => {
+  const f = fixture();
+  const owner = new Ownership(f.raw, { sharedDaemon: true });
+  f.state.blocked = true;
+  await assert.rejects(
+    owner.call("turn/start", { threadId: "t", input: ["original"] }),
+    /SESSION_OWNED_ELSEWHERE/,
+  );
+  assert.equal((await owner.access("t")).state, "external");
+  f.state.blocked = false;
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await owner.sweep("t");
+  assert.equal((await owner.access("t")).state, "readonly");
+  assert.equal(f.calls.filter((call) => call.method === "thread/unsubscribe").length, 0);
+});
+
 test("release waits for authoritative loaded state and no active resource or stale queue permits unload", async () => {
   let now = 0;
   for (const hold of ["queue", "background", "active", "goal", "pending", "unknown"] as const) {

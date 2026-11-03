@@ -95,6 +95,33 @@ it("keeps the file summary visible together with a persisted failure", () => {
   expect(screen.getByRole("alert").textContent).toContain("本轮执行失败");
   expect(screen.getByText("文件改动仍保留")).toBeTruthy();
 });
+it("explains a provider safety refusal and does not treat it as a retry", () => {
+  render(
+    <EventItem
+      event={
+        {
+          method: "error",
+          params: {
+            threadId: "a",
+            turnId: "t",
+            willRetry: false,
+            error: {
+              message:
+                "This request was blocked by our safety systems. Reason: Potentially unintended activity.",
+              codexErrorInfo: "misalignment_policy_violation",
+            },
+          },
+        } as any
+      }
+    />,
+  );
+  expect(screen.getByRole("alert").textContent).toContain(
+    "Potentially unintended activity",
+  );
+  expect(document.querySelector("[data-provider-safety-block]")?.textContent).toContain(
+    "新开一个会话",
+  );
+});
 it("labels transient errors as retrying instead of terminal failure", () => {
   const event: any = {
     method: "error",

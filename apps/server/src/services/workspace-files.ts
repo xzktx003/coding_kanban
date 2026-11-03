@@ -42,7 +42,7 @@ const MAX_ZIP_DEPTH = 64;
 const hash = (bytes: Buffer) =>
   createHash("sha256").update(bytes).digest("hex");
 const inside = (root: string, path: string) =>
-  path === root || path.startsWith(root + sep);
+  path === root || path.startsWith(root === sep ? sep : root + sep);
 const moreSpecific = (left: string, right: string) =>
   right.length > left.length ? right : left;
 type ZipArchiveConstructor = new (
@@ -73,6 +73,7 @@ export class WorkspaceFiles {
   constructor(
     private trashHome: string,
     private roots: () => Promise<string[]>,
+    private options: { local?: boolean } = {},
   ) {}
   private serial<T>(fn: () => Promise<T>): Promise<T> {
     const p = this.queue.then(fn);
@@ -94,10 +95,13 @@ export class WorkspaceFiles {
     )
       throw new WorkspaceFileError("无效文件路径");
     const canonical = await realpath(root);
-    if (canonical === sep || !(await stat(canonical)).isDirectory())
+    if (
+      (!this.options.local && canonical === sep) ||
+      !(await stat(canonical)).isDirectory()
+    )
       throw new WorkspaceFileError("请选择有效的项目目录");
-    const allowed = await this.roots();
-    let accepted = false;
+    const allowed = this.options.local ? [] : await this.roots();
+    let accepted = this.options.local === true && canonical === sep;
     for (const item of allowed) {
       try {
         const r = await realpath(item);
@@ -160,13 +164,23 @@ export class WorkspaceFiles {
       typeof input !== "string" ||
       !isAbsolute(root) ||
       /[\\\x00-\x1f]/.test(root + input) ||
-      input.split("/").includes("..")
+      (!this.options.local && input.split("/").includes(".."))
     )
       throw new WorkspaceFileError("无效文件路径");
     const lexicalRoot = resolve(root);
+    if (this.options.local && isAbsolute(input)) {
+      return this.target(sep, await realpath(input));
+    }
     const canonicalRoot = await realpath(root);
-    if (canonicalRoot === sep || !(await stat(canonicalRoot)).isDirectory())
+    if (
+      (!this.options.local && canonicalRoot === sep) ||
+      !(await stat(canonicalRoot)).isDirectory()
+    )
       throw new WorkspaceFileError("请选择有效的项目目录");
+    if (this.options.local) {
+      const resolved = await realpath(resolve(lexicalRoot, input));
+      return this.target(sep, resolved);
+    }
     const requestRoot = await this.registeredRootFor(canonicalRoot);
     if (!requestRoot)
       throw new WorkspaceFileError("项目目录未注册，不能执行文件操作", 403);
@@ -193,7 +207,20 @@ export class WorkspaceFiles {
       if (!s.isFile()) throw new WorkspaceFileError("请选择普通文件");
       if (s.size > limit)
         throw new WorkspaceFileError("文件过大，请下载或使用外部编辑器", 413);
-      return { bytes: await handle.readFile(), mode: s.mode, nlink: s.nlink };
+      // A file can grow after stat, and procfs files often report size zero.
+      // Bound the actual read as well as the preliminary metadata check.
+      const chunks: Buffer[] = [];
+      let size = 0;
+      while (size <= limit) {
+        const chunk = Buffer.allocUnsafe(Math.min(64 * 1024, limit + 1 - size));
+        const { bytesRead } = await handle.read(chunk, 0, chunk.length, null);
+        if (!bytesRead) break;
+        chunks.push(chunk.subarray(0, bytesRead));
+        size += bytesRead;
+      }
+      if (size > limit)
+        throw new WorkspaceFileError("文件过大，请下载或使用外部编辑器", 413);
+      return { bytes: Buffer.concat(chunks, size), mode: s.mode, nlink: s.nlink };
     } finally {
       await handle.close();
     }

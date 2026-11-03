@@ -26,10 +26,16 @@ export function MessageReferenceActions({
   const [selection, setSelection] = useState("");
   useEffect(() => {
     const update = () => {
-      if (!isAgentInteractionVisible()) return;
+      if (!isAgentInteractionVisible()) {
+        setSelection("");
+        return;
+      }
       const selected = window.getSelection(),
         root = contentRef.current;
-      if (!root || !selected?.anchorNode || !selected.focusNode) return;
+      if (!root || !selected?.anchorNode || !selected.focusNode) {
+        setSelection("");
+        return;
+      }
       if (
         root.contains(selected.anchorNode) &&
         root.contains(selected.focusNode)

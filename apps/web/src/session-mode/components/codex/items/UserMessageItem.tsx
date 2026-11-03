@@ -77,6 +77,7 @@ export const UserMessageItem = ({
   return (
     <div
       className="codex-native-user flex justify-end min-w-0"
+      data-message-author="user"
       data-owner-thread={threadId}
       data-owner-turn={turnId}
       data-thread-user-message-navigation-item-id={itemId}

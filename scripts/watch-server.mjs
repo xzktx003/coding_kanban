@@ -109,6 +109,12 @@ export async function watchWithQuotaFallback(
 
 // One owner serializes installs and replacements; failed preparation never stops
 // the live gateway. A change arriving during preparation gets another pass.
+export function createGatewayReloadControl(processLike, request) {
+  const reload = () => void request();
+  processLike.on("SIGUSR2", reload);
+  return () => processLike.off("SIGUSR2", reload);
+}
+
 export function createRestartQueue({ prepare, restart, onError }) {
   let pending = false;
   let running;
@@ -358,6 +364,9 @@ async function main() {
       if (!stopping) void request();
     }, 500);
   };
+  // File-watch delivery can stall without an error. This explicit signal only
+  // reloads the gateway; it never addresses the session runtime process.
+  const stopReloadControl = createGatewayReloadControl(process, changed);
   for (const path of ["apps/server/src", "packages/shared/src"]) {
     watchers.push(
       await watched(
@@ -387,6 +396,7 @@ async function main() {
       stopping = true;
       clearTimeout(timer);
       recovery.cancel();
+      stopReloadControl();
       watchers.forEach((watcher) => watcher.close());
       await stopChild();
       process.exit(0);

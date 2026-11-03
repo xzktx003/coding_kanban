@@ -10,14 +10,15 @@ const subscribeToNothing = () => () => {};
 const readPreferences = () =>
   useNativeModelPickerPreferencesStore.getState().enabledReasoningEfforts;
 
-// This app has no source for the official 1186680773 rollout. Ordinary UI
-// rendering uses an explicit local display policy with ultra hidden; this
-// neither identifies the native auth method nor changes native permissions.
+// This app has no source for the official 1186680773 rollout. Ordinary menus
+// show every advertised effort the saved preference enables, including ultra.
+// persistent stays out through the picker allow-list. This neither identifies
+// the native auth method nor changes native permissions.
 function projectModels(
   rawModels: readonly Model[],
   enabled: readonly ReasoningEffort[],
 ): Model[] {
-  return projectNativePickerEfforts(rawModels, enabled, false);
+  return projectNativePickerEfforts(rawModels, enabled, true);
 }
 
 /** Read current preferences at the command event, within its existing owner guard. */

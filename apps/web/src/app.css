@@ -4653,7 +4653,6 @@ select optgroup {
     ),
     linear-gradient(180deg, #111820 0%, #070b10 100%);
   color: #f4f1ea;
-  animation: ui-fade-in var(--motion-standard) var(--motion-ease-out) both;
 }
 
 .mobile-workbench-content {
@@ -4707,6 +4706,147 @@ select optgroup {
   flex: 1;
   flex-direction: column;
   min-height: 0;
+}
+
+.mobile-workbench-page[data-session-open] .mobile-workbench-header,
+.mobile-workbench-page[data-session-open] .mobile-primary-nav {
+  display: none;
+}
+
+.mobile-workbench-page[data-session-open] .mobile-workbench-content--session {
+  padding: 0;
+  height: 100%;
+}
+
+.mobile-session-view--fullscreen {
+  position: relative;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+}
+
+.mobile-terminal-bar {
+  display: flex;
+  flex: 0 0 44px;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(10, 14, 19, 0.96);
+}
+
+.mobile-terminal-bar strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+}
+
+.mobile-terminal-bar button,
+.mobile-terminal-bar a {
+  flex: 0 0 auto;
+  min-width: 44px;
+  min-height: 36px;
+  touch-action: manipulation;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  text-decoration: none;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #f4f1ea;
+  cursor: pointer;
+}
+
+.mobile-terminal-accessory {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  background: rgba(9, 13, 18, 0.98);
+}
+
+.termux-extra-keys {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 4px max(2px, env(safe-area-inset-bottom));
+  background: #1b1b1b;
+}
+
+.termux-extra-key-row {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 2px;
+}
+
+.termux-extra-key {
+  min-width: 0;
+  min-height: 36px;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 2px;
+  background: #2b2b2b;
+  color: #d0d0d0;
+  font: 12px/1 "DejaVu Sans Mono", ui-monospace, monospace;
+  overflow: visible;
+}
+
+.termux-extra-key--locked {
+  background: #455a64;
+  color: #ffffff;
+}
+
+.mobile-terminal-ime {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  overflow: hidden;
+}
+
+.mobile-terminal-drawer {
+  position: fixed;
+  z-index: 40;
+  top: 44px;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  overflow: auto;
+  padding: 12px 12px 16px;
+  background: #090d12;
+}
+
+.mobile-session-groups {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.mobile-session-group header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.mobile-session-group button {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  margin-top: 4px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #f4f1ea;
+  text-align: left;
 }
 
 .mobile-terminal-controls {
@@ -6612,19 +6752,23 @@ select optgroup {
   }
 
   .mobile-terminal-surface {
-    flex: 1 1 96px;
-    min-height: 96px;
-    padding: 4px;
+    flex: 1 1 140px;
+    min-height: 140px;
+    padding: 0;
+  }
+
+  .mobile-terminal-bar {
+    flex-basis: 36px;
+    min-height: 36px;
   }
 
   .mobile-terminal-toolbar {
     padding: 4px 8px;
   }
 
-  .mobile-terminal-key {
-    min-width: 36px;
+  .termux-extra-key {
     min-height: 32px;
-    padding: 4px 6px;
+    font-size: 11px;
   }
 
   .mobile-agent-composer {
@@ -6671,9 +6815,9 @@ select optgroup {
 }
 
 .mobile-workbench-page[data-keyboard-open] .mobile-terminal-surface {
-  flex: 1 1 96px;
-  min-height: 96px;
-  padding: 4px;
+  flex: 1 1 140px;
+  min-height: 140px;
+  padding: 0;
 }
 
 .mobile-workbench-page[data-keyboard-open] .mobile-terminal-toolbar,

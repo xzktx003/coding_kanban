@@ -316,7 +316,7 @@ export const ComposerEditor = forwardRef<
   );
 
   return (
-    <div className="session-composer-editor relative">
+    <div className="session-composer-editor relative" data-composer-input="">
       <LexicalComposer
         initialConfig={{
           namespace: "codex-composer",

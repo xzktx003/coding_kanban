@@ -51,6 +51,7 @@ import {
 import { NativeServiceTierControl } from "./NativeServiceTierControl";
 import { recentModelConfigs, rememberRecentModel } from "./recentModelConfigs";
 import { isCodexOperationScopeCurrent, type CodexOperationScope } from "@session/services/codexOperationScope";
+import { useNativeUltraEffortCommit } from "./useNativeUltraEffortCommit";
 
 // Native impl-517ea8aeeec5 dt(percent): 28px thumb / 2 minus 1px.
 const POWER_ENDPOINT_INSET = 13;
@@ -113,6 +114,7 @@ export function NativeModelSelector({
   initialScope?: CodexOperationScope;
 }) {
   const settings = useThreadModelSettings(threadId);
+  const ultraEffort = useNativeUltraEffortCommit(threadId);
   const { openAiModels, providerItems, loading, error, reload, modelStatus, hasModelSnapshot } =
     useModels();
   const [open, setOpen] = useState(false);
@@ -451,6 +453,7 @@ export function NativeModelSelector({
               : {}),
           }
         : null;
+    const applyChoice = () => {
     if (jointNativeSelection) {
       settings.setModelSelection(jointNativeSelection);
     } else {
@@ -481,6 +484,10 @@ export function NativeModelSelector({
       settings.setServiceTier(null);
     if (isNativeModelProvider && isCurrentNativeAction(false))
       useNativeModelPickerPreferencesStore.getState().setSelectionMode("model");
+    };
+    const chosenEffort = jointNativeSelection?.reasoningEffort ?? next ?? settings.reasoningEffort;
+    if (typeof chosenEffort === "string") ultraEffort.commit(chosenEffort, applyChoice);
+    else applyChoice();
   };
   const chooseDefault = () => {
     if (
@@ -491,10 +498,12 @@ export function NativeModelSelector({
     if (effectiveSelectionMode !== "default") {
       const choice = pickerPresentation?.defaultChoice;
       if (!choice) return;
-      useNativeModelPickerPreferencesStore.getState().setSelectionMode("default");
-      settings.setModelSelection({
-        model: choice.model,
-        reasoningEffort: choice.reasoningEffort,
+      ultraEffort.commit(choice.reasoningEffort, () => {
+        useNativeModelPickerPreferencesStore.getState().setSelectionMode("default");
+        settings.setModelSelection({
+          model: choice.model,
+          reasoningEffort: choice.reasoningEffort,
+        });
       });
     }
     setAdvanced(false);
@@ -508,10 +517,12 @@ export function NativeModelSelector({
     if (!choice) return;
     // hCa Ln restores the recommended pair without a power-commit notice or
     // changing speed. The advanced selected Default radio remains a no-op.
-    useNativeModelPickerPreferencesStore.getState().setSelectionMode("default");
-    settings.setModelSelection({
-      model: choice.model,
-      reasoningEffort: choice.reasoningEffort,
+    ultraEffort.commit(choice.reasoningEffort, () => {
+      useNativeModelPickerPreferencesStore.getState().setSelectionMode("default");
+      settings.setModelSelection({
+        model: choice.model,
+        reasoningEffort: choice.reasoningEffort,
+      });
     });
     if (keyboardViewFocus.current) {
       keyboardViewFocus.current = false;
@@ -528,39 +539,45 @@ export function NativeModelSelector({
         Math.max(0, Math.min(physicalPowerChoices.length - 1, index))
       ];
       if (!choice) return;
-      commitModelSelectionWithNotice(threadId, "power", () => settings.setModelSelection({
-        model: choice.model,
-        reasoningEffort: choice.reasoningEffort,
-      }));
-      setRecentTick((tick) => tick + 1);
-      rememberRecentModel({
-        model: choice.model,
-        label: items.find((item) => item.id === choice.model)?.label ?? choice.modelLabel,
-        reasoningEffort: choice.reasoningEffort,
-        serviceTier: settings.serviceTier ?? null,
+      ultraEffort.commit(choice.reasoningEffort, () => {
+        commitModelSelectionWithNotice(threadId, "power", () => settings.setModelSelection({
+          model: choice.model,
+          reasoningEffort: choice.reasoningEffort,
+        }));
+        setRecentTick((tick) => tick + 1);
+        rememberRecentModel({
+          model: choice.model,
+          label: items.find((item) => item.id === choice.model)?.label ?? choice.modelLabel,
+          reasoningEffort: choice.reasoningEffort,
+          serviceTier: settings.serviceTier ?? null,
+        });
       });
       return;
     }
     const next = options[Math.max(0, Math.min(options.length - 1, index))];
-    if (next) {
-      if (isNativeModelProvider && settings.model) {
-        settings.setModelSelection({
-          model: settings.model,
-          reasoningEffort: next,
-        });
-      } else {
-        settings.setReasoningEffort(next);
+    const applyEffort = () => {
+      if (next) {
+        if (isNativeModelProvider && settings.model) {
+          settings.setModelSelection({
+            model: settings.model,
+            reasoningEffort: next,
+          });
+        } else {
+          settings.setReasoningEffort(next);
+        }
       }
-    }
-    setRecentTick((tick) => tick + 1);
-    if (settings.model) {
-      rememberRecentModel({
-        model: settings.model,
-        label,
-        reasoningEffort: next ?? null,
-        serviceTier: settings.serviceTier ?? null,
-      });
-    }
+      setRecentTick((tick) => tick + 1);
+      if (settings.model) {
+        rememberRecentModel({
+          model: settings.model,
+          label,
+          reasoningEffort: next ?? null,
+          serviceTier: settings.serviceTier ?? null,
+        });
+      }
+    };
+    if (next) ultraEffort.commit(next, applyEffort);
+    else applyEffort();
   };
   function isCurrentPowerWheel(
     lease: PowerWheelLease,
@@ -685,11 +702,15 @@ export function NativeModelSelector({
   }, [releasePowerWheel]);
   const applyRecent = (item: (typeof recent)[number]) => {
     if (modelPending || modelSelectionDisabled) return;
-    commitModelSelectionWithNotice(threadId, "recent", () => {
-      settings.setModel(item.model);
-      if (item.reasoningEffort) settings.setReasoningEffort(item.reasoningEffort);
-      settings.setServiceTier?.(item.serviceTier);
-    });
+    const applyRecentItem = () => {
+      commitModelSelectionWithNotice(threadId, "recent", () => {
+        settings.setModel(item.model);
+        if (item.reasoningEffort) settings.setReasoningEffort(item.reasoningEffort);
+        settings.setServiceTier?.(item.serviceTier);
+      });
+    };
+    if (item.reasoningEffort) ultraEffort.commit(item.reasoningEffort, applyRecentItem);
+    else applyRecentItem();
     setRecentOpen(false);
     changeOpen(false);
   };
@@ -817,6 +838,8 @@ export function NativeModelSelector({
     changeTriggerOpen(true);
   }, [initiallyOpen]);
   return (
+    <>
+    {ultraEffort.confirmation}
     <DropdownMenu modal={openedLayer.current?.modal ?? true} open={open} onOpenChange={changeTriggerOpen}>
       <DropdownMenuTrigger asChild>
         <NativeModelTrigger
@@ -1246,5 +1269,6 @@ export function NativeModelSelector({
         </DropdownMenuContent>
       )}
     </DropdownMenu>
+    </>
   );
 }

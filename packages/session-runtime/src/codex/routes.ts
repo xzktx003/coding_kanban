@@ -158,6 +158,18 @@ export function registerCodexRoutes(
         // The archived daemon exposes this read-only failure as JSON-RPC
         // -32600, without a structured archived code. Keep it unavailable;
         // never turn it into an empty Goal that could authorize continuation.
+        if (
+          method === "account/read" &&
+          ((error instanceof Error &&
+            error.message.startsWith("WORKSPACE_ROUTING_DISCOVERY_TIMEOUT:")) ||
+            (error instanceof RpcError &&
+              error.code === -32603 &&
+              error.message === "workspace routing discovery timed out"))
+        )
+          throw Object.assign(
+            new HttpError(503, "工作区路由发现超时，可稍后重试"),
+            { code: "WORKSPACE_ROUTING_DISCOVERY_TIMEOUT" },
+          );
         if (method === "thread/goal/get" && error instanceof RpcError && error.code === -32600)
           throw Object.assign(
             new HttpError(409, "原生 Goal 状态暂不可用，不能推断为无活动 Goal"),

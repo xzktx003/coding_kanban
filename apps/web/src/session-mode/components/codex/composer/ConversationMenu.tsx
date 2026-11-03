@@ -53,6 +53,7 @@ import {
 } from "./nativeReasoningOptions";
 import { formatDraftRange, type FormatKind } from "./editor/formatSelection";
 import { useModelCacheStore } from "../hooks/useModels";
+import { useNativeUltraEffortCommit } from "./useNativeUltraEffortCommit";
 import { getOrdinaryNativePickerModels } from "./ordinaryNativePickerModels";
 import { useThreadModelSettings } from "@session/hooks/useThreadModelSettings";
 import { activeDraftOwner } from "@session/stores/useInputStore";
@@ -299,6 +300,7 @@ export const ConversationMenu = memo(function ConversationMenu({
     collaborationMode,
     setCollaborationMode,
   } = useThreadModelSettings(threadId);
+  const ultraEffort = useNativeUltraEffortCommit(threadId);
   const bumpHistory = () => setHistoryTick((tick) => tick + 1);
   const nativeProvider = modelProvider === "openai";
   const reasoningPending = nativeProvider && modelStatus === "pending";
@@ -361,12 +363,14 @@ export const ConversationMenu = memo(function ConversationMenu({
       );
       return;
     }
-    if (nativeProvider) {
-      setModelSelection({ model, reasoningEffort: next });
-    } else {
-      setReasoningEffort(next);
-    }
-    toast.message(`推理强度已设为${nativeReasoningLabel(next)}`);
+    ultraEffort.commit(next, () => {
+      if (nativeProvider) {
+        setModelSelection({ model, reasoningEffort: next });
+      } else {
+        setReasoningEffort(next);
+      }
+      toast.message(`推理强度已设为${nativeReasoningLabel(next)}`);
+    });
   };
   useEffect(() => {
     // A persistent owner keeps its forms alive after the parent closes; it does
@@ -1853,6 +1857,7 @@ export const ConversationMenu = memo(function ConversationMenu({
         </DeferredConversationDialog>
     )}
       {supplemental && <DeferredConversationDialog label="会话命令" onClose={() => setSupplemental(null)}><SupplementalCommandDialog key={`${supplemental.kind}:${supplemental.threadId}`} kind={supplemental.kind} threadId={supplemental.threadId} targetScope={supplemental.scope} onClose={() => setSupplemental(null)} /></DeferredConversationDialog>}
+      {ultraEffort.confirmation}
     </SelectedActionContext.Provider>
   );
 });

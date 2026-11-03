@@ -1,6 +1,9 @@
 import { render } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
-import { StreamingCodexMarkdown } from "./StreamingCodexMarkdown";
+import {
+  mayContainStreamingMarkdown,
+  StreamingCodexMarkdown,
+} from "./StreamingCodexMarkdown";
 const calls = vi.hoisted(() => vi.fn());
 vi.mock("./CodexMarkdown", () => ({
   CodexMarkdown: ({
@@ -24,7 +27,7 @@ it("renders Markdown while streaming and does not reparse stable blocks for ever
       threadId="thread"
     />,
   );
-  expect(view.container.querySelector("[data-markdown-live]")).not.toBeNull();
+  expect(view.container.querySelector("[data-streaming-live-tail]")).not.toBeNull();
   calls.mockClear();
   view.rerender(
     <StreamingCodexMarkdown
@@ -64,4 +67,25 @@ it("resets progressive state when its immutable segment prefix is replaced", () 
     <StreamingCodexMarkdown segments={["new\n\n"]} current="fresh" />,
   );
   expect(view.container.textContent).toBe("new\n\nfresh");
+});
+
+it.each([
+  "title\n===\n",
+  "---\n",
+  "1. list",
+  "www.example.test",
+  "user@example.test",
+  ':codex-file-citation{path="/owner/source.ts"}',
+  "【/owner/source.ts†L8】",
+])(
+  "detects formatted content before entering the bounded preview: %s",
+  (value) => {
+    expect(mayContainStreamingMarkdown(value)).toBe(true);
+  },
+);
+
+it("keeps the large plain-text preview on its lightweight path", () => {
+  expect(mayContainStreamingMarkdown(`active 0\n${"x".repeat(8192)}`)).toBe(
+    false,
+  );
 });

@@ -1057,8 +1057,16 @@ export async function registerAgentSessionRoutes(
 
   fastify.post<{ Params: { id: string }; Body: StdinAgentSessionInput }>(
     "/api/agent-sessions/:id/stdin",
-    async (request) =>
-      inputService.write(request.params.id, request.body.input),
+    async (request, reply) => {
+      try {
+        return await inputService.write(request.params.id, request.body.input);
+      } catch (error) {
+        reply.code(409);
+        return {
+          error: error instanceof Error ? error.message : "终端还不能接收输入",
+        };
+      }
+    },
   );
 
   fastify.post<{ Body: ScanDirectoryInput }>(

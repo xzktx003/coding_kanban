@@ -1,6 +1,6 @@
 # Native 代次的持久授权锚
 
-刷新候选的 `startPrivateService` 现在先启动独立授权观察进程，完成实际原生 initialize、账号初始通知与两次只读 `account/read(refreshToken:false)`，才发布服务 ready。观察进程跨创建者、管理器、网关和页面退出保留；它不读取 thread/正文、不提交用户操作，也不控制任务。默认入口仍未启用候选架构。
+刷新候选的 `startPrivateService` 现在先启动独立授权观察进程，完成实际原生 initialize、账号初始通知与两次只读 `account/read(refreshToken:false)`，才发布服务 ready。两次读各自发出，单次等待默认 45 秒。JSON-RPC `-32603` 且正文为 `workspace routing discovery timed out` 时绑定保持可重试，不把这次发现超时写成授权撤销。观察进程跨创建者、管理器、网关和页面退出保留；它不读取 thread/正文、不提交用户操作，也不控制任务。默认入口仍未启用候选架构。
 
 ## 记录和接入
 

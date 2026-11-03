@@ -127,6 +127,9 @@ for (const dark of [false, true])
         }),
       );
       await page.goto("/rail-theme-fixture");
+      await page.locator("#composer-root").evaluate((el) => {
+        (el as HTMLElement).style.paddingTop = "240px";
+      });
       await page.evaluate(async ({ react, client }) => {
         const refresh = (await import("/@react-refresh")).default;
         refresh.injectIntoGlobalHook(window);
@@ -382,6 +385,13 @@ for (const dark of [false, true])
             };
           };
           const rail = host.querySelector("[data-composer-rail]")!;
+          const overlay = rail.querySelector(".session-composer-rail-content");
+          const canvas = document.createElement("canvas");
+          const ctx = canvas.getContext("2d")!;
+          if (overlay) {
+            ctx.fillStyle = getComputedStyle(overlay).backgroundColor;
+            ctx.fillRect(0, 0, 1, 1);
+          }
           const items = Array.from(
             rail.querySelectorAll("[data-composer-rail-item]"),
           );
@@ -428,6 +438,7 @@ for (const dark of [false, true])
             dpr: devicePixelRatio,
             tokens: (window as any).railHostTokens,
             rail: metrics(rail),
+            overlayAlpha: overlay ? ctx.getImageData(0, 0, 1, 1).data[3] : null,
             items: items.map((el) => ({
               box: metrics(el),
               counters: Array.from(
@@ -597,14 +608,13 @@ for (const dark of [false, true])
       expect(await native.evaluate(() => (window as any).nativeErrors)).toEqual(
         [],
       );
-      // Real rows, not fixed-height placeholders: the first item has a separate
-      // diff target and action; every queued message remains visible on desktop.
+      // Real rows, not fixed-height placeholders. Outer geometry and background
+      // intentionally differ from native; compare row typography and actions.
       const painted = (item: any) =>
         Object.fromEntries(
           [
             "text",
             "height",
-            "width",
             "font",
             "fontSize",
             "lineHeight",
@@ -616,55 +626,53 @@ for (const dark of [false, true])
             "borderRadius",
           ].map((key) => [key, item[key]]),
         );
+      const expectButtons = (actual: any[], expected: any[]) => {
+        expect(actual.map(painted)).toEqual(expected.map(painted));
+        for (let i = 0; i < expected.length; i++)
+          expect(Math.abs(actual[i].width - expected[i].width)).toBeLessThanOrEqual(2);
+      };
       for (const sample of samples as any[]) {
         const { actual, expected } = sample;
         expect(actual.tokens).toEqual(expected.tokens);
         expect(actual.dpr).toBe(expected.dpr);
+        expect(actual.overlayAlpha).toBeGreaterThan(0);
+        expect(actual.overlayAlpha).toBeLessThan(255);
         expect(actual.items[0].box.text).toContain("1 个文件已更改");
-        expect(actual.items[0].buttons.map(painted)).toEqual(
-          expected.items[0].buttons.map(painted),
-        );
+        expectButtons(actual.items[0].buttons, expected.items[0].buttons);
         for (let i = 0; i < expected.items[0].counters.length; i++) {
           const counter = actual.items[0].counters[i],
             referenceCounter = expected.items[0].counters[i];
-          const { width: actualWidth, ...actualPaint } = painted(counter);
-          const { width: expectedWidth, ...expectedPaint } =
-            painted(referenceCounter);
-          expect(actualPaint).toEqual(expectedPaint);
+          expect(painted(counter)).toEqual(painted(referenceCounter));
           expect(counter.top).toBe(referenceCounter.top);
           // Preserve raw floats in JSON. The two independent renderers differ
           // by up to 2 layout subpixels (1/32 CSS px) in shaped digit advances.
           expect(
-            Math.abs(Number(actualWidth) - Number(expectedWidth)),
+            Math.abs(Number(counter.width) - Number(referenceCounter.width)),
           ).toBeLessThanOrEqual(1 / 16);
           expect(
             Math.abs(counter.left - referenceCounter.left),
           ).toBeLessThanOrEqual(1 / 16);
         }
         expect(actual.items[0].box.height).toBe(expected.items[0].box.height);
-        expect(actual.items[0].box.background).toBe(
-          expected.items[0].box.background,
-        );
+        expect(actual.items[0].box.background).toBe("rgba(0, 0, 0, 0)");
         const actualQueue = actual.items.find((item: any) =>
           item.box.text.includes(queueMessages[0]),
         );
-        expect(actualQueue.box.height).toBe(expected.items[1].box.height);
-        expect(actualQueue.box.background).toBe(
-          expected.items[1].box.background,
-        );
-        expect(
+        // The old attached last row included a four-pixel tuck; the floating
+        // panel has its own border and does not extend under the composer.
+        expect(actualQueue.box.height + (coexist ? 0 : 4)).toBe(expected.items[1].box.height);
+        expect(actualQueue.box.background).toBe("rgba(0, 0, 0, 0)");
+        expectButtons(
           actualQueue.buttons
-            .filter((button: any) => !queueMessages.includes(button.text))
-            .map(painted),
-        ).toEqual(expected.items[1].buttons.map(painted));
+            .filter((button: any) => !queueMessages.includes(button.text)),
+          expected.items[1].buttons,
+        );
         expect(actual.queueRows).toBe(queueMessages.length);
         if (coexist) {
-          expect(actual.items.at(-1).box.height).toBe(
+          expect(actual.items.at(-1).box.height + 4).toBe(
             expected.items.at(-1).box.height,
           );
-          expect(actual.items.at(-1).buttons.map(painted)).toEqual(
-            expected.items.at(-1).buttons.map(painted),
-          );
+          expectButtons(actual.items.at(-1).buttons, expected.items.at(-1).buttons);
         }
       }
       await local

@@ -63,6 +63,8 @@ type ExecFileLike = (
     encoding: "utf8";
     env: NodeJS.ProcessEnv;
     maxBuffer: number;
+    signal?: AbortSignal;
+    timeout?: number;
   },
   callback: (error: Error | null, stdout: string, stderr: string) => void,
 ) => void;
@@ -73,6 +75,7 @@ interface ResolveShellStartupEnvOptions {
   marker?: string;
   nodePath?: string;
   shellPath?: string;
+  timeoutMs?: number;
 }
 
 function buildShellStartupEnvArgs(
@@ -181,6 +184,7 @@ export async function resolveShellStartupEnv(
 
   return new Promise((resolve, reject) => {
     const cwd = options.cwd ?? shellEnv.HOME?.trim() ?? os.homedir();
+    const timeoutMs = options.timeoutMs ?? 5_000;
 
     (options.execFileImpl ?? execFile)(
       shellPath,
@@ -196,6 +200,8 @@ export async function resolveShellStartupEnv(
         encoding: "utf8",
         env: shellEnv,
         maxBuffer: 10 * 1024 * 1024,
+        signal: AbortSignal.timeout(timeoutMs),
+        timeout: timeoutMs,
       },
       (error, stdout) => {
         if (error) {

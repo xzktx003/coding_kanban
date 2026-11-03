@@ -91,8 +91,14 @@ it("rejects malformed resolve responses and unknown owners before opening", asyn
   expect(
     await openWorkspaceFileReference({ path: "/repo/link" }, "/repo"),
   ).toBe(false);
-  expect(await openWorkspaceFileReference({ path: "/repo/link" })).toBe(false);
+  expect(await openWorkspaceFileReference({ path: "relative/link" })).toBe(false);
   expect(useEditorStore.getState().openFiles).toEqual([]);
   expect(resolveWorkspaceFileReference).toHaveBeenCalledTimes(1);
+});
+it("opens an absolute local path even when the original project is unavailable", async () => {
+  vi.mocked(resolveWorkspaceFileReference).mockResolvedValue({ root: "/", path: "/outside/file" });
+  expect(await openWorkspaceFileReference({ path: "/outside/file" })).toBe(true);
+  expect(resolveWorkspaceFileReference).toHaveBeenCalledWith("/", "/outside/file");
+  expect(useEditorStore.getState().activeFile).toBe("/outside/file");
 });
 it("does not reveal a late old-runtime file or toast after account authority changes",async()=>{let done!:(target:{root:string;path:string})=>void;vi.mocked(resolveWorkspaceFileReference).mockReturnValueOnce(new Promise(resolve=>done=resolve));const onOpened=vi.fn(),pending=openWorkspaceFileReference({path:"/repo/file"},"/repo",onOpened);const {invalidateCodexOperationScope}=await import("./codexOperationScope");invalidateCodexOperationScope();done({root:"/repo",path:"/repo/file"});expect(await pending).toBe(false);expect(onOpened).not.toHaveBeenCalled();expect(useEditorStore.getState().activeFile).toBeNull();});

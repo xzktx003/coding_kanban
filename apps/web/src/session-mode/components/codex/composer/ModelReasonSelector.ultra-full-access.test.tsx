@@ -19,13 +19,8 @@ import { rememberNonFullAccessMode } from "@session/services/nonFullAccessPrefer
  * which sets the fallback permission mode and then applies), and `onClose`,
  * which resolves `false` and applies nothing.
  *
- * Reachability on our side: `ultra` is hidden from the native trigger
- * (`ordinaryNativePickerModels` calls `projectNativePickerEfforts` with
- * `includeUltra: false`), but the "模型与提供商设置" panel renders
- * `ReasoningEffortSelector` straight over `nativeReasoningOptions`, whose
- * allow-list contains `ultra`. So the combination is reachable in the panel,
- * and the panel is the surface that needs the gate. The existing graded
- * assertion that ultra stays hidden in the trigger must keep passing.
+ * Reachability: advertised ultra is visible in the session menu and in the
+ * settings panel. Both surfaces share the same confirmation before writing.
  *
  * Boundary: this is a local confirmation before a local write. It is not
  * native permission admission, and declining must leave the previously saved

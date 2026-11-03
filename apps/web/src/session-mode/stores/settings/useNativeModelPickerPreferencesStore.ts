@@ -8,6 +8,9 @@ export type NativeModelPickerSelectionMode = null | "default" | "model";
  * separate from native configuration, model intent and each menu's local view.
  */
 export const DEFAULT_NATIVE_PICKER_REASONING_EFFORTS: readonly ReasoningEffort[] =
+  Object.freeze(["low", "medium", "high", "xhigh", "max", "ultra", "persistent"]);
+
+const LEGACY_DEFAULT_NATIVE_PICKER_REASONING_EFFORTS: readonly ReasoningEffort[] =
   Object.freeze(["low", "medium", "high", "xhigh", "ultra", "persistent"]);
 
 export interface NativeModelPickerPreferencesState {
@@ -55,6 +58,9 @@ function mergePreferences(
   if (Object.prototype.hasOwnProperty.call(value, "enabledReasoningEfforts") && efforts(value.enabledReasoningEfforts) &&
       !equalEfforts(enabled, value.enabledReasoningEfforts)) {
     enabled = Object.freeze([...value.enabledReasoningEfforts]);
+  }
+  if (equalEfforts(enabled, LEGACY_DEFAULT_NATIVE_PICKER_REASONING_EFFORTS)) {
+    enabled = DEFAULT_NATIVE_PICKER_REASONING_EFFORTS;
   }
   return mode === current.selectionMode && enabled === current.enabledReasoningEfforts
     ? current : { ...current, selectionMode: mode, enabledReasoningEfforts: enabled };

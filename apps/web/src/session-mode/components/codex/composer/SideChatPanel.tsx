@@ -1,5 +1,6 @@
 import { newSessionEditId } from "@session/services/sessionEditIdentity";
 import { composeContextText } from "@agent-orchestrator/shared";
+import { contextForDelivery } from "./v2/selectionAnnotations";
 import {
   composerDrafts,
   useComposerDraft,
@@ -118,7 +119,8 @@ function SideChat({
       return;
     const capturedContexts = composerDrafts.capture(owner);
     const contexts = capturedContexts.contexts;
-    if (composeContextText(inputValue, contexts).length > 200_000) {
+    const deliveryContexts = contexts.map(contextForDelivery);
+    if (composeContextText(inputValue, deliveryContexts).length > 200_000) {
       toast.error("正文与上下文合计不能超过 200,000 字符");
       return;
     }
@@ -153,7 +155,7 @@ function SideChat({
         mode,
         turnId ?? undefined,
         undefined,
-        contexts,
+        deliveryContexts,
       );
       useSessionDraftStore.getState().clearSubmitted(owner, snapshot);
       draft.clear(ids);

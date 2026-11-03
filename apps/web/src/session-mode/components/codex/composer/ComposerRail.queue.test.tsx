@@ -129,6 +129,18 @@ it("closes a queued message's portaled menu as soon as its rail item exits", asy
   );
 });
 
+it("closes the portaled queue menu when the rail is collapsed and restores the queue when reopened", async () => {
+  render(<Fixture />);
+  const toggle = screen.getByRole("button", { name: "收起提示" });
+  fireEvent.keyDown(screen.getByRole("button", { name: "排队消息操作 1" }), { key: "ArrowDown" });
+  expect(await screen.findByRole("menu")).toBeTruthy();
+  fireEvent.click(toggle);
+  await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+  expect(screen.queryByRole("button", { name: "排队消息操作 1" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "展开提示" }));
+  expect(screen.getByRole("button", { name: "排队消息操作 1" })).toBeTruthy();
+});
+
 it("keeps paused and failed-connection shelves visible without queued rows", () => {
   const empty = { ...snapshot, state: { ...snapshot.state, items: [] } };
   expect(hasVisibleFollowupQueue("owner", empty)).toBe(false);

@@ -2,13 +2,22 @@ import { memo, useRef } from "react";
 import { parseMarkdownIntoBlocks } from "streamdown";
 import { CodexMarkdown } from "./CodexMarkdown";
 import { copyTranscriptText } from "@session/services/codexTranscriptMemoryBudget";
+import { LiveMarkdownTail } from "./liveMarkdownTail";
+import { prepareStreamingMarkdown } from "./prepareStreamingMarkdown";
 
 export const STREAMING_MARKDOWN_TAIL_LIMIT = 16 * 1024;
 const MAX_STABLE_BLOCKS = 128;
-// Reference definitions can change earlier blocks. Keep their source intact
-// during streaming and let the final, single-document renderer resolve them.
-const needsDocumentContext =
-  /(^|\n) {0,3}\[[^\]\n]+\]:|\[[^\]\n]*\]\[[^\]\n]*\]|\[\^[^\]\n]+\]/;
+// Plain, very large output does not need a Markdown tree. In particular this
+// keeps the existing large-stream memory path free of thousands of DOM nodes.
+export const mayContainStreamingMarkdown = (value: string) =>
+  /[*_`#>\[\]~$\\|<!]/.test(value) ||
+  /(?:^|\n) {0,3}(?:[-+][ \t]|\d+[.)][ \t]|={2,}[ \t]*(?:\n|$)|-(?:[ \t]*-){2,}[ \t]*(?:\n|$))/.test(
+    value,
+  ) ||
+  /https?:\/\/|www\./i.test(value) ||
+  value.includes("@") ||
+  value.includes("codex-file-citation") ||
+  value.includes("【");
 const StableMarkdown = memo(function StableMarkdown({
   value,
   threadId,
@@ -26,6 +35,9 @@ class StreamingBlocks {
   pending = "";
   raw: string[] = [];
   overflow = false;
+  generation = 0;
+  frozen: string | undefined;
+  frozenLength = 0;
   update(segments: readonly string[]) {
     if (
       segments.length < this.segments.length ||
@@ -36,6 +48,9 @@ class StreamingBlocks {
       this.pending = "";
       this.raw = [];
       this.overflow = false;
+      this.frozen = undefined;
+      this.frozenLength = 0;
+      this.generation++;
     }
     for (let i = this.segments.length; i < segments.length; i++) {
       const segment = segments[i];
@@ -46,8 +61,7 @@ class StreamingBlocks {
       const value = this.pending + segment;
       if (
         value.length > STREAMING_MARKDOWN_TAIL_LIMIT ||
-        this.stable.length >= MAX_STABLE_BLOCKS ||
-        needsDocumentContext.test(value)
+        this.stable.length >= MAX_STABLE_BLOCKS
       ) {
         if (this.pending) this.raw.push(this.pending);
         this.raw.push(segment);
@@ -58,9 +72,7 @@ class StreamingBlocks {
       const blocks = parseMarkdownIntoBlocks(value);
       // Lexer drops reference definitions; never lose source in the projection.
       if (blocks.reduce((n, part) => n + part.length, 0) !== value.length) {
-        this.raw.push(value);
-        this.pending = "";
-        this.overflow = true;
+        this.pending = copyTranscriptText(value);
         continue;
       }
       let last = blocks.length - 1;
@@ -74,15 +86,40 @@ class StreamingBlocks {
     // a growing response. Replaced/truncated segments release the old cursor.
     this.segments = segments;
   }
+
+  /** Freeze only a bounded, already displayed prefix before a raw overflow. */
+  freeze(current: string) {
+    if (!this.overflow) {
+      if (this.pending) this.raw.push(this.pending);
+      this.pending = "";
+      this.overflow = true;
+    }
+    if (this.frozen !== undefined) return;
+    const parts: string[] = [];
+    let remaining = STREAMING_MARKDOWN_TAIL_LIMIT;
+    for (const part of [...this.raw, current]) {
+      if (!remaining) break;
+      parts.push(part.slice(0, remaining));
+      remaining -= Math.min(remaining, part.length);
+    }
+    const prefix = parts.join("");
+    const formatted = mayContainStreamingMarkdown(prefix)
+      ? prepareStreamingMarkdown(prefix)
+      : "";
+    this.frozen = copyTranscriptText(formatted);
+    this.frozenLength = formatted.length;
+  }
 }
 export function StreamingCodexMarkdown({
   segments = [],
   current = "",
   threadId,
+  markContainer = true,
 }: {
   segments?: readonly string[];
   current?: string;
   threadId?: string;
+  markContainer?: boolean;
 }) {
   const cursor = useRef<StreamingBlocks | null>(null);
   if (!cursor.current) cursor.current = new StreamingBlocks();
@@ -90,30 +127,43 @@ export function StreamingCodexMarkdown({
   state.update(segments);
   const boundedTail =
     !state.overflow &&
-    state.pending.length + current.length <= STREAMING_MARKDOWN_TAIL_LIMIT &&
-    !needsDocumentContext.test(state.pending + current);
+    state.pending.length + current.length <= STREAMING_MARKDOWN_TAIL_LIMIT;
+  if (!boundedTail) state.freeze(current);
+  let skipped = state.frozenLength;
+  const remainingParts = boundedTail
+    ? []
+    : [...state.raw, current].map((part) => {
+        const count = Math.min(skipped, part.length);
+        skipped -= count;
+        return count ? part.slice(count) : part;
+      });
   return (
-    <div data-codex-streaming-text data-streaming-markdown>
+    <div
+      data-codex-streaming-text={markContainer ? "" : undefined}
+      data-streaming-markdown
+    >
       {state.stable.map((value, index) => (
         <StableMarkdown key={index} value={value} threadId={threadId} />
       ))}
       {boundedTail ? (
-        <CodexMarkdown
+        <LiveMarkdownTail
+          key={`${state.generation}:${state.stable.length}`}
           value={state.pending + current}
-          threadId={threadId}
-          streaming
         />
       ) : (
-        <div
-          className="whitespace-pre-wrap break-words leading-relaxed"
-          data-streaming-markdown-plain
-        >
-          {state.raw.map((part, index) => (
-            <span key={index}>{part}</span>
-          ))}
-          {state.pending}
-          {current}
-        </div>
+        <>
+          {state.frozen && (
+            <CodexMarkdown value={state.frozen} threadId={threadId} streaming />
+          )}
+          <div
+            className="whitespace-pre-wrap break-words leading-relaxed"
+            data-streaming-markdown-plain
+          >
+            {remainingParts.map((part, index) => (
+              <span key={index}>{part}</span>
+            ))}
+          </div>
+        </>
       )}
     </div>
   );

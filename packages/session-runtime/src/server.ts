@@ -186,7 +186,9 @@ export async function createRuntime(options: RuntimeOptions) {
               code: failure.code,
               nativeErrorCode: failure.nativeErrorCode,
             }
-          : {};
+          : failure.code === "WORKSPACE_ROUTING_DISCOVERY_TIMEOUT"
+            ? { code: failure.code }
+            : {};
       reply
         .code(
           failure.statusCode ??

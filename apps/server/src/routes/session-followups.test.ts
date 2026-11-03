@@ -20,6 +20,104 @@ const body = {
   mode: "queue",
 };
 
+test("an older runtime without the public queue route remains readable through its guarded raw call", async () => {
+  const app = Fastify();
+  const calls: string[] = [];
+  registerSessionFollowupRoutes(app, {
+    origin: () => "http://fixture.invalid",
+    fetch: async (input, init) => {
+      const url = String(input);
+      calls.push(`${init?.method ?? "GET"} ${new URL(url).pathname}`);
+      if (url.endsWith("/api/internal/codex/operation-context"))
+        return new Response(JSON.stringify({ scope: "scope", namespace: "ns" }));
+      if (url.endsWith("/api/codex/thread/queue/list"))
+        return new Response(JSON.stringify({
+          message: "Route POST:/api/codex/thread/queue/list not found",
+          error: "Not Found",
+          statusCode: 404,
+        }), { status: 404, headers: { "content-type": "application/json" } });
+      if (url.endsWith("/api/internal/codex/guarded-queue")) {
+        const body = JSON.parse(String(init?.body));
+        assert.equal(body.method, "thread/queue/list");
+        assert.equal(body.expectedScope, "scope");
+        assert.deepEqual(body.params, { threadId: "thread", limit: 50, cursor: null });
+        return new Response(JSON.stringify({ data: [], nextCursor: null }));
+      }
+      throw new Error(`Unexpected fixture request ${url}`);
+    },
+    autoStart: false,
+  });
+  try {
+    const response = await app.inject({ url: "/api/session/followups?threadId=thread" });
+    assert.equal(response.statusCode, 200, response.body);
+    assert.deepEqual(response.json().items, []);
+    assert.equal(response.json().authority, "native");
+    assert.deepEqual(calls.filter((call) => call.includes("queue")), [
+      "POST /api/codex/thread/queue/list",
+      "POST /api/internal/codex/guarded-queue",
+    ]);
+  } finally {
+    await app.close();
+  }
+});
+
+test("a legacy runtime without operation context keeps the queue unavailable instead of rejected", async () => {
+  const app = Fastify();
+  registerSessionFollowupRoutes(app, {
+    origin: () => "http://fixture.invalid",
+    fetch: async (input) => {
+      const url = String(input);
+      if (url.endsWith("/api/internal/codex/operation-context"))
+        return new Response(JSON.stringify({
+          message: "Route GET:/api/internal/codex/operation-context not found",
+          error: "Not Found",
+          statusCode: 404,
+        }), { status: 404, headers: { "content-type": "application/json" } });
+      throw new Error(`Unexpected fixture request ${url}`);
+    },
+    autoStart: false,
+  });
+  try {
+    const response = await app.inject({ url: "/api/session/followups?threadId=thread" });
+    assert.equal(response.statusCode, 409);
+    assert.equal(response.json().code, "FOLLOWUP_READ_UNAVAILABLE");
+    assert.equal(response.json().items, undefined);
+    assert.doesNotMatch(response.body, /FOLLOWUP_REJECTED|items":\[\]/);
+  } finally {
+    await app.close();
+  }
+});
+
+test("a native queue 404 is not treated as a missing legacy route", async () => {
+  const app = Fastify();
+  const calls: string[] = [];
+  registerSessionFollowupRoutes(app, {
+    origin: () => "http://fixture.invalid",
+    fetch: async (input) => {
+      const url = String(input);
+      calls.push(new URL(url).pathname);
+      if (url.endsWith("/api/internal/codex/operation-context"))
+        return new Response(JSON.stringify({ scope: "scope", namespace: "ns" }));
+      if (url.endsWith("/api/codex/thread/queue/list"))
+        return new Response(JSON.stringify({ error: "thread is archived" }), {
+          status: 404,
+          headers: { "content-type": "application/json" },
+        });
+      throw new Error(`Unexpected fixture request ${url}`);
+    },
+    autoStart: false,
+  });
+  try {
+    const response = await app.inject({ url: "/api/session/followups?threadId=thread" });
+    assert.equal(response.statusCode, 409);
+    assert.equal(response.json().code, "FOLLOWUP_REJECTED");
+    assert.equal(response.json().error, "thread is archived");
+    assert.equal(calls.includes("/api/internal/codex/guarded-queue"), false);
+  } finally {
+    await app.close();
+  }
+});
+
 test("followup read failures stay explicit and never become an empty queue", async () => {
   for (const scenario of [
     {

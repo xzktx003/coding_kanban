@@ -51,6 +51,11 @@ import "./native-markdown.css";
 const math = createMathPlugin({ singleDollarTextMath: true });
 const referencePrefix = "#codex-file=";
 const MarkdownStreaming = createContext(false);
+// Definitions can resolve references in earlier blocks. Streamdown normally
+// parses blocks separately, so completed documents with definitions must be
+// parsed together once. Live streaming stays on its bounded incremental path.
+const parseReferenceDocument = (source: string) => [source];
+const hasReferenceDefinition = /(^|\n) {0,3}\[[^\]\n]+\]:/;
 const nativeCitationTags = {
   img: [
     "src",
@@ -280,15 +285,11 @@ export function CodexMarkdown({
             onOpen={(reference, captured) => {
               const root = captured.cwd
                 ? resolveLiteralFilePath(captured.cwd)
-                : null;
-              const path = reference.path.replace(/\\/g, "/");
-              const boundary = root?.replace(/\\/g, "/").replace(/\/+$/, "");
-              if (
-                !root ||
-                (path !== boundary &&
-                  !path.startsWith(boundary === "" ? "/" : boundary + "/"))
-              ) {
-                toast.error("引用文件不属于原会话项目，未打开其他项目文件");
+                : reference.path.startsWith("/")
+                  ? "/"
+                  : null;
+              if (!root) {
+                toast.error("无法确定文件所属会话目录");
                 return;
               }
               void openWorkspaceFileReference(reference, root, (target) => {
@@ -462,6 +463,11 @@ export function CodexMarkdown({
                   }}
                   shikiTheme={code.getThemes()}
                   mode={streaming ? "streaming" : "static"}
+                  parseMarkdownIntoBlocksFn={
+                    !streaming && hasReferenceDefinition.test(normalized)
+                      ? parseReferenceDocument
+                      : undefined
+                  }
                   isAnimating={streaming}
                   className="codex-markdown-blocks"
                   rehypePlugins={nativeRehypePlugins}

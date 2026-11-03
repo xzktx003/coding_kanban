@@ -90,15 +90,19 @@ export const nativeFenceHighlight = {
   highlight(
     { code, language }: { code: string; language: string },
     callback: (html: string) => void,
+    options?: { cache?: boolean },
   ): string | null {
+    const useCache = options?.cache !== false;
     // Check before key serialization, language loading, regexes or caching.
     const limit = language.trim()
       ? MAX_NAMED_FENCE_CHARS
       : MAX_AUTODETECT_FENCE_CHARS;
     if (code.length > limit) return escapeCode(code);
     const key = JSON.stringify([language, code]);
-    const cached = cache.get(key);
-    if (cached !== undefined) return cached;
+    if (useCache) {
+      const cached = cache.get(key);
+      if (cached !== undefined) return cached;
+    }
     highlighter ??= Promise.all([
       import("highlight.js"),
       import("./nativeTsrx.js"),
@@ -128,8 +132,10 @@ export const nativeFenceHighlight = {
                 : "plaintext",
             })
           : instance.highlightAuto(code, nativeLanguages);
-        cache.set(key, result.value);
-        cacheChars += key.length + result.value.length;
+        if (useCache) {
+          cache.set(key, result.value);
+          cacheChars += key.length + result.value.length;
+        }
         while (cache.size > 128 || cacheChars > 1_000_000) {
           const oldest = cache.keys().next().value;
           if (oldest === undefined) break;

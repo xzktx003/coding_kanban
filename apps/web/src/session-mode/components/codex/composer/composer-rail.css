@@ -1,4 +1,4 @@
-/* Codex 26.51007.21434 z8i/R8i attached, above placement. See the evidence note. */
+/* The rows follow the native rail; this application floats them over the transcript. */
 @property --session-queue-top-fade {
   syntax: "<length>";
   inherits: false;
@@ -22,63 +22,124 @@
   }
 }
 .session-mode .session-composer-rail {
-  --composer-rail-radius: 1rem;
-  --composer-rail-tuck: 4px;
-  position: relative;
+  position: absolute;
+  inset-inline: 13px;
+  bottom: calc(100% + 4px);
+  z-index: 20;
   display: flex;
   flex-direction: column;
   min-width: 0;
-  margin-inline: 13px;
-  overflow: clip;
-  padding-bottom: var(--composer-rail-radius);
-  margin-bottom: calc(
-    -1 * (var(--composer-rail-radius) + var(--composer-rail-tuck))
-  );
-  border-color: color-mix(
-    in oklab,
-    var(--codex-border, var(--border)) 80%,
-    transparent
-  );
-  border-start-start-radius: var(--composer-rail-radius);
-  border-start-end-radius: var(--composer-rail-radius);
+  max-height: min(200px, 28dvh);
+  gap: 3px;
+  pointer-events: none;
 }
-@supports (corner-shape: superellipse(1.5)) {
-  .session-mode .session-composer-rail {
-    --composer-rail-radius: 1.25rem;
-    corner-shape: superellipse(1.5);
-  }
-}
-.session-mode .session-composer-rail:not(:has([data-composer-rail-item])) {
+.session-mode .session-composer-rail:not(:has([data-composer-rail-item])):not(:has(.session-native-composer-status)) {
   display: none;
 }
-.session-mode .session-composer-rail::after {
-  content: "";
-  pointer-events: none;
-  position: absolute;
-  inset: 0;
-  border: 1px solid;
-  border-bottom: 0;
-  border-color: inherit;
-  border-radius: inherit;
-  corner-shape: inherit;
-  clip-path: inset(0 0 var(--composer-rail-radius));
+.session-mode .session-composer-rail-header {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  min-width: 0;
+  flex: 0 0 auto;
+}
+.session-mode .session-composer-rail-header:empty {
+  display: none;
+}
+.session-mode .session-composer-rail-summary {
+  pointer-events: auto;
+  color: var(--codex-text, var(--foreground));
+  background: color-mix(in srgb, var(--codex-secondary, var(--background)) 85%, transparent);
+  border: 1px solid color-mix(in srgb, var(--codex-border, var(--border)) 80%, transparent);
+  border-radius: 7px;
+  backdrop-filter: blur(3px);
+}
+.session-mode .session-composer-rail .session-composer-rail-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  flex-shrink: 0;
+  min-width: 26px;
+  min-height: 26px;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--codex-muted, var(--muted-foreground));
+  background: transparent;
+  font-size: 11px;
+  line-height: 1;
+  pointer-events: auto;
+}
+.session-mode .session-composer-rail .session-composer-rail-toggle svg {
+  width: 13px;
+  height: 13px;
+}
+.session-mode .session-composer-rail .session-composer-rail-toggle:hover,
+.session-mode .session-composer-rail .session-composer-rail-toggle:focus-visible {
+  color: var(--codex-text, var(--foreground));
+  background: color-mix(in srgb, var(--codex-text, var(--foreground)) 8%, transparent);
+}
+.session-mode .session-composer-rail .session-composer-rail-toggle:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+@media (pointer: coarse) {
+  .session-mode .session-composer-rail .session-composer-rail-toggle {
+    min-width: 40px;
+    min-height: 40px;
+  }
+}
+.session-mode .session-composer-rail-summary {
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 3px 7px;
+  font-size: 11px;
+}
+.session-mode .session-composer-rail .session-native-composer-status {
+  position: static;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  margin-left: auto;
+  overflow: visible;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  pointer-events: auto;
+  backdrop-filter: blur(3px);
+}
+.session-mode .session-composer-rail-content {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  border: 1px solid color-mix(in srgb, var(--codex-border, var(--border)) 80%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--codex-secondary, var(--background)) 84%, transparent);
+  backdrop-filter: blur(3px);
+  pointer-events: auto;
+}
+.session-mode .session-composer-rail-content[hidden],
+.session-mode .session-composer-rail-content:not(:has([data-composer-rail-item])) {
+  display: none;
 }
 .session-mode .session-composer-rail-item {
   position: relative;
   display: grid;
+  flex-shrink: 0;
   min-width: 0;
   overflow: clip;
   border-top: 1px solid
     color-mix(in oklab, var(--codex-border, var(--border)) 80%, transparent);
   border-inline: 1px solid transparent;
   color: var(--codex-text, var(--foreground));
-  background: var(--codex-secondary, var(--background));
+  background: transparent;
 }
 .session-mode .session-composer-rail-item:first-child {
   border-top-color: transparent;
-}
-.session-mode .session-composer-rail-item:last-child {
-  padding-bottom: var(--composer-rail-tuck);
 }
 .session-mode .session-composer-rail-item[data-composer-rail-item="exiting"] {
   pointer-events: none;
@@ -105,6 +166,14 @@
 .session-mode .session-composer-rail .session-thread-goal {
   border: 0;
   border-radius: 0;
+  background: transparent;
+}
+.session-mode .session-composer-rail .session-async-notice,
+.session-mode .session-composer-rail .session-followup-queue {
+  background: transparent;
+}
+.session-mode .session-composer-rail .session-native-queue-settings {
+  padding: 6px 12px;
 }
 .session-mode
   .session-native-composer
@@ -339,33 +408,11 @@
   margin: 0;
 }
 
-/* The approved phone layout keeps the bounded floating shelf above the fixed
-   composer. Desktop and narrow desktop panes use the attached in-flow rail. */
+/* Keep the same floating treatment in the smaller phone viewport. */
 @media (max-width: 767px) {
   .session-mode .session-composer-rail {
-    position: absolute;
-    inset-inline: 0;
-    bottom: 100%;
-    z-index: 20;
     max-height: min(160px, 25dvh);
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    scrollbar-width: thin;
-    gap: 4px;
-    padding: 0;
-    margin: 0;
-    border-radius: 0;
-  }
-  .session-mode .session-composer-rail::after {
-    content: none;
-  }
-  .session-mode .session-composer-rail-item {
-    flex-shrink: 0;
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 0;
-    background: color-mix(in oklab, var(--background) 78%, transparent);
-    backdrop-filter: blur(3px);
+    inset-inline: 4px;
   }
   .session-mode .session-composer-rail .codex-running-changes-target,
   .session-mode .session-composer-rail .codex-running-changes-review {

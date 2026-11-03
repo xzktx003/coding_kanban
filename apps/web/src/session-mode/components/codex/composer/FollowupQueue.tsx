@@ -145,6 +145,12 @@ export function FollowupQueueContent({
     setEditing(null);
     setExpanded(false);
   }, [threadId]);
+  useEffect(() => {
+    if (!railPresent) {
+      setConfirm(null);
+      setExpanded(false);
+    }
+  }, [railPresent]);
   const items = state.items.filter(
     (m) => m.status !== "sent" && m.status !== "cancelled",
   );
@@ -465,7 +471,7 @@ export function FollowupQueueContent({
                   <Trash2 size={15} />
                 )}
               </Button>
-              <DropdownMenu>
+              <DropdownMenu key={railPresent ? "present" : "hidden"}>
                 <DropdownMenuTrigger asChild>
                   <Button
                     type="button"

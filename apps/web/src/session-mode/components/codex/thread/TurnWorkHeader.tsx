@@ -30,10 +30,12 @@ export function TurnWorkHeader({
   work,
   onToggle,
   retryNotice,
+  hasLiveMessage = false,
 }: {
   work: TurnWork;
   onToggle(): void;
   retryNotice?: string;
+  hasLiveMessage?: boolean;
 }) {
   const { i18n, t } = useTranslation("thread");
   const [, tick] = useState(0);
@@ -62,6 +64,18 @@ export function TurnWorkHeader({
         role={work.running ? "status" : undefined}
       >
         {label}
+        {work.running &&
+          work.startedAtMs !== null &&
+          Number.isFinite(work.startedAtMs) &&
+          work.startedAtMs >= 0 &&
+          elapsed !== null &&
+          elapsed >= 30_000 &&
+          !hasLiveMessage &&
+          !retryNotice && (
+            <span className="codex-turn-waiting-notice">
+              {t("waitingForOutput")}
+            </span>
+          )}
         {work.running && retryNotice && (
           <span className="text-yellow-600 dark:text-yellow-400">
             {" "}

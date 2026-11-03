@@ -482,6 +482,21 @@ test("runtime manifest and missing dependencies are checked only for the default
   );
 });
 
+test("an explicit gateway reload requests replacement without signaling the session runtime", async () => {
+  const { EventEmitter } = await import("node:events");
+  const { createGatewayReloadControl } = await import("./watch-server.mjs");
+  const processLike = new EventEmitter();
+  let requested = 0;
+  const stop = createGatewayReloadControl(processLike, () => {
+    requested++;
+  });
+  processLike.emit("SIGUSR2");
+  assert.equal(requested, 1);
+  stop();
+  processLike.emit("SIGUSR2");
+  assert.equal(requested, 1);
+});
+
 for (const code of ["EMFILE", "ENOSPC"])
   test(`watch quota ${code} preserves recursive changes and closes its polling timer`, async () => {
     const { watchWithQuotaFallback } = await import("./watch-server.mjs");

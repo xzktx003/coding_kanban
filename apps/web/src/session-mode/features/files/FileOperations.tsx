@@ -50,11 +50,20 @@ const isInsideRoot = (root: string, path: string) =>
   path === root || path.startsWith(root.replace(/\/$/, "") + "/");
 const relativePath = (root: string, path: string) => {
   const base = root.replace(/\/+$/, "");
-  return path.replace(/\/+$/, "") === base
-    ? "."
-    : path.startsWith(base + "/")
-      ? path.slice(base.length + 1)
-      : path;
+  if (!root.startsWith("/") || !path.startsWith("/")) return path;
+  const left = base.split("/").filter(Boolean),
+    right = path.split("/").filter(Boolean);
+  let common = 0;
+  while (
+    common < left.length &&
+    common < right.length &&
+    left[common] === right[common]
+  )
+    common++;
+  return (
+    [...left.slice(common).map(() => ".."), ...right.slice(common)].join("/") ||
+    "."
+  );
 };
 export const refreshFiles = (root: string) =>
   window.dispatchEvent(
@@ -62,11 +71,13 @@ export const refreshFiles = (root: string) =>
   );
 export function FileOperations({
   root,
+  displayRoot,
   target,
   action,
   onAction,
 }: {
   root: string | null;
+  displayRoot?: string;
   target?: FileOperationSelection | null;
   action: FileOperationTarget | null;
   onAction: (a: FileOperationTarget | null) => void;
@@ -127,12 +138,12 @@ export function FileOperations({
         ? name(action.path)
         : "",
     );
-    setDestination(action.root);
+    setDestination(action.root === "/" ? parent(action.path) : action.root);
     if (action.type === "copy-path" || action.type === "copy-relative") {
       const text =
         action.type === "copy-path"
           ? action.path
-          : relativePath(action.root, action.path);
+          : relativePath(displayRoot ?? action.root, action.path);
       void copyPath(text);
       onAction(null);
     } else if (action.type === "download") {
@@ -443,7 +454,8 @@ export function FileOperations({
           aria-label="复制相对路径"
           title="复制相对路径"
           onClick={() =>
-            root && void copyPath(relativePath(root, operationPath))
+            root &&
+            void copyPath(relativePath(displayRoot ?? root, operationPath))
           }
         >
           <Copy size={16} />
@@ -531,7 +543,9 @@ export function FileOperations({
               ? " 将移入应用回收站，可恢复。"
               : action?.type === "purge"
                 ? " 将永久删除，无法恢复。"
-                : " 操作范围限定在该项目内。"}
+                : action?.root === "/"
+                  ? " 操作作用于此本机路径。"
+                  : " 操作范围限定在该项目内。"}
           </DialogDescription>
           {action?.type === "move" && (
             <label className="text-sm">

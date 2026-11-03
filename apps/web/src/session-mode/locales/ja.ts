@@ -459,6 +459,8 @@ export const ja = {
     workingFor: "処理中 {{time}}",
     workedFor: "所要時間 {{time}}",
     workActivity: "作業履歴",
+    waitingForOutput:
+      "このターンの処理や応答はまだ表示されていません。処理中か、接続が遅延している可能性があります。",
     readFiles_other: "{{count}} 件のファイルを読み込み",
     ranCommands_other: "{{count}} 件のコマンドを実行",
     listedFolders_other: "{{count}} 件のフォルダーを一覧表示",

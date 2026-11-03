@@ -138,7 +138,11 @@ export function useFileTree(folder: string): UseFileTreeReturn {
 
   useEffect(() => {
     const refresh = (event: Event) => {
-      if ((event as CustomEvent<{ root: string }>).detail?.root === folder)
+      const changedRoot = (event as CustomEvent<{ root: string }>).detail?.root;
+      if (
+        changedRoot === folder ||
+        (changedRoot === "/" && folder.startsWith("/"))
+      )
         setRefreshKey((key) => key + 1);
     };
     window.addEventListener("workspace-files-changed", refresh);

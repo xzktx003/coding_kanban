@@ -31,7 +31,7 @@ export async function createBridgeAuthorization({
   service,
   control,
   signal,
-  timeoutMs = 15000,
+  timeoutMs = 45000,
 }) {
   const scope = validateNativeScope({
     domain: service?.record?.domain,

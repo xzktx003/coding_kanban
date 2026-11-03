@@ -238,7 +238,7 @@ export class Ownership {
     });
   }
 
-  async call(method: string, params: Json, options?: { signal?: AbortSignal; beforeSend?: () => void }): Promise<Json> {
+  async call(method: string, params: Json, options?: { signal?: AbortSignal; beforeSend?: () => void; timeoutMs?: number }): Promise<Json> {
     const id = typeof object(params).threadId === "string" ? object(params).threadId as string : undefined;
     if (method === "thread/unsubscribe") {
       if (!id) throw new Error("threadId required");
@@ -277,6 +277,11 @@ export class Ownership {
         entry.state = "readonly"; entry.releasingSince = undefined;
       }
       const loaded = method === "thread/resume" || await this.isLoadedForAcquire(id, goalSignal);
+      if (!loaded && entry.state === "external") {
+        entry.state = "readonly";
+        entry.reason = "";
+        entry.releasingSince = undefined;
+      }
       // A permission read before the keyed lock can be stale while waiting for
       // another operation or for native unload. Re-read metadata, not history,
       // after those waits and before acquiring or dispatching any direct input.
@@ -396,7 +401,15 @@ export class Ownership {
     if (this.locks.busy(id)) return;
     await this.locks.run(id, async () => {
       const entry = this.entry(id);
-      if (!["readonly", "external"].includes(entry.state)) await this.tryRelease(id, entry);
+      if (entry.state === "external") {
+        if (!(await loadedIds(this.raw)).has(id)) {
+          entry.state = "readonly";
+          entry.reason = "";
+          entry.releasingSince = undefined;
+        }
+        return;
+      }
+      if (entry.state !== "readonly") await this.tryRelease(id, entry);
     });
   }
   private async tryRelease(id: string, entry: Entry): Promise<void> {

@@ -13,15 +13,54 @@ export interface TrashEntry {
   root: string;
   deletedAt: string;
 }
+const fileEndpoint = (root: string) =>
+  root === "/" ? "/local-files/" : "/workspace-files/";
 export const workspaceFileRequest = <T>(action: string, body: unknown) =>
-  postJsonWithOptions<T>("/workspace-files/" + action, body, {
-    suppressToast: true,
-  });
-export const resolveWorkspaceFileReference = (root: string, path: string) =>
-  workspaceFileRequest<{ root: string; path: string }>("resolve", {
-    root,
-    path,
-  });
+  postJsonWithOptions<T>(
+    fileEndpoint((body as { root?: string })?.root ?? "") + action,
+    body,
+    {
+      suppressToast: true,
+    },
+  );
+export const resolveWorkspaceFileReference = async (
+  root: string,
+  path: string,
+) => {
+  const body = { root, path };
+  const inside =
+    path === root || path.startsWith(root.replace(/\/+$/, "") + "/");
+  if (
+    root === "/" ||
+    (path.startsWith("/") && !inside) ||
+    path.split("/").includes("..")
+  )
+    return postJsonWithOptions<{ root: string; path: string }>(
+      "/local-files/resolve",
+      body,
+      { suppressToast: true },
+    );
+  try {
+    return await workspaceFileRequest<{ root: string; path: string }>(
+      "resolve",
+      body,
+    );
+  } catch (error) {
+    // The original project may contain a symlink to an unregistered directory.
+    if (
+      typeof error !== "object" ||
+      !error ||
+      !("status" in error) ||
+      error.status !== 403
+    )
+      throw error;
+    return postJsonWithOptions<{ root: string; path: string }>(
+      "/local-files/resolve",
+      body,
+      { suppressToast: true },
+    );
+  }
+};
 export const readWorkspaceVisualization = (root: string, path: string) =>
   workspaceFileRequest<TextSnapshot>("visualization", { root, path });
 export const readWorkspaceText = (root: string, path: string) =>
@@ -109,7 +148,7 @@ export async function uploadWorkspaceFile(
     xhr.onabort = () =>
       finishReject(new DOMException("上传已取消", "AbortError"));
     try {
-      xhr.open("POST", buildUrl("/workspace-files/upload"));
+      xhr.open("POST", buildUrl(fileEndpoint(root) + "upload"));
       for (const [key, value] of Object.entries(authHeaders()))
         xhr.setRequestHeader(key, value);
       xhr.send(data);
@@ -125,7 +164,7 @@ export async function downloadWorkspaceFile(root: string, path: string) {
   );
   const params = new URLSearchParams({ root, path: info.path });
   const a = document.createElement("a");
-  a.href = buildEventUrl("/workspace-files/download?" + params.toString());
+  a.href = buildEventUrl(fileEndpoint(root) + "download?" + params.toString());
   a.download = info.filename || path.split("/").pop() || "download";
   a.target = "_blank";
   a.rel = "noopener";

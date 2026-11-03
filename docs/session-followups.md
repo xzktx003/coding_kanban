@@ -91,3 +91,9 @@ queue 入队后等待会话空闲；运行中的即时追加使用「立即引�
 ## 2026-10-30：归档会话只读状态不可用
 
 原生 daemon 对 archived thread 的 `thread/queue/list` 返回 JSON-RPC `-32600`，而 `thread/goal/get` 返回同码 `thread not found`，没有专用 archived code/data。网关不得把这类读取错误当成空队列或空 Goal；followups 只读失败使用稳定的 `FOLLOWUP_READ_UNAVAILABLE`，保留浏览器已有队列并记录读取错误。goal/get 仅对精确 `RpcError(-32600)` 映射为 `NATIVE_READ_UNAVAILABLE`，不推断 thread 一定 archived。所有上游 5xx 保持未知错误，不得变成确定失败或 `not-admitted`。
+
+## 2026-10-31：旧运行层缺少公开队列路由
+
+健康检查明确是旧运行层时，网关直接使用旧文件队列，不访问公开 `thread/queue/list`。协议选择和发送边界见 [发送兼容](session-legacy-send-compatibility.md)。
+
+只有已经选中官方队列适配器、而该运行层又缺少公开 `POST /api/codex/thread/queue/list` 时，网关才在 Fastify 返回精确的路由不存在正文后，改用已有内部 guarded raw call 做同范围只读。普通 404、方法拒绝和 5xx 仍保持原错误，不解释成空队列，也不因此改走旧写入。若同一读取缺少 operation-context，只读队列返回 `FOLLOWUP_READ_UNAVAILABLE`，不能包装成 `FOLLOWUP_REJECTED` 或空队列。此兼容不提交、重放或恢复任务，也不替换活跃运行层。

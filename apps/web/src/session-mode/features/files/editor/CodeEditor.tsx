@@ -1,4 +1,7 @@
 import { listenInSessionMode } from "@session/session-dom";
+import { activeDraftOwner } from "@session/stores/useInputStore";
+import { composerDrafts } from "@session/components/codex/composer/v2/drafts";
+import { isCodexDraftOwner, type AnnotatedContext } from "@session/components/codex/composer/v2/selectionAnnotations";
 import {
   ChevronDown,
   ChevronUp,
@@ -61,7 +64,8 @@ interface CodeEditorProps {
   onSendToAI?: (
     selectedText: string,
     range?: { start: number; end: number },
-  ) => void;
+    annotation?: string,
+  ) => { owner: string; id: string } | void;
   onAddToTodo?: (selectedText: string) => void;
   className?: string;
 }
@@ -135,8 +139,83 @@ export function CodeEditor({
     position: { x: number; y: number };
     range?: { start: number; end: number };
   } | null>(null);
+  const [selectionCommentOpen, setSelectionCommentOpen] = useState(false);
+  const [selectionComment, setSelectionComment] = useState("");
+  const [selectionCommentTarget, setSelectionCommentTarget] = useState<{
+    owner: string;
+    id: string;
+  } | null>(null);
+  const selectionCommentOwner = useRef<string | null>(null);
+  const selectionCommentSource = useRef<string | null>(null);
+  const [selectionCommentError, setSelectionCommentError] = useState("");
+  useEffect(() => {
+    if (!selection) {
+      setSelectionCommentOpen(false);
+      setSelectionComment("");
+      setSelectionCommentTarget(null);
+      setSelectionCommentError("");
+      selectionCommentOwner.current = null;
+      selectionCommentSource.current = null;
+    } else if (
+      selectionCommentOpen &&
+      selectionCommentSource.current !==
+        JSON.stringify([selection.text, selection.range])
+    ) {
+      // A new editor selection must not edit the earlier selection's comment.
+      setSelectionCommentOpen(false);
+      setSelectionCommentTarget(null);
+    }
+  }, [selection, selectionCommentOpen]);
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const searchMarkerRef = useRef<any>(null);
+
+  function beginSelectionComment() {
+    if (!selection || !onSendToAI) return;
+    const owner = activeDraftOwner();
+    const codex = isCodexDraftOwner(owner);
+    const target = codex ? onSendToAI(selection.text, selection.range) : undefined;
+    if (codex && !target) return;
+    selectionCommentOwner.current = owner;
+    selectionCommentSource.current = JSON.stringify([selection.text, selection.range]);
+    setSelectionCommentTarget(target || null);
+    setSelectionComment("");
+    setSelectionCommentError("");
+    setSelectionCommentOpen(true);
+  }
+
+  function updateSelectionComment(value: string) {
+    setSelectionComment(value);
+    if (!selectionCommentTarget) return;
+    const context = composerDrafts
+      .read(selectionCommentTarget.owner)
+      .contexts.find((item) => item.id === selectionCommentTarget.id);
+    if (context)
+      composerDrafts.replace(selectionCommentTarget.owner, context.id, {
+        ...context,
+        annotation: value,
+      } as AnnotatedContext);
+    else setSelectionCommentError("该选区已从草稿移除，请重新选择。");
+  }
+
+  function finishSelectionComment() {
+    if (!selection || !onSendToAI) return;
+    if (!selectionCommentTarget && selectionCommentOwner.current !== activeDraftOwner()) {
+      setSelectionCommentError("输入目标已改变，请切回原会话后再添加。");
+      return;
+    }
+    if (
+      selectionCommentTarget &&
+      !composerDrafts.read(selectionCommentTarget.owner).contexts.some(
+        (item) => item.id === selectionCommentTarget.id,
+      )
+    ) {
+      setSelectionCommentError("该选区已从草稿移除，请重新选择。");
+      return;
+    }
+    if (!selectionCommentTarget)
+      onSendToAI(selection.text, selection.range, selectionComment);
+    setSelection(null);
+  }
 
   // Zustand stores
   const { resolvedTheme } = useThemeContext();
@@ -694,11 +773,54 @@ export function CodeEditor({
                   : "bg-white border-gray-200"
               }`}
               style={{
-                left: selection.position.x,
-                top: selection.position.y,
-                transform: "translateX(-50%)",
+                left: selectionCommentOpen
+                  ? `clamp(8px, ${selection.position.x - 147}px, max(8px, calc(100% - 302px)))`
+                  : selection.position.x,
+                top: selectionCommentOpen
+                  ? `clamp(8px, ${selection.position.y}px, max(8px, calc(100% - 160px)))`
+                  : selection.position.y,
+                width: selectionCommentOpen
+                  ? "min(294px, calc(100% - 16px))"
+                  : undefined,
+                transform: selectionCommentOpen ? "none" : "translateX(-50%)",
+              }}
+              onMouseDown={(event) => {
+                if ((event.target as Element).closest("button"))
+                  event.preventDefault();
               }}
             >
+              {selectionCommentOpen && onSendToAI ? (
+                <div className="session-file-selection-comment">
+                  <textarea
+                    autoFocus
+                    aria-label="代码选区评论"
+                    placeholder="添加可选评论…"
+                    maxLength={10000}
+                    value={selectionComment}
+                    onChange={(event) => updateSelectionComment(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") {
+                        event.stopPropagation();
+                        setSelection(null);
+                      }
+                    }}
+                  />
+                  {selectionCommentError && (
+                    <span role="alert">{selectionCommentError}</span>
+                  )}
+                  <div>
+                    <button type="button" onClick={() => {
+                      if (selectionCommentTarget)
+                        composerDrafts.remove(selectionCommentTarget.owner, selectionCommentTarget.id);
+                      setSelectionCommentTarget(null);
+                      setSelectionCommentOpen(false);
+                    }}>取消</button>
+                    <button type="button" onClick={finishSelectionComment}>
+                      添加到对话
+                    </button>
+                  </div>
+                </div>
+              ) : <>
               {onSendToAI && (
                 <Button
                   variant="ghost"
@@ -707,12 +829,16 @@ export function CodeEditor({
                     onSendToAI(selection.text, selection.range);
                     setSelection(null);
                   }}
-                  className="size-8 p-1"
+                  className="h-8 px-2 gap-1"
                   title="将代码选区加入当前会话"
                   aria-label="将代码选区加入当前会话"
                 >
                   <Send className="w-4 h-4" />
+                  添加到对话
                 </Button>
+              )}
+              {onSendToAI && (
+                <button type="button" className="session-file-selection-comment-action" onClick={beginSelectionComment}>评论</button>
               )}
               {onAddToTodo && (
                 <Button
@@ -729,6 +855,7 @@ export function CodeEditor({
                   <FileText className="w-4 h-4" />
                 </Button>
               )}
+              </>}
             </div>
           )}
 

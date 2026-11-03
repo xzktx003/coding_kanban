@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 import { useEffect, useRef, useState } from "react";
 import { commandDurationLabel } from "../presentation/nativeCommand";
 import { CodexMarkdown } from "../presentation/CodexMarkdown";
+import { LiveMarkdownTail } from "../presentation/liveMarkdownTail";
 import { NativeCadencedShimmer } from "../presentation/NativeCadencedShimmer";
 import { nativePublicReasoning } from "../presentation/nativeToolSemantics";
 import { NativeToolDisclosure } from "./NativeToolDisclosure";
@@ -51,7 +52,7 @@ export function ReasoningSummaryItem({
         </span>
         {value && (
           <div className="codex-summary-body">
-            <CodexMarkdown value={value} streaming />
+            <LiveMarkdownTail value={value} />
           </div>
         )}
       </div>

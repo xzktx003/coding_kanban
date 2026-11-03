@@ -213,7 +213,8 @@ export class LocalTmuxInputRouter {
     // waiting. Prefix/prompt control still waits for the attached client,
     // because send-keys would deliver those bytes to the pane application.
     if (ptyAvailable && !ptyReady && !requiresAttachedClient) {
-      return this.writeThroughAdapter(agentSession, input);
+      await ptyRuntimeManager.write(agentSession.id, input.input);
+      return registry.get(agentSession.id);
     }
 
     const prefixCommandInput = input.input.slice(0, 1);

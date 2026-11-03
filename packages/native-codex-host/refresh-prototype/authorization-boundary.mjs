@@ -72,7 +72,7 @@ export function createNativeAuthorizationTracker({
       if (!binding) throw Error("native authorization binding unavailable");
       return binding;
     },
-    async bind(client, { timeoutMs = 15000 } = {}) {
+    async bind(client, { timeoutMs = 45000 } = {}) {
       if (
         started ||
         typeof client?.request !== "function" ||
@@ -85,7 +85,11 @@ export function createNativeAuthorizationTracker({
       try {
         assertValid();
         const first = nativeAuthorizationIdentity(
-          await client.request("account/read", { refreshToken: false }),
+          await client.request(
+            "account/read",
+            { refreshToken: false },
+            { timeoutMs },
+          ),
           { domain, generation },
         );
         assertValid();
@@ -113,7 +117,11 @@ export function createNativeAuthorizationTracker({
         assertValid();
         const before = revision;
         const confirmed = nativeAuthorizationIdentity(
-          await client.request("account/read", { refreshToken: false }),
+          await client.request(
+            "account/read",
+            { refreshToken: false },
+            { timeoutMs },
+          ),
           { domain, generation },
         );
         assertValid();
@@ -123,11 +131,22 @@ export function createNativeAuthorizationTracker({
         binding = validateAuthorizationBinding(confirmed);
         return binding;
       } catch (error) {
+        if (workspaceRoutingDiscoveryTimedOut(error)) {
+          started = false;
+          throw error;
+        }
         invalidate();
         throw error;
       }
     },
   };
+}
+
+export function workspaceRoutingDiscoveryTimedOut(error) {
+  return (
+    error?.code === -32603 &&
+    error?.nativeMessage === "workspace routing discovery timed out"
+  );
 }
 
 /** Hash native authority metadata only; never retain the response or credentials. */

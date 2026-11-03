@@ -1,5 +1,6 @@
-import { forwardRef } from "react";
+import { forwardRef, useEffect } from "react";
 import { useCodexStore } from "@session/components/codex/stores";
+import { useConfigStore } from "@session/components/codex/stores/useConfigStore";
 import { useThreadModelSettings } from "@session/hooks/useThreadModelSettings";
 import { Button } from "@session/components/ui/button";
 import { NativeComposerIcon } from "./NativeComposerIcon";
@@ -8,7 +9,10 @@ import { ComposerFooterLabel } from "./ComposerToolbarContext";
 import { useModels } from "../hooks/useModels";
 import { useOrdinaryNativePickerModels } from "./ordinaryNativePickerModels";
 import { nativeReasoningLabel } from "./nativeReasoningLabel";
-import { canonicalNativeModel } from "./nativeModelIdentity";
+import {
+  canonicalNativeModel,
+  nextEffortForNativeRecord,
+} from "./nativeModelIdentity";
 import {
   NATIVE_UNKNOWN_REASONING_OPTIONS,
   nativeDisplayReasoningEffort,
@@ -44,6 +48,28 @@ export const NativeModelTrigger = forwardRef<
   const { model, modelProvider, reasoningEffort } =
     useThreadModelSettings(threadId);
   const { providerItems, openAiModels, modelStatus } = useModels();
+  useEffect(() => {
+    if (threadId !== null || modelStatus !== "success") return;
+    const state = useConfigStore.getState();
+    if (
+      state.modelProvider !== "openai" ||
+      state.model ||
+      state.providerModels.openai
+    )
+      return;
+    const fallback =
+      openAiModels?.find((item) => item.isDefault) ?? openAiModels?.[0];
+    if (!fallback?.model) return;
+    // Automatic initialization is not a user choice: don't persist over a
+    // different page's selection while its storage event is still in flight.
+    useConfigStore.setState({
+      model: fallback.model,
+      providerModels: { ...state.providerModels, openai: fallback.model },
+      reasoningEffort:
+        nextEffortForNativeRecord(fallback, state.reasoningEffort) ??
+        state.reasoningEffort,
+    });
+  }, [threadId, modelStatus, openAiModels, model, modelProvider]);
   const pickerModels = useOrdinaryNativePickerModels(
     openAiModels,
     modelProvider === "openai",
@@ -72,11 +98,11 @@ export const NativeModelTrigger = forwardRef<
       ? nativeDisplayReasoningEffort(reasoningEffort, options)
       : reasoningEffort;
   const label =
-    (modelProvider === "openai"
+    ((modelProvider === "openai"
       ? catalog?.displayName || catalog?.model
       : providerItems(modelProvider).find((item) => item.id === model)
           ?.label) ??
-    model ??
+      model) ||
     "选择模型";
   const effort = displayedEffort || "默认";
   const enhancedTrigger =

@@ -14,6 +14,20 @@ import { ComposerSheet } from "./ComposerSheet";
 import { offerUndo } from "./UndoNotice";
 import { readWithDeadline } from "@session/services/sessionReadQueue";
 import { refreshedProjectContext } from "@session/features/files/contextReferenceUpdate";
+import type { AnnotatedContext } from "./selectionAnnotations";
+
+function describeContext(context: ComposerContext): string {
+  const description = context.range
+    ? `L${context.range.start}–${context.range.end}`
+    : context.kind === "paste"
+      ? `${context.text.split(/\r?\n/).length} 行 · 完整内容`
+      : context.kind === "quote"
+        ? "回答引用"
+        : context.sourceKind === "directory" ? "目录引用" : "文件快照";
+  return (context as AnnotatedContext).annotation?.trim()
+    ? `${description} · 已评论`
+    : description;
+}
 
 async function readContextFile(path: string) {
   try {
@@ -103,6 +117,21 @@ export function ContextAttachments({
         {c.range && ` · L${c.range.start}–${c.range.end}`}
       </div>
       <pre className="session-context-preview">{c.text}</pre>
+      {(c.kind === "quote" || (c.kind === "file" && (c.range || (c as AnnotatedContext).annotation))) && (
+        <label className="session-context-annotation">
+          <span>评论</span>
+          <textarea
+            aria-label="给所选内容添加评论"
+            placeholder="添加可选评论…"
+            maxLength={10000}
+            value={(c as AnnotatedContext).annotation ?? ""}
+            onChange={(event) => composerDrafts.replace(owner, c.id, {
+              ...c,
+              annotation: event.target.value,
+            } as AnnotatedContext)}
+          />
+        </label>
+      )}
       <div className="session-context-actions">
         <button type="button" onClick={() => remove(c)}>
           移除
@@ -135,8 +164,14 @@ export function ContextAttachments({
           <button
             type="button"
             onClick={() => {
+              const current = composerDrafts.read(owner).contexts.find((entry) => entry.id === c.id);
+              if (!current) return;
+              const refreshed = changed[c.id];
               const next = {
-                ...changed[c.id],
+                ...current,
+                text: refreshed.text,
+                sourceKind: refreshed.sourceKind,
+                version: refreshed.version,
                 id: newSessionEditId(),
               };
               composerDrafts.replace(owner, c.id, next);
@@ -205,20 +240,14 @@ export function ContextAttachments({
             <div className="session-context-chip" key={c.id}>
               <button
                 type="button"
-                aria-label={`查看上下文 ${c.name} ${c.range ? `L${c.range.start}–${c.range.end}` : c.kind === "paste" ? `${c.text.split(/\r?\n/).length} 行 · 完整内容` : c.kind === "quote" ? "回答引用" : c.sourceKind === "directory" ? "目录引用" : "文件快照"}`}
+                aria-label={`查看上下文 ${c.name} ${describeContext(c)}`}
                 onClick={() => setPanel(c.id)}
               >
                 {c.kind === "quote" ? <Quote /> : c.sourceKind === "directory" ? <Folder /> : <FileText />}
                 <span>
                   <strong>{c.name}</strong>
                   <small>
-                    {c.range
-                      ? `L${c.range.start}–${c.range.end}`
-                      : c.kind === "paste"
-                        ? `${c.text.split(/\r?\n/).length} 行 · 完整内容`
-                        : c.kind === "quote"
-                          ? "回答引用"
-                          : c.sourceKind === "directory" ? "目录引用" : "文件快照"}
+                    {describeContext(c)}
                   </small>
                 </span>
               </button>
@@ -303,7 +332,7 @@ export function ContextAttachments({
                 <section key={c.id}>
                   <button
                     type="button"
-                    aria-label={`查看上下文 ${c.name} ${c.range ? `L${c.range.start}–${c.range.end}` : c.kind === "paste" ? `${c.text.split(/\r?\n/).length} 行 · 完整内容` : c.kind === "quote" ? "回答引用" : c.sourceKind === "directory" ? "目录引用" : "文件快照"}`}
+                    aria-label={`查看上下文 ${c.name} ${describeContext(c)}`}
                     onClick={() => setPanel(c.id)}
                   >
                     <FileText />

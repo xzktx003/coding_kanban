@@ -43,7 +43,7 @@ it("times out a stalled remote context read, aborts it and ignores its late resu
   }
 });
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { ContextAttachments } from "./ContextAttachments";
 import type { useImageAttachments } from "@session/components/common/useImageAttachments";
 vi.mock("./ComposerSheet",()=>({ComposerSheet:({children}:{children:import("react").ReactNode})=><section role="dialog">{children}</section>}));
@@ -58,4 +58,49 @@ it.each(["ready","uploading"] as const)("the selected image preview exposes anno
   fireEvent.click(button);
   if(status==="ready"){expect(annotate).toHaveBeenCalledExactlyOnceWith(item);expect(screen.queryByRole("dialog")).toBeNull();}
   else expect(annotate).not.toHaveBeenCalled();
+});
+
+it("shows and updates the comment for a selected file context", () => {
+  const owner = "commented-file-owner";
+  composerDrafts.add(owner, {
+    id: "file-comment",
+    kind: "file",
+    name: "example.ts",
+    path: "/project/example.ts",
+    text: "const value = 1;",
+    range: { start: 2, end: 2 },
+    annotation: "解释这行",
+  } as import("./selectionAnnotations").AnnotatedContext);
+  const images = { attachments: [], removeUndoable: vi.fn(), retry: vi.fn() } as unknown as ReturnType<typeof useImageAttachments>;
+  render(<ContextAttachments owner={owner} images={images} onAnnotate={vi.fn()} onRestore={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: /查看上下文 example.ts L2–2 · 已评论/ }));
+  const note = screen.getByRole("textbox", { name: "给所选内容添加评论" }) as HTMLTextAreaElement;
+  expect(note.value).toBe("解释这行");
+  fireEvent.change(note, { target: { value: "检查边界" } });
+  expect((composerDrafts.read(owner).contexts[0] as import("./selectionAnnotations").AnnotatedContext).annotation).toBe("检查边界");
+});
+
+it("retains a later comment when applying a previously checked file update", async () => {
+  const owner = "file-update-with-comment";
+  composerDrafts.add(owner, {
+    id: "checked-file",
+    kind: "file",
+    name: "example.ts",
+    path: "/project/example.ts",
+    text: "const value = 1;",
+    range: { start: 2, end: 2 },
+    annotation: "原评论",
+  } as import("./selectionAnnotations").AnnotatedContext);
+  vi.mocked(readTextFile).mockResolvedValueOnce("first line\nconst value = 2;");
+  const images = { attachments: [], removeUndoable: vi.fn(), retry: vi.fn() } as unknown as ReturnType<typeof useImageAttachments>;
+  render(<ContextAttachments owner={owner} images={images} onAnnotate={vi.fn()} onRestore={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: /查看上下文 example.ts/ }));
+  fireEvent.click(screen.getByRole("button", { name: "检查源文件更新" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "更新为最新内容" })).toBeTruthy());
+  fireEvent.change(screen.getByRole("textbox", { name: "给所选内容添加评论" }), { target: { value: "修改后的评论" } });
+  fireEvent.click(screen.getByRole("button", { name: "更新为最新内容" }));
+  expect(composerDrafts.read(owner).contexts[0]).toMatchObject({
+    text: "const value = 2;",
+    annotation: "修改后的评论",
+  });
 });

@@ -35,7 +35,6 @@ import type {
 } from "@session/bindings/v2";
 import {
   useCodexStore,
-  useConfigStore,
   useThreadListStore,
 } from "@session/components/codex/stores";
 import { RenameThreadDialog } from "@session/components/codex/thread/RenameThreadDialog";
@@ -159,7 +158,6 @@ export const ThreadList = memo(function ThreadList({ cwd }: ThreadListProps) {
   const pinnedIds = usePinStore((s) => s.pinned);
   const pinWrites = useRef(new Set<string>());
   const [pinRevision, setPinRevision] = useState(0);
-  const modelProvider = useConfigStore((s) => s.modelProvider);
   const [response, setResponse] = useState<ThreadListResponse>(EMPTY_LIST);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -186,7 +184,7 @@ export const ThreadList = memo(function ThreadList({ cwd }: ThreadListProps) {
 
   useEffect(() => {
     setResponse(EMPTY_LIST);
-  }, [cwd, modelProvider]);
+  }, [cwd]);
 
   // A freshly started thread is not in the state DB yet, so the backend list
   // does not return it. Merge in live threads from the store so it shows up
@@ -198,18 +196,14 @@ export const ThreadList = memo(function ThreadList({ cwd }: ThreadListProps) {
         !childNodes[t.id] &&
         !subagentParent(t) &&
         t.cwd === cwd &&
-        t.modelProvider === modelProvider &&
         !seen.has(t.id),
     );
     if (live.length === 0) return response.data;
     const key = sortKey === "created_at" ? "createdAt" : "updatedAt";
     return [...live, ...response.data].sort((a, b) => b[key] - a[key]);
-  }, [response.data, storeThreads, cwd, modelProvider, sortKey, childNodes]);
+  }, [response.data, storeThreads, cwd, sortKey, childNodes]);
 
   // --- Thread loading (search + sort delegated to backend) ---
-
-  // Only show threads of the provider currently selected in the composer.
-  const providerFilter = useMemo(() => [modelProvider], [modelProvider]);
 
   // Keep however many threads are already visible when the list reloads
   // (select / delete / archive / fork) instead of collapsing back to one page.
@@ -225,7 +219,7 @@ export const ThreadList = memo(function ThreadList({ cwd }: ThreadListProps) {
     const params: ThreadListParams = {
       limit: Math.max(PAGE_SIZE, loadedRef.current.count),
       sortKey,
-      modelProviders: providerFilter,
+      modelProviders: null,
       cwd,
       useStateDbOnly: true,
     };
@@ -254,9 +248,18 @@ export const ThreadList = memo(function ThreadList({ cwd }: ThreadListProps) {
       cancelled = true;
       ++requestRef.current;
     };
-  }, [cwd, sortKey, providerFilter, refreshCounter]);
+  }, [cwd, sortKey, refreshCounter]);
 
   const refresh = useCallback(() => setRefreshCounter((n) => n + 1), []);
+
+  // The selected project's separate live list is replaced on navigation. Reload
+  // its sidebar once on departure so threads saved since the last read remain.
+  const previousWorkspace = useRef(workspaceCwd);
+  useEffect(() => {
+    const previous = previousWorkspace.current;
+    previousWorkspace.current = workspaceCwd;
+    if (previous === cwd && workspaceCwd !== cwd) refresh();
+  }, [cwd, workspaceCwd, refresh]);
 
   // When a new thread is created in the store (e.g. after threadStart),
   // refresh the list so the sidebar reflects it immediately.
@@ -415,7 +418,7 @@ export const ThreadList = memo(function ThreadList({ cwd }: ThreadListProps) {
       const params: ThreadListParams = {
         cursor: nextCursor,
         limit: 20,
-        modelProviders: providerFilter,
+        modelProviders: null,
         useStateDbOnly: true,
         sortKey,
         cwd,
@@ -439,7 +442,7 @@ export const ThreadList = memo(function ThreadList({ cwd }: ThreadListProps) {
     } finally {
       if (request === requestRef.current) setIsLoadingMore(false);
     }
-  }, [cwd, isLoadingMore, nextCursor, sortKey, providerFilter]);
+  }, [cwd, isLoadingMore, nextCursor, sortKey]);
 
   const openRenameDialog = useCallback(
     (thread: Thread) => {

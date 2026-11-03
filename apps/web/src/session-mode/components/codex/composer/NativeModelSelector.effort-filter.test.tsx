@@ -99,7 +99,7 @@ function surface() {
 
 beforeEach(() => {
   // Explicit initial enabled membership preserves the original none/minimal/max
-  // counterexamples. The app display policy still excludes ultra.
+  // counterexamples. Advertised ultra stays visible.
   useNativeModelPickerPreferencesStore.getState().setEnabledReasoningEfforts([
     "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra", "persistent",
   ]);
@@ -243,7 +243,7 @@ it("offers only low and medium and ArrowRight skips persistent while retaining t
   assertRawCache();
 });
 
-it("shows seven explicitly enabled ordinary efforts with ultra hidden and ArrowRight moves medium to high", async () => {
+it("shows every explicitly enabled ordinary effort including ultra and ArrowRight moves medium to high", async () => {
   const efforts = [
     "none",
     "minimal",
@@ -264,20 +264,20 @@ it("shows seven explicitly enabled ordinary efforts with ultra hidden and ArrowR
   const dots = [
     ...menu.querySelectorAll<HTMLElement>(".session-native-power-dot"),
   ];
-  expect(dots).toHaveLength(7);
+  expect(dots).toHaveLength(8);
   dots.forEach((dot, index) => {
-    expect(parseFloat(dot.style.left)).toBeCloseTo(13 + (index / 6) * 174);
+    expect(parseFloat(dot.style.left)).toBeCloseTo(13 + (index / 7) * 174);
   });
-  for (const [index, effort] of efforts.slice(0, 7).entries()) {
+  for (const [index, effort] of efforts.entries()) {
     settings.effort = effort;
     view.rerender(surface());
     expect(
       menu.querySelector(".session-native-power-effort")?.textContent,
     ).toBe(nativeReasoningLabel(effort));
     expect(screen.getByRole("status").textContent).toContain(
-      `第 ${index + 1} 项，共 7 项`,
+      `第 ${index + 1} 项，共 8 项`,
     );
-    expect(menu.querySelectorAll(".session-native-power-dot")).toHaveLength(7);
+    expect(menu.querySelectorAll(".session-native-power-dot")).toHaveLength(8);
   }
   settings.effort = "ultra";
   view.rerender(surface());
@@ -285,9 +285,9 @@ it("shows seven explicitly enabled ordinary efforts with ultra hidden and ArrowR
   expect(document.querySelector(".session-native-model-trigger .session-native-model-effort")).toBeNull();
     expect(document.querySelector(".session-native-model-trigger")?.getAttribute("aria-label")).toBeNull();
     expect(document.querySelector(".session-native-model-trigger-placeholder")?.textContent ?? null).toBe("选择强度");
-  expect(menu.querySelector(".session-native-power-effort")?.textContent).toBe("中");
-  expect(screen.getByRole("status").textContent).toContain("第 4 项，共 7 项");
-  expect(menu.querySelector(".session-native-power-effort")?.getAttribute("data-maximum")).toBe("false");
+  expect(menu.querySelector(".session-native-power-effort")?.textContent).toBe("Ultra");
+  expect(screen.getByRole("status").textContent).toContain("第 8 项，共 8 项");
+  expect(menu.querySelector(".session-native-power-effort")?.getAttribute("data-maximum")).toBe("true");
   assertRawCache();
   expect(settings.setEffort).not.toHaveBeenCalled();
   settings.effort = "medium";

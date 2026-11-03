@@ -87,10 +87,14 @@ function validateContext(
 export function addBrowserEditorContext(
   owner: CodexHostOwner,
   value: CodexEditorContext,
+  annotation?: string,
 ) {
   const context = validateContext(owner, value);
+  if (annotation !== undefined && (typeof annotation !== "string" || annotation.length > 10_000 || annotation.includes("\0")))
+    throw new Error("选区评论无效或过长");
+  const id = newSessionEditId();
   composerDrafts.add(owner.draftOwner, {
-    id: newSessionEditId(),
+    id,
     kind: "file",
     name: context.path.split("/").pop() ?? context.path,
     path: context.path,
@@ -98,7 +102,9 @@ export function addBrowserEditorContext(
     ...(context.range
       ? { range: { start: context.range.start, end: context.range.end } }
       : {}),
-  });
+    ...(annotation?.trim() ? { annotation } : {}),
+  } as import("@session/components/codex/composer/v2/selectionAnnotations").AnnotatedContext);
+  return { owner: owner.draftOwner, id };
 }
 export class EditorHostBridge {
   private pending = new Map<

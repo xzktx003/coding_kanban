@@ -314,3 +314,29 @@ test("successful deletion updates navigation while preserving unrelated executio
   expect(useCodexStore.getState().activeThreadIds).toEqual(["another-task"]);
   expect(useCodexStore.getState().events["keyboard-codex"]).toBe(history);
 });
+
+test("a project's history remains visible across composer provider changes and project switches", async () => {
+  const { useConfigStore, useCodexStore } = await import("@session/components/codex/stores");
+  useConfigStore.setState({ modelProvider: "openai" });
+  useCodexStore.setState({ threads: [] });
+  api.list.mockImplementation(async (params) => ({
+    data: params.modelProviders === null ? [{ ...row, id: "other-provider-thread", modelProvider: "other-provider", name: "后台运行会话" }] : [],
+    nextCursor: null,
+  }));
+  render(<ThreadList cwd="/fixture" />);
+  expect(await screen.findByText("后台运行会话")).toBeTruthy();
+  expect(api.list).toHaveBeenCalledWith(expect.objectContaining({ cwd: "/fixture", modelProviders: null }));
+});
+
+test("refreshes project history when leaving a project after a new thread reaches the database", async () => {
+  const { useWorkspaceStore } = await import("@session/stores/useWorkspaceStore");
+  const { useCodexStore } = await import("@session/components/codex/stores");
+  useCodexStore.setState({ threads: [] });
+  useWorkspaceStore.setState({ cwd: "/fixture" });
+  api.list.mockResolvedValue({ data: [], nextCursor: null });
+  render(<ThreadList cwd="/fixture" />);
+  await screen.findByText("该项目还没有会话。");
+  api.list.mockResolvedValue({ data: [{ ...row, id: "late-saved", name: "新保存的会话" }], nextCursor: null });
+  act(() => useWorkspaceStore.setState({ cwd: "/other" }));
+  expect(await screen.findByText("新保存的会话")).toBeTruthy();
+});

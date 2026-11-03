@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { downloadWorkspaceFile, uploadWorkspaceFile } from "./workspaceFiles";
+import {
+  downloadWorkspaceFile,
+  uploadWorkspaceFile,
+  resolveWorkspaceFileReference,
+  readWorkspaceText,
+} from "./workspaceFiles";
 import { postJsonWithOptions } from "./apiAdapt/shared";
 
 vi.mock("@session/hooks/runtime", () => ({
@@ -130,5 +135,92 @@ describe("workspaceFiles transfer helpers", () => {
 
     await expect(promise).rejects.toMatchObject({ name: "AbortError" });
     expect(xhr.aborted).toBe(true);
+  });
+
+  test("cross-project links and their reads use the local file endpoint", async () => {
+    vi.mocked(postJsonWithOptions)
+      .mockResolvedValueOnce({ root: "/", path: "/other/source.ts" })
+      .mockResolvedValueOnce({ content: "ok", version: "v" });
+    expect(
+      await resolveWorkspaceFileReference("/project", "/other/source.ts"),
+    ).toEqual({ root: "/", path: "/other/source.ts" });
+    await readWorkspaceText("/", "/other/source.ts");
+    expect(postJsonWithOptions).toHaveBeenCalledWith(
+      "/local-files/resolve",
+      { root: "/project", path: "/other/source.ts" },
+      { suppressToast: true },
+    );
+    expect(postJsonWithOptions).toHaveBeenCalledWith(
+      "/local-files/read",
+      { root: "/", path: "/other/source.ts" },
+      { suppressToast: true },
+    );
+  });
+  test("a project symlink denied by the project resolver is resolved through the local endpoint", async () => {
+    vi.mocked(postJsonWithOptions)
+      .mockReset()
+      .mockRejectedValueOnce({ status: 403 })
+      .mockResolvedValueOnce({ root: "/", path: "/outside/target" });
+    expect(
+      await resolveWorkspaceFileReference("/project", "/project/link"),
+    ).toEqual({ root: "/", path: "/outside/target" });
+    expect(postJsonWithOptions).toHaveBeenNthCalledWith(
+      1,
+      "/workspace-files/resolve",
+      { root: "/project", path: "/project/link" },
+      { suppressToast: true },
+    );
+    expect(postJsonWithOptions).toHaveBeenNthCalledWith(
+      2,
+      "/local-files/resolve",
+      { root: "/project", path: "/project/link" },
+      { suppressToast: true },
+    );
+  });
+  test("relative links can resolve through a parent directory outside the project", async () => {
+    vi.mocked(postJsonWithOptions)
+      .mockReset()
+      .mockResolvedValueOnce({ root: "/", path: "/other/source.ts" });
+    expect(
+      await resolveWorkspaceFileReference("/project", "../other/source.ts"),
+    ).toEqual({ root: "/", path: "/other/source.ts" });
+    expect(postJsonWithOptions).toHaveBeenCalledWith(
+      "/local-files/resolve",
+      { root: "/project", path: "../other/source.ts" },
+      { suppressToast: true },
+    );
+  });
+  test("local uploads and downloads use local transfer routes", async () => {
+    vi.mocked(postJsonWithOptions).mockResolvedValue({
+      path: "/outside/file",
+      filename: "file",
+    });
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+    await downloadWorkspaceFile("/", "/outside/file");
+    expect(postJsonWithOptions).toHaveBeenCalledWith(
+      "/local-files/download-info",
+      { root: "/", path: "/outside/file" },
+      { suppressToast: true },
+    );
+    const anchor = vi
+      .mocked(document.body.appendChild)
+      .mock.calls.find(
+        ([node]) => node instanceof HTMLAnchorElement,
+      )?.[0] as HTMLAnchorElement;
+    expect(anchor.href).toContain("event:/local-files/download?");
+    const upload = uploadWorkspaceFile(
+      "/",
+      "/outside/file2",
+      new File(["x"], "file2"),
+    );
+    const xhr = FakeXMLHttpRequest.instances.at(-1)!;
+    expect(xhr.url).toBe("fetch:/local-files/upload");
+    xhr.status = 200;
+    xhr.responseText = "{}";
+    xhr.onload?.();
+    await upload;
+    expect(click).toHaveBeenCalledOnce();
   });
 });

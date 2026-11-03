@@ -47,6 +47,23 @@ it("renders oversized named fences as escaped text without expanding syntax span
   expect(node.textContent).toBe(code);
 });
 
+it("does not reuse a partial highlight captured while text is still arriving", async () => {
+  const partial = "const value";
+  const first = nativeFenceHighlight.highlight(
+    { code: partial, language: "typescript" },
+    () => {},
+    { cache: false },
+  );
+  expect(first).toBeNull();
+  await highlight(partial, "typescript");
+  const second = nativeFenceHighlight.highlight(
+    { code: partial, language: "typescript" },
+    () => {},
+    { cache: false },
+  );
+  expect(second).toBeNull();
+});
+
 it("does not auto-detect all native grammars for a large unlabelled fence", async () => {
   const code = 'const value = {name: "testing", data: [1, 2, 3]};\n'.repeat(
     220,

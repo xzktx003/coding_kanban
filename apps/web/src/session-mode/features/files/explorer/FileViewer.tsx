@@ -2,6 +2,7 @@ import { openWorkspaceFileReference } from "@session/services/openWorkspaceFileR
 import { formatEditorContext } from "@session/services/editorContext";
 import { activeDraftOwner } from "@session/stores/useInputStore";
 import { addBrowserEditorContext } from "@session/features/codex-host/bridge";
+import { isCodexDraftOwner } from "@session/components/codex/composer/v2/selectionAnnotations";
 import { useCodexStore } from "@session/components/codex/stores";
 import { sessionDraftKey } from "@session/stores/useSessionDraftStore";
 import { useVsCodePanelStore } from "@session/stores/useVsCodePanelStore";
@@ -19,7 +20,7 @@ import {
   DialogFooter,
 } from "@session/components/ui/dialog";
 import { useDirWatch } from "@session/hooks/useDirWatch";
-import { buildUrl } from "@session/hooks/runtime";
+import { buildEventUrl } from "@session/hooks/runtime";
 import {
   readWorkspaceText,
   saveWorkspaceText,
@@ -46,10 +47,17 @@ const images = [
   "bmp",
   "ico",
 ];
-function localPath(source: string, path: string, root: string) {
+function localPath(
+  source: string,
+  path: string,
+  root: string,
+  allowOutside = false,
+) {
   try {
     const target = new URL(source, "https://workspace.invalid" + path).pathname;
-    return target === root || target.startsWith(root.replace(/\/$/, "") + "/")
+    return allowOutside ||
+      target === root ||
+      target.startsWith(root.replace(/\/$/, "") + "/")
       ? decodeURIComponent(target)
       : null;
   } catch {
@@ -168,11 +176,10 @@ export function FileViewer({ filePath }: { filePath: string }) {
         <img
           alt={filePath.split("/").pop()}
           className="max-w-full object-contain"
-          src={
-            buildUrl("/workspace-files/asset") +
-            "?" +
-            new URLSearchParams({ root, path: filePath })
-          }
+          src={buildEventUrl(
+            (root === "/" ? "/local-files/asset?" : "/workspace-files/asset?") +
+              new URLSearchParams({ root, path: filePath }).toString(),
+          )}
         />
       </div>
     );
@@ -203,7 +210,7 @@ export function FileViewer({ filePath }: { filePath: string }) {
               onClick={(e) => {
                 if (href && !/^(https?:|mailto:|#)/i.test(href)) {
                   e.preventDefault();
-                  const target = localPath(href, filePath, root);
+                  const target = localPath(href, filePath, root, true);
                   if (target)
                     void openWorkspaceFileReference({ path: target }, root);
                 }
@@ -222,9 +229,15 @@ export function FileViewer({ filePath }: { filePath: string }) {
                 alt={alt ?? ""}
                 src={
                   target
-                    ? buildUrl("/workspace-files/asset") +
-                      "?" +
-                      new URLSearchParams({ root, path: target })
+                    ? buildEventUrl(
+                        (root === "/"
+                          ? "/local-files/asset?"
+                          : "/workspace-files/asset?") +
+                          new URLSearchParams({
+                            root,
+                            path: target,
+                          }).toString(),
+                      )
                     : /^https?:/i.test(src ?? "")
                       ? src
                       : undefined
@@ -337,12 +350,11 @@ export function FileViewer({ filePath }: { filePath: string }) {
                   isReadOnly={large && !full}
                   onContentChange={(value) => docs.edit(filePath, value)}
                   onSave={save}
-                  onSendToAI={(text, range) => {
+                  onSendToAI={(text, range, annotation) => {
                     // Resolve the input owner at this deliberate action, then keep its identity immutable.
                     const draftOwner = activeDraftOwner();
                     try {
-                      const parts: unknown = JSON.parse(draftOwner);
-                      if (Array.isArray(parts) && parts[0] === "codex") {
+                      if (isCodexDraftOwner(draftOwner)) {
                         const state = useCodexStore.getState();
                         const workspace = useWorkspaceStore.getState().cwd;
                         if (
@@ -383,16 +395,19 @@ export function FileViewer({ filePath }: { filePath: string }) {
                           threadId,
                           draftOwner,
                         });
-                        addBrowserEditorContext(owner, {
+                        const attached = addBrowserEditorContext(owner, {
                           path,
                           text,
                           ...(range ? { range: { ...range } } : {}),
-                        });
+                        }, annotation);
+                        setContextError(null);
+                        return attached;
                       } else
                         useInputStore
                           .getState()
                           .appendInputValue(
-                            formatEditorContext(filePath, text, range),
+                            formatEditorContext(filePath, text, range) +
+                              (annotation?.trim() ? `\n\n用户评论：\n${annotation.trim()}` : ""),
                           );
                       setContextError(null);
                     } catch (error) {

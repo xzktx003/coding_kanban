@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 const command = vi.fn();
@@ -9,7 +15,10 @@ vi.mock("@session/stores/useVsCodePanelStore", () => ({
   openVsCodePanel: vi.fn(),
 }));
 vi.mock("@session/services/workspaceFiles", () => ({
-  resolveWorkspaceFileReference: vi.fn(async (root: string, path: string) => ({ root, path })),
+  resolveWorkspaceFileReference: vi.fn(async (root: string, path: string) => ({
+    root,
+    path,
+  })),
 }));
 const setActiveRightPanelTab = vi.fn();
 vi.mock("@session/stores/useLayoutStore", () => ({
@@ -38,8 +47,12 @@ import { useCodexStore } from "../stores/useCodexStore";
 beforeEach(() => {
   vi.clearAllMocks();
   useEditorStore.getState().resetFiles();
-  useCodexStore.setState({ threads: [{ id: "thread-a", cwd: "/fixture/project" }] as any });
-  vi.mocked(resolveWorkspaceFileReference).mockImplementation(async (root, path) => ({ root, path }));
+  useCodexStore.setState({
+    threads: [{ id: "thread-a", cwd: "/fixture/project" }] as any,
+  });
+  vi.mocked(resolveWorkspaceFileReference).mockImplementation(
+    async (root, path) => ({ root, path }),
+  );
 });
 afterEach(() => {
   cleanup();
@@ -56,24 +69,87 @@ it("opens a cited file in the editor at the cited line", async () => {
     />,
   );
   fireEvent.click(screen.getByRole("button", { name: /source\.ts/ }));
-  await waitFor(() => expect(setActiveRightPanelTab).toHaveBeenCalledWith("files"));
+  await waitFor(() =>
+    expect(setActiveRightPanelTab).toHaveBeenCalledWith("files"),
+  );
   expect(useEditorStore.getState().activeFile).toBe(path);
-  expect(useEditorStore.getState().revealLocation).toMatchObject({ path, line: 12, column: 1, endLine: 14 });
+  expect(useEditorStore.getState().revealLocation).toMatchObject({
+    path,
+    line: 12,
+    column: 1,
+    endLine: 14,
+  });
   expect(openVsCodePanel).toHaveBeenCalled();
-  expect(command).toHaveBeenCalledWith({ type: "openLocation", path, line: 12, column: 1 });
+  expect(command).toHaveBeenCalledWith({
+    type: "openLocation",
+    path,
+    line: 12,
+    column: 1,
+  });
+});
+
+it("opens a citation outside the message project at its exact line", async () => {
+  vi.mocked(resolveWorkspaceFileReference).mockResolvedValue({
+    root: "/",
+    path: "/other/source.ts",
+  });
+  render(
+    <CodexMarkdown
+      threadId="thread-a"
+      value=':codex-file-citation{path="/other/source.ts" line_range_start="12" line_range_end="14"}'
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: /source\.ts/ }));
+  await waitFor(() =>
+    expect(useEditorStore.getState().revealLocation).toMatchObject({
+      path: "/other/source.ts",
+      line: 12,
+      endLine: 14,
+    }),
+  );
+  expect(resolveWorkspaceFileReference).toHaveBeenCalledWith(
+    "/fixture/project",
+    "/other/source.ts",
+  );
 });
 
 it("opens the resolved registered-project path in the project file workspace", async () => {
-  vi.mocked(resolveWorkspaceFileReference).mockResolvedValue({ root: "/registered", path: "/registered/source.ts" });
-  render(<CodexMarkdown threadId="thread-a" value=':codex-file-citation{path="/fixture/project/link/source.ts" line_range_start="12" line_range_end="14"}' />);
+  vi.mocked(resolveWorkspaceFileReference).mockResolvedValue({
+    root: "/registered",
+    path: "/registered/source.ts",
+  });
+  render(
+    <CodexMarkdown
+      threadId="thread-a"
+      value=':codex-file-citation{path="/fixture/project/link/source.ts" line_range_start="12" line_range_end="14"}'
+    />,
+  );
   fireEvent.click(screen.getByRole("button", { name: /source\.ts/ }));
-  await waitFor(() => expect(useEditorStore.getState().revealLocation).toMatchObject({ path: "/registered/source.ts", line: 12, column: 1 }));
-  expect(command).toHaveBeenCalledWith({ type: "openLocation", path: "/registered/source.ts", line: 12, column: 1 });
+  await waitFor(() =>
+    expect(useEditorStore.getState().revealLocation).toMatchObject({
+      path: "/registered/source.ts",
+      line: 12,
+      column: 1,
+    }),
+  );
+  expect(command).toHaveBeenCalledWith({
+    type: "openLocation",
+    path: "/registered/source.ts",
+    line: 12,
+    column: 1,
+  });
 });
 
 it("does not open the editor host when resolution is rejected", async () => {
-  vi.mocked(resolveWorkspaceFileReference).mockRejectedValue(new Error("unregistered target"));
-  render(<CodexMarkdown threadId="thread-a" value=':codex-file-citation{path="/fixture/project/source.ts" line_range_start="12"}' />);
+  vi.mocked(resolveWorkspaceFileReference).mockRejectedValue(
+    new Error("unregistered target"),
+  );
+  render(
+    <CodexMarkdown
+      threadId="thread-a"
+      value=':codex-file-citation{path="/fixture/project/source.ts" line_range_start="12"}'
+    />,
+  );
   fireEvent.click(screen.getByRole("button", { name: /source\.ts/ }));
   await waitFor(() => expect(resolveWorkspaceFileReference).toHaveBeenCalled());
   expect(command).not.toHaveBeenCalled();

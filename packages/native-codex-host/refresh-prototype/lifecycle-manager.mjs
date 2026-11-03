@@ -6,6 +6,7 @@ import { createNativePoolAdapter } from "./native-pool-adapter.mjs";
 import {
   isAuthorizationBoundary,
   createNativeAuthorizationTracker,
+  workspaceRoutingDiscoveryTimedOut,
 } from "./authorization-boundary.mjs";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const lifecycle = (method) =>
@@ -18,7 +19,7 @@ export async function createRefreshManager({
   resourceMonitor,
   idleLimit = 10,
   memoryBudgetBytes,
-  authorizationTimeoutMs = 15000,
+  authorizationTimeoutMs = 45000,
 }) {
   if (typeof resourceMonitor?.read !== "function")
     throw Error("explicit owned process resource monitor required");
@@ -334,6 +335,10 @@ export async function createRefreshManager({
       },
     );
   } catch (error) {
+    if (workspaceRoutingDiscoveryTimedOut(error)) {
+      await closeOwnConnection();
+      throw error;
+    }
     invalidate("initialization-failed");
     await closeOwnConnection();
     throw error;

@@ -373,7 +373,18 @@ export class NativeCodexFollowups {
     };
   }
   private async snapshot(id: string): Promise<FollowupThread> {
-    const context = await this.runtime.context?.();
+    let context: { scope: string; namespace: string } | undefined;
+    try {
+      context = await this.runtime.context?.();
+    } catch (error) {
+      // A missing context route cannot prove which account owns the queue.
+      // Keep the read unavailable instead of presenting a rejected send.
+      if (Number((error as { statusCode?: unknown }).statusCode) === 404)
+        throw Object.assign(new Error("官方队列状态暂不可用；原队列状态未知，已保留当前显示"), {
+          upstreamStatus: 503,
+        });
+      throw error;
+    }
     const native = await this.native(id),
       items = native.map((row) => this.project(id, row));
     const ids = new Set(items.map((item) => item.nativeClientUserMessageId));
@@ -1098,8 +1109,10 @@ export class NativeCodexFollowups {
             metadata.thread.status?.type === "notLoaded"
           ) {
             await step(
-              "thread/queue/restore",
-              { threadId: id, queuedSubmissionIds: rows.map((row) => row.id) },
+              rows.length ? "thread/queue/restore" : "thread/resume",
+              rows.length
+                ? { threadId: id, queuedSubmissionIds: rows.map((row) => row.id) }
+                : { threadId: id },
               "restoring-for-retry",
             );
             metadata = await this.runtime.call("thread/read", {

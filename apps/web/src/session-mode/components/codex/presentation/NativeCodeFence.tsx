@@ -29,12 +29,26 @@ export function downloadNativeText(
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
+const STREAMING_HIGHLIGHT_DELAY_MS = 120;
+
+function SourceLines({ code }: { code: string }) {
+  const lines = code.split("\n");
+  return lines.map((line, index) => (
+    <span key={index}>
+      {index > 0 ? "\n" : null}
+      {line}
+    </span>
+  ));
+}
+
 export function NativeCodeFence({
   code,
   language,
+  streaming = false,
 }: {
   code: string;
   language: string;
+  streaming?: boolean;
 }) {
   const { i18n } = useTranslation();
   const labels = nativeMarkdownLabels(i18n.language ?? "zh");
@@ -59,34 +73,88 @@ export function NativeCodeFence({
   const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
+  const highlightTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
+  const fenceRoot = useRef<HTMLDivElement>(null);
+  const visible = useRef(true);
+  const sawVisible = useRef(false);
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
       clearTimeout(copyTimer.current);
+      clearTimeout(highlightTimer.current);
     };
   }, []);
   useEffect(() => {
-    let live = true;
     setCopied(false);
 
     if (svgPreview) {
       setHighlight(null);
       return;
     }
+    const requested = { code, language };
     const apply = (html: string) => {
-      if (live) setHighlight({ code, language, html });
+      if (!mounted.current || !visible.current) return;
+      setHighlight({
+        code: requested.code,
+        language: requested.language,
+        html,
+      });
     };
-    const result = nativeFenceHighlight.highlight({ code, language }, apply);
-    if (result !== null) apply(result);
+    const start = () => {
+      if (!visible.current) return;
+      const result = nativeFenceHighlight.highlight(
+        requested,
+        apply,
+        streaming ? { cache: false } : undefined,
+      );
+      if (result !== null) apply(result);
+    };
+    const arm = () => {
+      clearTimeout(highlightTimer.current);
+      if (!visible.current) return;
+      if (streaming) highlightTimer.current = setTimeout(start, STREAMING_HIGHLIGHT_DELAY_MS);
+      else start();
+    };
+    arm();
+    const node = fenceRoot.current;
+    let observer: IntersectionObserver | undefined;
+    if (streaming && node && typeof IntersectionObserver === "function") {
+      observer = new IntersectionObserver((entries) => {
+        const intersecting = entries.at(-1)?.isIntersecting !== false;
+        if (intersecting) {
+          sawVisible.current = true;
+          if (!visible.current) {
+            visible.current = true;
+            arm();
+          }
+          return;
+        }
+        if (!sawVisible.current) return;
+        visible.current = false;
+        clearTimeout(highlightTimer.current);
+      });
+      observer.observe(node);
+    }
     return () => {
-      live = false;
+      clearTimeout(highlightTimer.current);
+      observer?.disconnect();
     };
-  }, [code, language, svgPreview]);
-  const result =
-    highlight?.code === code && highlight.language === language
-      ? highlight.html
+  }, [code, language, svgPreview, streaming]);
+  const matched =
+    highlight &&
+    highlight.language === language &&
+    (streaming ? code.startsWith(highlight.code) : highlight.code === code)
+      ? highlight
       : null;
+  const highlightedPrefix =
+    matched && streaming && code !== matched.code ? matched.html : null;
+  const highlightedSuffix = highlightedPrefix
+    ? code.slice(matched.code.length)
+    : "";
+  const result = highlightedPrefix ? null : (matched?.html ?? null);
   const info = bundledLanguagesInfo.find(
     (info) => info.id === language || info.aliases?.includes(language),
   );
@@ -119,15 +187,16 @@ export function NativeCodeFence({
   const suffix = language.replace(/[^a-z0-9_-]/gi, "").slice(0, 30) || "txt";
   return (
     <div
+      ref={fenceRoot}
       className="codex-native-code-fence"
-      data-streamdown="code-block"
+      data-streamdown={streaming ? undefined : "code-block"}
       data-markdown-copy="code-block"
       data-markdown-copy-text={svgPreview ? code : undefined}
       data-language={language}
     >
       <div
         className="codex-native-code-header"
-        data-streamdown="code-block-header"
+        data-streamdown={streaming ? undefined : "code-block-header"}
         data-markdown-copy="exclude"
       >
         <NativeMarkdownIcon name="code" />
@@ -191,7 +260,7 @@ export function NativeCodeFence({
         </div>
       </div>
       <pre
-        data-streamdown="code-block-body"
+        data-streamdown={streaming ? undefined : "code-block-body"}
         data-wrap={!svgPreview && wrap ? "true" : "false"}
       >
         {svgPreview ? (
@@ -202,8 +271,13 @@ export function NativeCodeFence({
               src={imageSource}
             />
           ) : null
+        ) : highlightedPrefix ? (
+          <code dir="ltr">
+            <span dangerouslySetInnerHTML={{ __html: highlightedPrefix }} />
+            <span>{highlightedSuffix}</span>
+          </code>
         ) : result === null ? (
-          <code dir="ltr">{code}</code>
+          <code dir="ltr">{streaming ? <SourceLines code={code} /> : code}</code>
         ) : (
           <code dir="ltr" dangerouslySetInnerHTML={{ __html: result }} />
         )}

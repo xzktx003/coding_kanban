@@ -480,6 +480,8 @@ export const fr = {
     workingFor: "En cours depuis {{time}}",
     workedFor: "Durée {{time}}",
     workActivity: "Activité",
+    waitingForOutput:
+      "Aucune activité ni réponse n'est encore visible. Le traitement continue peut-être ou la connexion peut être retardée.",
     readFiles_one: "{{count}} fichier lu",
     readFiles_other: "{{count}} fichiers lus",
     ranCommands_one: "{{count}} commande exécutée",

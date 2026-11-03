@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { FollowupRejected } from "./codex-followups.js";
 import { NativeCodexFollowups } from "./native-codex-followups.js";
 
 const message = {
@@ -22,7 +23,11 @@ function fixture(file?: string) {
     },
     async call(method: string, params: any): Promise<any> {
       calls.push({ method, params });
-      if (method === "thread/settings/update") return {};
+      if (method === "thread/settings/update") {
+        if ((runtime as { unloaded?: boolean }).unloaded)
+          throw new FollowupRejected("thread not found: thread");
+        return {};
+      }
       if (method === "thread/queue/add") {
         const item = {
           id: "official-1",
@@ -524,6 +529,49 @@ test("a lost undo-add ACK fences the source token across pages even after native
     f.calls.filter((call) => call.method === "thread/queue/add").length,
     1,
   );
+});
+
+test("confirmed retry of an unloaded empty thread loads it before adding the saved message", async () => {
+  const f = fixture();
+  const original = f.runtime.call;
+  let loaded = false;
+  (f.runtime as { unloaded?: boolean }).unloaded = true;
+  f.runtime.call = async (method: string, params: any) => {
+    f.calls.push({ method, params });
+    if (method === "thread/settings/update" && !loaded)
+      throw new FollowupRejected("thread not found: thread");
+    if (method === "thread/read")
+      return {
+        thread: {
+          id: "thread",
+          status: { type: loaded ? "idle" : "notLoaded" },
+          canAcceptDirectInput: true,
+        },
+      };
+    if (method === "thread/resume") {
+      assert.deepEqual(params, { threadId: "thread" });
+      loaded = true;
+      (f.runtime as { unloaded?: boolean }).unloaded = false;
+      return { resumed: true };
+    }
+    return original(method, params);
+  };
+  const submitted = await f.queue.submit({ ...message, text: "你好" });
+  assert.equal(submitted.items[0]?.status, "uncertain");
+  const retry = await f.queue.change(
+    "thread",
+    submitted.revision,
+    {
+      type: "retry",
+      id: submitted.items[0].id,
+      confirmUncertain: true,
+    },
+    undefined,
+    "retry-unloaded",
+  );
+  assert.equal(retry.operation?.status, "accepted");
+  const methods = f.calls.map((call) => call.method);
+  assert.ok(methods.indexOf("thread/resume") < methods.lastIndexOf("thread/queue/add"));
 });
 
 test("accepted direct and queued steer retain display-only content across restart until exact native identity appears", async () => {

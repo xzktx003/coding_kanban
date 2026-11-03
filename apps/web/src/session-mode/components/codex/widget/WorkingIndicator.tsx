@@ -7,9 +7,11 @@ import type { TurnTiming } from '@session/components/codex/stores/useCodexStore'
 export function WorkingIndicator({
   turnTiming,
   retryNotice,
+  hasLiveMessage = false,
 }: {
   turnTiming: TurnTiming | undefined;
   retryNotice?: string;
+  hasLiveMessage?: boolean;
 }) {
   const { t } = useTranslation('thread');
   // Re-render only; elapsed is derived from startedAtMs, never stored.
@@ -26,7 +28,10 @@ export function WorkingIndicator({
     return () => clearInterval(intervalId);
   }, [inProgress]);
 
-  const elapsed = inProgress && turnTiming && Number.isFinite(turnTiming.startedAtMs) ? Math.max(0, Date.now() - turnTiming.startedAtMs) : null;
+  const elapsed = inProgress && turnTiming && Number.isFinite(turnTiming.startedAtMs) &&
+    turnTiming.startedAtMs >= 0
+      ? Math.max(0, Date.now() - turnTiming.startedAtMs)
+      : null;
 
   if (!turnTiming) return null;
 
@@ -37,6 +42,12 @@ export function WorkingIndicator({
         {retryNotice && (
           <span className="text-yellow-600 dark:text-yellow-400"> · {retryNotice}</span>
         )}
+        {elapsed !== null &&
+          elapsed >= 30_000 &&
+          !retryNotice &&
+          !hasLiveMessage && (
+            <div className="mt-1 text-xs">{t('waitingForOutput')}</div>
+          )}
       </div>
     );
   }

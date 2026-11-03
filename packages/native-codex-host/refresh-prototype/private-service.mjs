@@ -230,7 +230,7 @@ function descriptor(record, metadata) {
           .catch(() => {});
         await client.ready;
         const binding = await tracker.bind(client, {
-          timeoutMs: options.timeoutMs ?? 15000,
+          timeoutMs: options.timeoutMs ?? 45000,
         });
         try {
           anchor.assertBinding(binding);

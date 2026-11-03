@@ -1,0 +1,86 @@
+.session-mode .session-response-annotations {
+  position: fixed;
+  inset: 0;
+  z-index: 65;
+  pointer-events: none;
+}
+.session-mode .session-response-annotation-highlight {
+  position: fixed;
+  background: rgba(67, 142, 239, 0.25);
+  border-radius: 2px;
+  pointer-events: none;
+}
+.session-mode .session-response-selection-toolbar,
+.session-mode .session-response-annotation-editor,
+.session-mode .session-response-annotation-marker {
+  pointer-events: auto;
+  color: var(--foreground);
+  background: var(--popover, var(--card));
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+.session-mode .session-response-selection-toolbar {
+  position: fixed;
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 10px;
+  transform: translate(-50%, calc(-100% - 8px));
+  white-space: nowrap;
+}
+.session-mode .session-response-selection-toolbar button,
+.session-mode .session-response-annotation-editor button {
+  border: 0;
+  border-radius: 6px;
+  padding: 6px 10px;
+  background: transparent;
+  font-size: 12px;
+  cursor: pointer;
+}
+.session-mode .session-response-selection-toolbar button:hover,
+.session-mode .session-response-annotation-editor button:hover {
+  background: var(--accent);
+}
+.session-mode .session-response-annotation-marker {
+  position: fixed;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 5px;
+  border-color: #3b82f6;
+  border-radius: 8px 8px 8px 2px;
+  background: #3b82f6;
+  color: white;
+  font-size: 11px;
+  font-weight: 600;
+  transform: translate(3px, -50%);
+  cursor: pointer;
+}
+.session-mode .session-response-annotation-editor {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  width: min(294px, calc(100vw - 16px));
+  padding: 10px;
+  border-radius: 12px;
+}
+.session-mode .session-response-annotation-editor textarea {
+  width: 100%;
+  min-height: 76px;
+  resize: vertical;
+  border: 0;
+  outline: none;
+  color: inherit;
+  background: transparent;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.session-mode .session-response-annotation-editor > div {
+  display: flex;
+  justify-content: space-between;
+}
+.session-mode .session-response-selection-toolbar button:focus-visible,
+.session-mode .session-response-annotation-marker:focus-visible,
+.session-mode .session-response-annotation-editor button:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}

@@ -51,15 +51,17 @@ export function registerWorkspaceFileRoutes(
   app: FastifyInstance,
   options: { trashHome?: string; roots: () => Promise<string[]> },
 ) {
-  app.register(async (scope) => {
+  const register = (mode: "workspace-files" | "local-files") => app.register(async (scope) => {
     await scope.register(multipart, {
       limits: { fileSize: 64 * 1024 * 1024, files: 1, fields: 4 },
     });
     const files = options.trashHome
-      ? new WorkspaceFiles(options.trashHome, options.roots)
+      ? new WorkspaceFiles(options.trashHome, options.roots, {
+          local: mode === "local-files",
+        })
       : null;
     const environments = options.trashHome ? new WorkspaceEnvironments(resolve(options.trashHome, "..", "workspace-environments"), options.roots) : null;
-    const prefix = "/api/session/workspace-files/";
+    const prefix = `/api/session/${mode}/`;
     scope.setErrorHandler((error, request, reply) => {
       const status =
         error instanceof WorkspaceFileError
@@ -158,6 +160,8 @@ export function registerWorkspaceFileRoutes(
           const b = req.body;
           if (!b || typeof b.root !== "string")
             throw new WorkspaceFileError("缺少项目目录");
+          if (mode === "local-files" && action.startsWith("environment-"))
+            throw new WorkspaceFileError("不支持的本机文件操作", 404);
           reply.header("cache-control", "no-store");
           switch (action) {
             case "environment-list":
@@ -236,4 +240,6 @@ export function registerWorkspaceFileRoutes(
       );
     });
   });
+  register("workspace-files");
+  register("local-files");
 }

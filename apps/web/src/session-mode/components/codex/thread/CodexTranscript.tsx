@@ -36,6 +36,7 @@ import { ScrollArea } from "@session/components/ui/scroll-area";
 import { EventItem } from "../items";
 import { MessageTimestamp } from "../items/MessageTimestamp";
 import { AgentMessageItem } from "../items/AgentMessageItem";
+import { ResponseSelectionAnnotations } from "../composer/v2/ResponseSelectionAnnotations";
 import { ApprovalItem } from "../items/ApprovalItem";
 import { CommandActionSummaryItem } from "../items/CommandActionSummaryItem";
 import { ElicitationItem } from "../items/ElicitationItem";
@@ -145,6 +146,7 @@ const ThreadMessage = memo(
     hookRuns,
     onToggleWork,
     retryNotice,
+    hasLiveMessage = false,
   }: {
     row: TranscriptWorkRow;
     nativeEditUser?: boolean;
@@ -152,12 +154,14 @@ const ThreadMessage = memo(
     hookRuns?: readonly HookRunSummary[];
     onToggleWork?: (key: string) => void;
     retryNotice?: string;
+    hasLiveMessage?: boolean;
   }) {
     if (row.work)
       return (
         <TurnWorkHeader
           work={row.work}
           retryNotice={retryNotice}
+          hasLiveMessage={hasLiveMessage}
           onToggle={() => onToggleWork?.(row.key)}
         />
       );
@@ -184,7 +188,8 @@ const ThreadMessage = memo(
   (before, after) => {
     if (
       before.onToggleWork !== after.onToggleWork ||
-      before.retryNotice !== after.retryNotice
+      before.retryNotice !== after.retryNotice ||
+      before.hasLiveMessage !== after.hasLiveMessage
     )
       return false;
     if (before.row.work || after.row.work)
@@ -1423,6 +1428,12 @@ const CodexTranscript = memo(function CodexTranscript({
         onNavigate={navigateToMessage}
         activeTurnIds={visibleTurns}
       />
+      <ResponseSelectionAnnotations
+        threadId={activeThreadId}
+        contentRef={contentRef}
+        getViewport={viewport}
+        disabled={inspection}
+      />
       <div className="flex-1 min-h-0 overflow-hidden">
         <ScrollArea ref={rootRef} className="h-full px-4 pb-4">
           <div
@@ -1500,6 +1511,11 @@ const CodexTranscript = memo(function CodexTranscript({
                             ? retryNotice
                             : undefined
                         }
+                        hasLiveMessage={
+                          !!streamingMessage?.length &&
+                          rows[item.index].work?.turnId ===
+                            streamingMessage.turnId
+                        }
                         nativeEditUser={
                           rows[item.index].key === workflow.lastUserRowId
                         }
@@ -1570,6 +1586,10 @@ const CodexTranscript = memo(function CodexTranscript({
                 <WorkingIndicator
                   turnTiming={turnTiming}
                   retryNotice={retryNotice}
+                  hasLiveMessage={
+                    !!streamingMessage?.length &&
+                    turnTiming?.turnId === streamingMessage.turnId
+                  }
                 />
               )}
               <RequestUserInputItem currentThreadId={activeThreadId} />

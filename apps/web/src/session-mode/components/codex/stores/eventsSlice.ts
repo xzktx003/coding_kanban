@@ -95,6 +95,55 @@ function appendTextSegments(
   };
 }
 
+function isCurrentTurn(state: CodexStore, threadId: string, turnId: string) {
+  const timing = state.turnTimingMap[threadId];
+  return (
+    !timing || (timing.turnId === turnId && timing.status === "inProgress")
+  );
+}
+
+function clearsRetryNotice(
+  state: CodexStore,
+  threadId: string,
+  event: ServerNotification,
+) {
+  const timing = state.turnTimingMap[threadId];
+  if (event.method === "turn/started")
+    return (
+      timing?.turnId !== event.params.turn.id &&
+      acceptTurnStart(timing, event.params.turn)
+    );
+  if (event.method === "turn/completed")
+    return !timing || timing.turnId === event.params.turn.id;
+  if (event.method === "error")
+    return (
+      !event.params.willRetry &&
+      isCurrentTurn(state, threadId, event.params.turnId)
+    );
+  if (event.method === "thread/status/changed")
+    return event.params.status.type === "systemError";
+  if (event.method === "item/started" || event.method === "item/completed")
+    return (
+      isCurrentTurn(state, threadId, event.params.turnId) &&
+      (event.params.item.type === "agentMessage" ||
+        event.params.item.type === "reasoning")
+    );
+  return false;
+}
+
+function hasCurrentTurnDelta(
+  state: CodexStore,
+  threadId: string,
+  events: DeltaEvent[],
+) {
+  return events.some(
+    (event) =>
+      event.params.threadId === threadId &&
+      !!event.params.delta &&
+      isCurrentTurn(state, threadId, event.params.turnId),
+  );
+}
+
 export const createEventsSlice: StateCreator<
   CodexStore,
   [],
@@ -125,7 +174,6 @@ export const createEventsSlice: StateCreator<
     if (event.method === "thread/tokenUsage/updated") {
       const usage = event.params.tokenUsage;
       set((state) => tokenUsageState(state, threadId, usage));
-      // Continue lifecycle bookkeeping (for example clearing a retry notice);
       // appendTranscriptEvent excludes this metadata from the transcript.
     }
     // Goal state is lifecycle metadata, never a retained transcript body. The
@@ -221,11 +269,15 @@ export const createEventsSlice: StateCreator<
       let retryNoticeMap = state.retryNoticeMap;
       if (event.method === "error" && event.params.willRetry) {
         isRetryNotice = true;
-        retryNoticeMap = {
-          ...retryNoticeMap,
-          [threadId]: event.params.error.message,
-        };
-      } else if (retryNoticeMap[threadId] !== undefined) {
+        if (isCurrentTurn(state, threadId, event.params.turnId))
+          retryNoticeMap = {
+            ...retryNoticeMap,
+            [threadId]: event.params.error.message,
+          };
+      } else if (
+        retryNoticeMap[threadId] !== undefined &&
+        clearsRetryNotice(state, threadId, event)
+      ) {
         const { [threadId]: _cleared, ...rest } = retryNoticeMap;
         retryNoticeMap = rest;
       }
@@ -433,7 +485,10 @@ export const createEventsSlice: StateCreator<
         nextEvents = appendTranscriptEvent(nextEvents, event);
 
       let retryNoticeMap = state.retryNoticeMap;
-      if (retryNoticeMap[threadId] !== undefined) {
+      if (
+        retryNoticeMap[threadId] !== undefined &&
+        hasCurrentTurnDelta(state, threadId, events)
+      ) {
         const { [threadId]: _cleared, ...rest } = retryNoticeMap;
         retryNoticeMap = rest;
       }
@@ -506,11 +561,20 @@ export const createEventsSlice: StateCreator<
       }
       if (!current || current === state.streamingAgentMessages?.[threadId])
         return state;
+      let retryNoticeMap = state.retryNoticeMap;
+      if (
+        retryNoticeMap[threadId] !== undefined &&
+        hasCurrentTurnDelta(state, threadId, events)
+      ) {
+        const { [threadId]: _cleared, ...rest } = retryNoticeMap;
+        retryNoticeMap = rest;
+      }
       return {
         streamingAgentMessages: {
           ...(state.streamingAgentMessages ?? {}),
           [threadId]: current,
         },
+        ...(retryNoticeMap !== state.retryNoticeMap ? { retryNoticeMap } : {}),
       };
     });
   },

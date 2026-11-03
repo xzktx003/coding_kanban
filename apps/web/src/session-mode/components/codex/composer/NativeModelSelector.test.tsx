@@ -127,12 +127,12 @@ it("uses the actual native 28px thumb minus 1px endpoint inset for ticks and inp
 });
 
 it.each([
-  { raw: "high", display: "高", accent: "true" },
-  { raw: "xhigh", display: "极高", accent: "true" },
-  { raw: "ultra", display: "中", accent: "true" },
+  { raw: "high", display: "高", maximum: "false" },
+  { raw: "xhigh", display: "极高", maximum: "false" },
+  { raw: "ultra", display: "Ultra", maximum: "true" },
 ])(
-  "uses the app ordinary display policy without rewriting raw $raw",
-  async ({ raw, display, accent }) => {
+  "shows advertised ultra without rewriting raw $raw",
+  async ({ raw, display, maximum }) => {
     calls.options = ["low", "medium", "high", "xhigh", "ultra"];
     calls.effortValue = raw;
     render(<NativeModelSelector threadId="original" />);
@@ -142,9 +142,9 @@ it.each([
     await screen.findByRole("menuitem", { name: "强度" });
     const label = document.querySelector(".session-native-power-effort")!;
     expect(label.textContent).toBe(display);
-    expect(label.getAttribute("data-accent")).toBe(accent);
-    expect(label.getAttribute("data-maximum")).toBe("false");
-    expect(document.querySelectorAll(".session-native-power-dot")).toHaveLength(4);
+    expect(label.getAttribute("data-accent")).toBe("true");
+    expect(label.getAttribute("data-maximum")).toBe(maximum);
+    expect(document.querySelectorAll(".session-native-power-dot")).toHaveLength(5);
     expect(calls.effortValue).toBe(raw);
   },
 );

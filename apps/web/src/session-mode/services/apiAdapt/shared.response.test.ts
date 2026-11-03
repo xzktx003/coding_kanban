@@ -85,6 +85,26 @@ describe("HTTP JSON response semantics", () => {
     expect(response.bodyUsed).toBe(true);
   });
 
+  it("does not treat an unavailable queue read as a definite rejection", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            error: "官方队列状态暂不可用；原队列状态未知，已保留当前显示",
+            code: "FOLLOWUP_READ_UNAVAILABLE",
+          }),
+          { status: 409, headers: { "content-type": "application/json" } },
+        ),
+      ),
+    );
+    const error = await getJsonWithOptions("/followups?threadId=thread", {
+      suppressToast: true,
+    }).catch((value) => value);
+    expect(error).toMatchObject({ status: 409, code: "FOLLOWUP_READ_UNAVAILABLE" });
+    expect(isExplicitRequestRejection(error)).toBe(false);
+  });
+
   it.each([
     ['{"error":"明确拒绝"}', "明确拒绝"],
     ["upstream unavailable", "Request failed: 503"],

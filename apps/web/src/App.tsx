@@ -148,8 +148,8 @@ import {
   loadTerminalFontSize,
   saveTerminalFontSize,
 } from "./lib/terminal-font-size";
-import { shouldEnableMobileTerminalTouchMode } from "./lib/mobile-terminal-mode";
-import { isMobileWorkbenchLocation } from "./lib/mobile-workbench-route";
+import { shouldEnableMobileTerminalTouchMode, shouldUsePhoneTerminal } from "./lib/mobile-terminal-mode";
+import { readWorkbenchMode } from "./lib/workbench-mode";
 import {
   MAX_CACHED_VSCODE_IFRAMES,
   loadVsCodeIframeCacheMode,
@@ -426,6 +426,11 @@ export default function App({
   const [mobileTerminalTouchMode, setMobileTerminalTouchMode] = useState(
     readMobileTerminalTouchMode,
   );
+  const [phoneViewport, setPhoneViewport] = useState(() => ({
+    height: window.innerHeight,
+    width: window.innerWidth,
+  }));
+  const [workbenchMode, setWorkbenchMode] = useState(readWorkbenchMode);
   const mainLayoutRef = useRef<HTMLDivElement | null>(null);
   const fileBrowserShellRef = useRef<HTMLDivElement | null>(null);
   const fileBrowserWidthSchedulerRef =
@@ -770,9 +775,22 @@ export default function App({
 
     pointerMedia?.addEventListener("change", refresh);
     window.addEventListener("orientationchange", refresh);
+    const refreshPhoneTerminal = () => {
+      setPhoneViewport({
+        height: window.innerHeight,
+        width: window.innerWidth,
+      });
+      setWorkbenchMode(readWorkbenchMode());
+    };
+    window.addEventListener("resize", refreshPhoneTerminal);
+    window.addEventListener("popstate", refreshPhoneTerminal);
+    window.addEventListener("workbench-mode-changed", refreshPhoneTerminal);
     return () => {
       pointerMedia?.removeEventListener("change", refresh);
       window.removeEventListener("orientationchange", refresh);
+      window.removeEventListener("resize", refreshPhoneTerminal);
+      window.removeEventListener("popstate", refreshPhoneTerminal);
+      window.removeEventListener("workbench-mode-changed", refreshPhoneTerminal);
     };
   }, []);
 
@@ -991,7 +1009,14 @@ export default function App({
     [acknowledgeFocusedSession],
   );
 
-  const mobileActiveSessionId = isMobileWorkbenchLocation(window.location)
+  const phoneTerminal = shouldUsePhoneTerminal({
+    coarsePointer: mobileTerminalTouchMode,
+    location: window.location,
+    viewportHeight: phoneViewport.height,
+    viewportWidth: phoneViewport.width,
+    workbenchMode,
+  });
+  const mobileActiveSessionId = phoneTerminal
     ? (visibleSessions.find(
         (session) =>
           session.id === (focusedId ?? snapshot?.activeAgentSessionId),
@@ -1735,7 +1760,7 @@ export default function App({
     handleFocusSession(lastFocusedId);
   }, [lastFocusedId]);
 
-  if (isMobileWorkbenchLocation(window.location)) {
+  if (phoneTerminal) {
     return (
       <>
       {sessionGroupsSyncError && <div className="session-group-sync-error" role="status">{sessionGroupsSyncError}</div>}

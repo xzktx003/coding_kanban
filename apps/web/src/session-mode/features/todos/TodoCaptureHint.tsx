@@ -49,6 +49,10 @@ export function TodoCaptureHint() {
     };
 
     const handleMouseDown = () => setHint(null);
+    const handleSelectionChange = () => {
+      const selection = document.getSelection();
+      if (!selection || selection.isCollapsed || !selection.toString().trim()) setHint(null);
+    };
     const handleKeyDown = (event: KeyboardEvent) => {
       // The chip has said its piece once the user acts on it.
       if (event.key === 'Shift') return;
@@ -57,6 +61,7 @@ export function TodoCaptureHint() {
 
     document.addEventListener('mouseup', sync);
     document.addEventListener('mousedown', handleMouseDown);
+    document.addEventListener('selectionchange', handleSelectionChange);
     const stopHandleKeyDownForSession = listenInSessionMode(document, 'keydown', handleKeyDown);
     // The chip is anchored to viewport coordinates, so any scroll strands it.
     window.addEventListener('scroll', handleMouseDown, true);
@@ -65,6 +70,7 @@ export function TodoCaptureHint() {
     return () => {
       document.removeEventListener('mouseup', sync);
       document.removeEventListener('mousedown', handleMouseDown);
+      document.removeEventListener('selectionchange', handleSelectionChange);
       stopHandleKeyDownForSession();
       window.removeEventListener('scroll', handleMouseDown, true);
       window.removeEventListener('resize', handleMouseDown);

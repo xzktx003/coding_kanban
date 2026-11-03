@@ -2,9 +2,14 @@ import { openWorkspaceFileReference } from "@session/services/openWorkspaceFileR
 import { useFileDocumentStore } from "@session/stores/useFileDocumentStore";
 import { FileCloseDialog } from "./FileCloseDialog";
 import { FileOperations, type FileOperationTarget } from "./FileOperations";
-import { Folders, X } from "lucide-react";
+import { ArrowUp, Folders, X } from "lucide-react";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { Button } from "@session/components/ui/button";
+import { Input } from "@session/components/ui/input";
+import {
+  canonicalizePath,
+  readDirectory,
+} from "@session/services/apiAdapt/filesystem";
 import { useIsMobile } from "@session/hooks/use-mobile";
 import { useEditorStore, useWorkspaceStore } from "@session/stores";
 import { getFilename } from "@session/utils/getFilename";
@@ -17,6 +22,11 @@ import {
 } from "@session/components/ui/resizable";
 
 const TREE_SIZE_KEY = "kanban.session.files-tree-size";
+const isCanonicalLocalPath = (path: unknown): path is string =>
+  typeof path === "string" &&
+  path.startsWith("/") &&
+  !/[\\\x00-\x1f]/.test(path) &&
+  !path.split("/").some((part) => part === "." || part === "..");
 function readTreeSize() {
   try {
     const value = Number(localStorage.getItem(TREE_SIZE_KEY));
@@ -28,37 +38,250 @@ function readTreeSize() {
 }
 
 export default function FilesPanel() {
-  const { openFiles, activeFile, closeFile, setActiveFile } = useEditorStore();
+  const { openFiles, activeFile, closeFile, setActiveFile, revealLocation } =
+    useEditorStore();
   const { cwd, projects } = useWorkspaceStore();
+  const [location, setLocation] = useState<{
+    owner: string | null;
+    path: string;
+  }>({ owner: cwd, path: cwd ?? "" });
+  const browsePath = location.owner === cwd ? location.path : (cwd ?? "");
+  const revealRevision =
+    revealLocation?.path === activeFile ? revealLocation.revision : 0;
+  const [fileOrigin, setFileOrigin] = useState({
+    path: activeFile,
+    revision: revealRevision,
+    owner: cwd,
+    directory: browsePath,
+  });
+  const currentFileOrigin =
+    fileOrigin.path === activeFile && fileOrigin.revision === revealRevision
+      ? fileOrigin
+      : {
+          path: activeFile,
+          revision: revealRevision,
+          owner: cwd,
+          directory: browsePath,
+        };
+  if (currentFileOrigin !== fileOrigin) setFileOrigin(currentFileOrigin);
+  const [pathInput, setPathInput] = useState(cwd ?? "");
+  const [pathError, setPathError] = useState("");
+  const [navigationPending, setNavigationPending] = useState(false);
+  const navigationRevision = useRef(0);
+  const currentOwner = useRef(cwd);
+  currentOwner.current = cwd;
+  const currentDirectory = useRef(browsePath);
+  currentDirectory.current = browsePath;
+  const selectionRevision = useRef(0);
+  const actionRevision = useRef(0);
+  const [selectionPending, setSelectionPending] = useState(false);
+  const [selectionError, setSelectionError] = useState(false);
+  const treeRoot =
+    cwd &&
+    (browsePath === cwd || browsePath.startsWith(cwd.replace(/\/+$/, "") + "/"))
+      ? cwd
+      : "/";
+  useEffect(() => {
+    navigationRevision.current++;
+    setPathInput(cwd ?? "");
+    setPathError("");
+    setNavigationPending(false);
+    return () => {
+      navigationRevision.current++;
+    };
+  }, [cwd]);
+  const navigate = async (path: string) => {
+    const input = path.trim(),
+      owner = cwd,
+      own = ++navigationRevision.current;
+    if (!input.startsWith("/") || /[\\\x00-\x1f]/.test(input)) {
+      setNavigationPending(false);
+      setPathError("请输入有效的本机绝对路径");
+      return;
+    }
+    actionRevision.current++;
+    setNavigationPending(true);
+    try {
+      const canonical = await canonicalizePath(input);
+      if (!isCanonicalLocalPath(canonical))
+        throw new Error("服务未返回有效的本机目录");
+      if (own !== navigationRevision.current || currentOwner.current !== owner)
+        return;
+      await readDirectory(canonical);
+      if (own !== navigationRevision.current || currentOwner.current !== owner)
+        return;
+      setLocation({ owner, path: canonical });
+      setPathInput(canonical);
+      setPathError("");
+    } catch (error) {
+      if (own === navigationRevision.current && currentOwner.current === owner)
+        setPathError(error instanceof Error ? error.message : String(error));
+    } finally {
+      if (own === navigationRevision.current && currentOwner.current === owner)
+        setNavigationPending(false);
+    }
+  };
   const drafts = useFileDocumentStore((s) => s.documents);
   const [closing, setClosing] = useState<string | null>(null);
   const [fileAction, setFileAction] = useState<FileOperationTarget | null>(
     null,
   );
   const [selectedNode, setSelectedNode] = useState<{
+    owner: string | null;
     root: string;
     node: FileNode;
+    displayPath?: string;
+    activeFile: string | null;
+    revealRevision: number;
   } | null>(null);
   const [draggingFiles, setDraggingFiles] = useState(false);
   const [dropError, setDropError] = useState("");
-  const selected = selectedNode?.root === cwd ? selectedNode.node : null;
+  const selected =
+    selectedNode &&
+    selectedNode.owner === cwd &&
+    selectedNode.root === browsePath &&
+    selectedNode.activeFile === activeFile &&
+    selectedNode.revealRevision === revealRevision
+      ? selectedNode.node
+      : null;
   const currentFile =
-    activeFile && cwd && activeFile.startsWith(cwd.replace(/\/$/, "") + "/")
+    activeFile &&
+    browsePath &&
+    (activeFile.startsWith(browsePath.replace(/\/$/, "") + "/") ||
+      (currentFileOrigin.owner === cwd &&
+        currentFileOrigin.directory === browsePath &&
+        currentFileOrigin.path === activeFile))
       ? activeFile
       : null;
+  const rootForPath = (path: string) =>
+    path === treeRoot || path.startsWith(treeRoot.replace(/\/$/, "") + "/")
+      ? treeRoot
+      : "/";
+  const operationRoot = selected
+    ? rootForPath(selected.path)
+    : currentFile
+      ? rootForPath(currentFile)
+      : treeRoot;
   const operationTarget = selected
     ? { path: selected.path, isDir: selected.kind === "dir" }
     : currentFile
       ? { path: currentFile, isDir: false }
-      : null;
+      : operationRoot === "/" && browsePath
+        ? { path: browsePath, isDir: true }
+        : null;
   const selectNode = (node: FileNode) => {
-    if (cwd) setSelectedNode({ root: cwd, node });
+    if (navigationPending) return;
+    actionRevision.current++;
+    const own = ++selectionRevision.current;
+    const owner = cwd,
+      directory = browsePath;
+    if (!directory) return;
+    setPathError("");
+    setSelectionError(false);
+    setSelectedNode({
+      owner,
+      root: directory,
+      node,
+      displayPath: node.path,
+      activeFile,
+      revealRevision,
+    });
+    setSelectionPending(node.kind === "dir");
+    if (node.kind !== "dir") return;
+    void canonicalizePath(node.path)
+      .then((path) => {
+        if (!isCanonicalLocalPath(path))
+          throw new Error("服务未返回有效的本机目录");
+        if (
+          own !== selectionRevision.current ||
+          currentOwner.current !== owner ||
+          currentDirectory.current !== directory
+        )
+          return;
+        setSelectedNode({
+          owner,
+          root: directory,
+          node: { ...node, path },
+          displayPath: node.path,
+          activeFile,
+          revealRevision,
+        });
+      })
+      .catch((error) => {
+        if (
+          own === selectionRevision.current &&
+          currentOwner.current === owner &&
+          currentDirectory.current === directory
+        ) {
+          setSelectionError(true);
+          setPathError(error instanceof Error ? error.message : String(error));
+        }
+      })
+      .finally(() => {
+        if (
+          own === selectionRevision.current &&
+          currentOwner.current === owner &&
+          currentDirectory.current === directory
+        )
+          setSelectionPending(false);
+      });
   };
   useEffect(() => {
+    selectionRevision.current++;
+    actionRevision.current++;
+    setSelectionPending(false);
+    setSelectionError(false);
     setSelectedNode(null);
     setDropError("");
     setDraggingFiles(false);
-  }, [cwd, activeFile]);
+    return () => {
+      selectionRevision.current++;
+      actionRevision.current++;
+    };
+  }, [cwd, browsePath, activeFile, revealRevision]);
+  const handleNodeAction = async (
+    type: FileOperationTarget["type"],
+    node: FileNode,
+  ) => {
+    if (navigationPending) {
+      setPathError("正在切换目录，请稍后操作");
+      return;
+    }
+    const owner = cwd,
+      directory = browsePath,
+      own = ++actionRevision.current;
+    let path = node.path;
+    if (
+      node.kind === "dir" &&
+      ["new-file", "new-folder", "upload", "download"].includes(type)
+    ) {
+      try {
+        path = await canonicalizePath(path);
+        if (!isCanonicalLocalPath(path))
+          throw new Error("服务未返回有效的本机目录");
+      } catch (error) {
+        if (
+          own === actionRevision.current &&
+          currentOwner.current === owner &&
+          currentDirectory.current === directory
+        )
+          setPathError(error instanceof Error ? error.message : String(error));
+        return;
+      }
+      if (
+        own !== actionRevision.current ||
+        currentOwner.current !== owner ||
+        currentDirectory.current !== directory
+      )
+        return;
+    }
+    setFileAction({
+      type,
+      root: rootForPath(path),
+      path,
+      isDir: node.kind === "dir",
+    });
+  };
   const requestClose = (path: string) => {
     const doc = useFileDocumentStore.getState().documents[path];
     if (doc && doc.draft !== doc.base) setClosing(path);
@@ -97,6 +320,10 @@ export default function FilesPanel() {
 
   // Close tree overlay when a file is selected on mobile
   const handleFileSelect = async (path: string) => {
+    if (navigationPending) {
+      setPathError("正在切换目录，请稍后操作");
+      return;
+    }
     // Directory listings can return canonical paths beneath linked project folders.
     const ownerRoot =
       [cwd, ...(projects ?? [])]
@@ -105,7 +332,8 @@ export default function FilesPanel() {
             !!root &&
             (path === root || path.startsWith(root.replace(/\/+$/, "") + "/")),
         )
-        .sort((left, right) => right.length - left.length)[0] ?? cwd;
+        .sort((left, right) => right.length - left.length)[0] ??
+      rootForPath(path);
     if (await openWorkspaceFileReference({ path }, ownerRoot)) {
       if (isMobile) setIsFileTreeVisible(false);
     }
@@ -136,6 +364,16 @@ export default function FilesPanel() {
         event.preventDefault();
         event.stopPropagation();
         setDraggingFiles(false);
+        if (selectionPending || selectionError || navigationPending) {
+          setDropError(
+            navigationPending
+              ? "正在切换目录，请稍后上传"
+              : selectionError
+                ? "所选目录无法确认，请重新选择后上传"
+                : "正在解析所选目录，请稍后上传",
+          );
+          return;
+        }
         if (!cwd) return;
         if (
           Array.from(event.dataTransfer.items ?? []).some(
@@ -155,10 +393,10 @@ export default function FilesPanel() {
                 0,
                 operationTarget.path.lastIndexOf("/"),
               )
-          : cwd;
+          : browsePath;
         window.dispatchEvent(
           new CustomEvent("workspace-files-upload", {
-            detail: { root: cwd, dir, files },
+            detail: { root: operationRoot, dir, files },
           }),
         );
       }}
@@ -186,7 +424,19 @@ export default function FilesPanel() {
               >
                 <button
                   type="button"
-                  onClick={() => setActiveFile(path)}
+                  onClick={() => {
+                    setSelectedNode(null);
+                    setFileOrigin({
+                      path,
+                      revision:
+                        revealLocation?.path === path
+                          ? revealLocation.revision
+                          : 0,
+                      owner: cwd,
+                      directory: browsePath,
+                    });
+                    setActiveFile(path);
+                  }}
                   aria-label={`查看文件 ${getFilename(path)}`}
                   aria-pressed={isActive}
                   className={`flex h-9 min-w-0 items-center pl-3 pr-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${
@@ -242,8 +492,66 @@ export default function FilesPanel() {
         </Button>
       </div>
 
+      {cwd && (
+        <form
+          className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1"
+          onSubmit={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            void navigate(pathInput);
+          }}
+        >
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 shrink-0"
+            aria-label="返回上级目录"
+            title="返回上级目录"
+            disabled={browsePath === "/"}
+            onClick={() =>
+              void navigate(
+                browsePath
+                  .replace(/\/+$/, "")
+                  .slice(0, browsePath.replace(/\/+$/, "").lastIndexOf("/")) ||
+                  "/",
+              )
+            }
+          >
+            <ArrowUp className="h-4 w-4" />
+          </Button>
+          <Input
+            aria-label="文件浏览路径"
+            className="h-8 min-w-0 flex-1 text-xs"
+            value={pathInput}
+            onChange={(event) => {
+              navigationRevision.current++;
+              setNavigationPending(false);
+              setPathInput(event.target.value);
+            }}
+          />
+          <Button
+            type="submit"
+            variant="outline"
+            size="sm"
+            className="h-8 shrink-0"
+          >
+            前往
+          </Button>
+        </form>
+      )}
+      {pathError && (
+        <p role="alert" className="px-2 py-1 text-xs text-destructive">
+          {pathError}
+        </p>
+      )}
       <FileOperations
-        root={cwd}
+        root={
+          cwd && !selectionPending && !selectionError && !navigationPending
+            ? operationRoot
+            : null
+        }
+        displayRoot={operationRoot === "/" ? browsePath : operationRoot}
         target={operationTarget}
         action={fileAction}
         onAction={setFileAction}
@@ -319,17 +627,14 @@ export default function FilesPanel() {
                 className="h-full min-w-0 bg-sidebar/20 overflow-hidden"
               >
                 <FileTree
-                  folder={cwd}
+                  folder={browsePath}
                   onFileSelect={handleFileSelect}
                   onNodeSelect={selectNode}
-                  selectedPath={operationTarget?.path}
+                  selectedPath={
+                    selected ? selectedNode?.displayPath : operationTarget?.path
+                  }
                   onFileAction={(action, node) =>
-                    setFileAction({
-                      type: action,
-                      root: cwd,
-                      path: node.path,
-                      isDir: node.kind === "dir",
-                    })
+                    void handleNodeAction(action, node)
                   }
                 />
               </ResizablePanel>
@@ -348,17 +653,14 @@ export default function FilesPanel() {
             />
             <div className="absolute inset-y-0 right-0 z-20 w-[min(78vw,280px)] border-l border-border bg-sidebar/90 overflow-hidden backdrop-blur">
               <FileTree
-                folder={cwd}
+                folder={browsePath}
                 onFileSelect={handleFileSelect}
                 onNodeSelect={selectNode}
-                selectedPath={operationTarget?.path}
+                selectedPath={
+                  selected ? selectedNode?.displayPath : operationTarget?.path
+                }
                 onFileAction={(action, node) =>
-                  setFileAction({
-                    type: action,
-                    root: cwd,
-                    path: node.path,
-                    isDir: node.kind === "dir",
-                  })
+                  void handleNodeAction(action, node)
                 }
               />
             </div>

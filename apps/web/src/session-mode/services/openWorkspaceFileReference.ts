@@ -26,8 +26,9 @@ export async function openWorkspaceFileReference(
     );
   };
   try {
-    if (!root) throw new Error("无法确定文件所属项目，请先选择项目");
-    const target = await resolveWorkspaceFileReference(root, reference.path);
+    const ownerRoot = root || (reference.path.startsWith("/") ? "/" : null);
+    if (!ownerRoot) throw new Error("无法确定文件所属项目，请先选择项目");
+    const target = await resolveWorkspaceFileReference(ownerRoot, reference.path);
     if (!stillCurrent()) return false;
     if (
       !target ||

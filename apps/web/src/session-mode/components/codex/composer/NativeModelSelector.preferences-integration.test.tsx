@@ -33,7 +33,7 @@ const OWNER = sessionDraftKey("codex", A), OTHER = sessionDraftKey("codex", B);
 const DRAFT = "E3 保留未发送正文\n附件和另一会话不变";
 const NINE = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra", "persistent"] as const;
 const COMMANDS = ["提高推理强度", "降低推理强度", "循环切换推理强度"] as const;
-const DEFAULT_VISIBLE = ["low", "medium", "high", "xhigh"];
+const DEFAULT_VISIBLE = ["low", "medium", "high", "xhigh", "max", "ultra"];
 
 function model(): Model {
   return {
@@ -205,34 +205,34 @@ afterEach(() => {
   finally { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); }
 });
 
-it.each([{ expanded: false }, { expanded: true }])("projects default hAt6 into readonly known-nine UI / expanded=$expanded", async ({ expanded }) => {
+it.each([{ expanded: false }, { expanded: true }])("projects the advertised default into readonly known-nine UI / expanded=$expanded", async ({ expanded }) => {
   const surface = await mount({ expanded, raw: "max" });
-  expect(useNativeModelPickerPreferencesStore.getState().enabledReasoningEfforts).toEqual(["low", "medium", "high", "xhigh", "ultra", "persistent"]);
+  expect(useNativeModelPickerPreferencesStore.getState().enabledReasoningEfforts).toEqual(["low", "medium", "high", "xhigh", "max", "ultra", "persistent"]);
   assertReadOnly(surface);
-  expect.soft(trigger().querySelector(".session-native-model-effort")?.textContent).toBe("中");
+  expect.soft(trigger().querySelector(".session-native-model-effort")?.textContent).toBe("Max");
   const { menu } = await openPower(); assertReadOnly(surface);
-  expectPower(menu, DEFAULT_VISIBLE.length, "中", 2);
+  expectPower(menu, DEFAULT_VISIBLE.length, "Max", 5);
   expect(useThreadModelStore.getState().threads[A].reasoningEffort).toBe("max");
 });
 
 it.each([{ expanded: false }, { expanded: true }])("shares default projected pointer/arrow/status/wheel and main command steps / expanded=$expanded", async ({ expanded }) => {
   const surface = await mount({ expanded });
   const { menu, slider } = await openPower(); assertReadOnly(surface);
-  expectPower(menu, 4, "中", 2);
+  expectPower(menu, 6, "中", 2);
   fireEvent.pointerDown(slider, { button: 0, pointerId: 1, pointerType: "mouse", clientX: 240, clientY: 12 });
-  expectEffort(surface, "xhigh", "极高"); expectPower(menu, 4, "极高", 4);
+  expectEffort(surface, "ultra", "Ultra"); expectPower(menu, 6, "Ultra", 6);
   fireEvent.keyDown(menu.querySelector<HTMLElement>("[data-reasoning-slider]")!, { key: "ArrowLeft", code: "ArrowLeft" });
-  expectEffort(surface, "high", "高"); expectPower(menu, 4, "高", 3);
+  expectEffort(surface, "max", "Max"); expectPower(menu, 6, "Max", 5);
   expect(wheel(slider, -30).defaultPrevented).toBe(true);
-  expectEffort(surface, "xhigh", "极高"); expectPower(menu, 4, "极高", 4);
+  expectEffort(surface, "ultra", "Ultra"); expectPower(menu, 6, "Ultra", 6);
   await closePicker(menu);
   if (!expanded) {
     const beforeBoundary = useThreadModelStore.getState().threads[A], recent = recentModelConfigs();
     await command(COMMANDS[0]); assertProtected(surface);
     expect(useThreadModelStore.getState().threads[A]).toBe(beforeBoundary); expect(recentModelConfigs()).toEqual(recent);
-    expectEffort(surface, "xhigh", "极高");
-    await command(COMMANDS[1]); expectEffort(surface, "high", "高");
-    await command(COMMANDS[2]); expectEffort(surface, "xhigh", "极高");
+    expectEffort(surface, "ultra", "Ultra");
+    await command(COMMANDS[1]); expectEffort(surface, "max", "Max");
+    await command(COMMANDS[2]); expectEffort(surface, "ultra", "Ultra");
     await command(COMMANDS[2]); expectEffort(surface, "low", "轻度");
   }
 });
@@ -271,12 +271,12 @@ it.each([{ known: true }, { known: false }])("keeps empty preferences distinct f
   }
 });
 
-it("cannot enable ultra through nine own preferences and leaves raw ultra and generic legality intact", async () => {
+it("shows advertised ultra from nine own preferences and leaves the saved ultra unchanged", async () => {
   const surface = await mount({ raw: "ultra", enabled: NINE }); assertReadOnly(surface);
   expect(useNativeModelPickerPreferencesStore.getState().enabledReasoningEfforts).toEqual(NINE);
-  expect.soft(trigger().querySelector(".session-native-model-effort")?.textContent).toBe("中");
+  expect.soft(trigger().querySelector(".session-native-model-effort")?.textContent).toBe("Ultra");
   const { menu } = await openPower(); assertReadOnly(surface);
-  expectPower(menu, 7, "中", 4);
+  expectPower(menu, 8, "Ultra", 8);
   expect(useThreadModelStore.getState().threads[A].reasoningEffort).toBe("ultra");
 });
 

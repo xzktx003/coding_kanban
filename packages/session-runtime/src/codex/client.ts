@@ -16,6 +16,7 @@ import {
 } from "../core/json.js";
 import {
   JsonLineRpc,
+  RpcError,
   StdioRpc,
   type RpcCallbacks,
   type ServerRequest,
@@ -99,6 +100,11 @@ export class CodexService {
   private readonly attachedThreads = new Set<string>();
   private loadedRead?: Promise<Set<string>>;
   private readonly accessReads = new Map<string, Promise<JsonObject>>();
+  private accountRead?: {
+    generation: number;
+    revision: number;
+    work: Promise<Json>;
+  };
   private connectionScope?: string;
   private verifyDaemonBinding?: () => Promise<string>;
   connectionSnapshot(): {
@@ -180,6 +186,7 @@ export class CodexService {
         if (this.transport !== rpc) return;
         if (!(rpc instanceof StdioRpc)) void rpc.close();
         this.transport = undefined;
+        this.accountRead = undefined;
         this.starting = undefined;
         clearInterval(this.sweep);
         this.sweep = undefined;
@@ -301,6 +308,7 @@ export class CodexService {
     // runtime). Never retry the failed RPC; only a subsequent call reconnects.
     if (this.transport && !this.transport.available) {
       this.transport = undefined;
+      this.accountRead = undefined;
       this.starting = undefined;
       clearInterval(this.sweep);
       this.sweep = undefined;
@@ -322,6 +330,13 @@ export class CodexService {
   }
   readonly raw: Rpc = async (method, params, options) => {
     const transport = await this.ready();
+    if (
+      method === "account/read" &&
+      isObject(params) &&
+      params.refreshToken === false &&
+      Object.keys(params).length === 1
+    )
+      return this.readAccountSnapshot(transport, options?.signal);
     const response = await transport.request(method, params, options);
     if (this.transport === transport && transport.available) {
       const id = object(object(response).thread).id;
@@ -338,6 +353,76 @@ export class CodexService {
     }
     return response;
   };
+  /**
+   * One passive account discovery per connection generation and account
+   * revision. Callers share the result; a cancelled caller does not cancel it.
+   */
+  private readAccountSnapshot(
+    transport: JsonLineRpc,
+    signal?: AbortSignal,
+  ): Promise<Json> {
+    const generation = this.connectionGeneration;
+    const revision = this.accountRevision;
+    const current = this.accountRead;
+    const work =
+      current?.generation === generation && current.revision === revision
+        ? current.work
+        : this.startAccountRead(transport, generation, revision);
+    const snapshot = work.then((value) => structuredClone(value));
+    if (signal?.aborted)
+      return Promise.reject(new Error("NOT_SENT: RPC request aborted"));
+    if (!signal) return snapshot;
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (settle: () => void) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener("abort", abort);
+        settle();
+      };
+      const abort = () =>
+        finish(() => reject(new Error("NOT_SENT: RPC request aborted")));
+      signal.addEventListener("abort", abort, { once: true });
+      snapshot.then(
+        (value) => finish(() => resolve(value)),
+        (error: unknown) => finish(() => reject(error)),
+      );
+    });
+  }
+  private startAccountRead(
+    transport: JsonLineRpc,
+    generation: number,
+    revision: number,
+  ): Promise<Json> {
+    const work = transport
+      .request("account/read", { refreshToken: false }, { timeoutMs: 45_000 })
+      .then((value) => {
+        if (
+          this.connectionGeneration !== generation ||
+          this.accountRevision !== revision ||
+          this.transport !== transport ||
+          !transport.available
+        )
+          throw new Error(
+            "NOT_SENT: account or execution scope changed during context verification",
+          );
+        return structuredClone(value);
+      })
+      .catch((error: unknown) => {
+        if (this.accountRead?.work === work) this.accountRead = undefined;
+        if (
+          error instanceof RpcError &&
+          error.code === -32603 &&
+          error.message === "workspace routing discovery timed out"
+        )
+          throw new Error(
+            "WORKSPACE_ROUTING_DISCOVERY_TIMEOUT: native workspace routing discovery timed out",
+          );
+        throw error;
+      });
+    this.accountRead = { generation, revision, work };
+    return work;
+  }
   readonly call: Rpc = (method, params, options) =>
     this.ownership.call(method, params, options);
   readHistory(id: string): Promise<Json> {
@@ -396,6 +481,7 @@ export class CodexService {
       params = object(notification.params);
     if (["account/updated", "account/login/completed"].includes(method)) {
       this.accountRevision++;
+      this.accountRead = undefined;
       this.pending.clear();
       this.attachedThreads.clear();
       this.loadedRead = undefined;
@@ -576,9 +662,22 @@ export class CodexService {
     const scope = this.operationScope();
     const verifyBinding = this.verifyDaemonBinding;
     const daemonIdentity = verifyBinding ? await verifyBinding() : undefined;
-    const response = object(
-      await this.raw("account/read", { refreshToken: false }),
-    );
+    let response: JsonObject;
+    try {
+      response = object(
+        await this.raw("account/read", { refreshToken: false }),
+      );
+    } catch (error) {
+      if (
+        error instanceof RpcError &&
+        error.code === -32603 &&
+        error.message === "workspace routing discovery timed out"
+      )
+        throw new Error(
+          "WORKSPACE_ROUTING_DISCOVERY_TIMEOUT: native workspace routing discovery timed out",
+        );
+      throw error;
+    }
     if (scope !== this.operationScope() || !this.transport?.available)
       throw new Error(
         "NOT_SENT: account or execution scope changed during context verification",

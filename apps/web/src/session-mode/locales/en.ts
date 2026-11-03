@@ -508,6 +508,8 @@ export const en = {
     workingFor: "Working for {{time}}",
     workedFor: "Worked for {{time}}",
     workActivity: "Activity",
+    waitingForOutput:
+      "No activity or reply is visible yet. The request may still be processing or the connection may be delayed.",
     readFiles_one: "Read {{count}} file",
     readFiles_other: "Read {{count}} files",
     ranCommands_one: "Ran {{count}} command",

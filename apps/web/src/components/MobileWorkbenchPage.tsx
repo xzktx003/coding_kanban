@@ -15,17 +15,19 @@ import {
 
 import type { AgentCompletionNotificationPermission } from "../lib/agent-completion-notifications";
 import { sendAgentInput } from "../lib/api";
+import { mobileImeCommit } from "../lib/mobile-terminal-input";
+import { phoneTerminalMinimumHeight } from "../lib/mobile-terminal-mode";
 import {
   groupSessions,
   type SessionGroupState,
 } from "../lib/session-groups";
+import { WORKBENCH_MODE_KEY, workbenchModeUrl } from "../lib/workbench-mode";
 import { buildTerminalPreviewLines } from "../lib/terminal-preview";
 import { AgentTranscriptDialog } from "./AgentTranscriptDialog";
 import { ChangesPanel } from "./ChangesPanel";
 import { LazyTerminalView } from "./LazyTerminalView";
-import { MobileAgentComposer } from "./MobileAgentComposer";
 import { MobileFileBrowser } from "./MobileFileBrowser";
-import { MobileTerminalToolbar } from "./MobileTerminalToolbar";
+import { MobileTerminalAccessory } from "./MobileTerminalAccessory";
 
 interface MobileWorkbenchPageProps {
   showBrand?: boolean;
@@ -470,7 +472,7 @@ export function MobileWorkbenchPage({
   onTerminalFontSizeChange,
   onToggleAgentCompletionNotifications,
 }: MobileWorkbenchPageProps) {
-  const [view, setView] = useState<MobileWorkbenchView>("session");
+  const [view, setView] = useState<MobileWorkbenchView>("board");
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
     activeSessionId,
   );
@@ -487,6 +489,8 @@ export function MobileWorkbenchPage({
   >(() => new Set());
   const sessionSwitcherRef = useRef<HTMLDivElement>(null);
   const inputQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const imeRef = useRef<HTMLTextAreaElement>(null);
+  const imeComposingRef = useRef(false);
   const [inputActivity, setInputActivity] = useState<{
     sessionId: string;
     revision: number;
@@ -571,6 +575,11 @@ export function MobileWorkbenchPage({
     let fullHeight = window.innerHeight;
     const syncKeyboardLayout = () => {
       if (!(page instanceof HTMLElement)) return;
+      if (document.body.classList.contains("mobile-terminal-route")) {
+        page.removeAttribute("data-keyboard-open");
+        syncNavClearance();
+        return;
+      }
       const height = Math.min(
         window.innerHeight,
         viewport?.height ?? window.innerHeight,
@@ -585,7 +594,7 @@ export function MobileWorkbenchPage({
         fullHeight = Math.max(fullHeight, height);
       }
       const composerFocused =
-        page.querySelector(".mobile-agent-composer-input:focus") !== null;
+        page.querySelector(".mobile-terminal-ime:focus") !== null;
       page.toggleAttribute(
         "data-keyboard-open",
         composerFocused &&
@@ -678,8 +687,20 @@ export function MobileWorkbenchPage({
     return pending;
   };
 
+  const sendCommitted = (text: string | null) => {
+    if (!text) return;
+    void handleSendInput(text);
+  };
+
+  const sessionOpen = view === "session" && !sessionFilesOpen;
+  const terminalMinHeight =
+    typeof window === "undefined" ? 180 : phoneTerminalMinimumHeight(window.innerHeight);
+
   return (
-    <main className="mobile-workbench-page">
+    <main
+      className="mobile-workbench-page"
+      data-session-open={sessionOpen ? "" : undefined}
+    >
       <header className="mobile-workbench-header">
         <div className="mobile-workbench-mode-switch" aria-label="端切换">
           <div className="mobile-workbench-title">
@@ -701,8 +722,18 @@ export function MobileWorkbenchPage({
                 : "暂无可用会话"}
             </span>
           </div>
-          <a className="mobile-workbench-desktop-link" href="/">
-            {showBrand ? "电脑端 Coding Kanban" : "电脑端"}
+          <a
+            className="mobile-workbench-desktop-link"
+            href={workbenchModeUrl("/", "session")}
+            onClick={() => {
+              try {
+                localStorage.setItem(WORKBENCH_MODE_KEY, "session");
+              } catch {
+                /* The URL still selects session mode. */
+              }
+            }}
+          >
+            会话
           </a>
           {onToggleAgentCompletionNotifications && (
             <button
@@ -737,6 +768,27 @@ export function MobileWorkbenchPage({
               </div>
               <strong>{visibleSessions.length} 个会话</strong>
             </div>
+            {sessionGroups.groups.length > 0 && (
+              <div aria-label="会话分组" className="mobile-session-groups">
+                {groupSessions(visibleSessions, sessionGroups).map((group) => (
+                  <section className="mobile-session-group" key={group.id}>
+                    <header>
+                      <strong>{group.name}</strong>
+                      <small>{group.sessions.length}</small>
+                    </header>
+                    {group.sessions.map((session) => (
+                      <button
+                        key={session.id}
+                        onClick={() => openSession(session)}
+                        type="button"
+                      >
+                        {session.displayName}
+                      </button>
+                    ))}
+                  </section>
+                ))}
+              </div>
+            )}
             {isLoading ? (
               <div className="mobile-workbench-empty">正在加载会话...</div>
             ) : attentionSortedSessions.length === 0 ? (
@@ -873,7 +925,7 @@ export function MobileWorkbenchPage({
         )}
 
         {view === "session" && (
-          <div className="mobile-session-view">
+          <div className="mobile-session-view mobile-session-view--fullscreen">
             {sessionFilesOpen && activeSession ? (
               <MobileFileBrowser
                 backLabel="返回终端"
@@ -882,28 +934,46 @@ export function MobileWorkbenchPage({
               />
             ) : (
               <>
-                <MobileSessionSwitcher
-                  activeSession={activeSession}
-                  containerRef={sessionSwitcherRef}
-                  onOpenChanges={() => {
-                    setSessionPickerOpen(false);
-                    setChangesOpen(true);
-                  }}
-                  onOpenFiles={() => {
-                    setSessionPickerOpen(false);
-                    if (activeSession) setSessionFilesOpen(true);
-                  }}
-                  onOpenTranscript={() => {
-                    setSessionPickerOpen(false);
-                    if (activeSession) setTranscriptSession(activeSession);
-                  }}
-                  onSelectSession={openSession}
-                  onToggle={() => setSessionPickerOpen((current) => !current)}
-                  open={sessionPickerOpen}
-                  sessions={sessionPickerSortedSessions}
-                  sessionGroups={sessionGroups}
-                />
-                <section className="mobile-terminal-surface">
+                <header className="mobile-terminal-bar">
+                  <button onClick={() => setView("board")} type="button">
+                    看板
+                  </button>
+                  <a
+                    href={workbenchModeUrl("/", "session")}
+                    onClick={() => {
+                      try {
+                        localStorage.setItem(WORKBENCH_MODE_KEY, "session");
+                      } catch {
+                        /* The URL still selects session mode. */
+                      }
+                    }}
+                  >
+                    会话
+                  </a>
+                  <strong>{activeSession?.displayName ?? "没有可用会话"}</strong>
+                  <button
+                    aria-expanded={sessionPickerOpen}
+                    aria-label="会话工具"
+                    onClick={() => setSessionPickerOpen((current) => !current)}
+                    type="button"
+                  >
+                    菜单
+                  </button>
+                  <button
+                    aria-label="输入"
+                    onPointerDown={(event) => {
+                      event.preventDefault();
+                      imeRef.current?.focus();
+                    }}
+                    type="button"
+                  >
+                    输入
+                  </button>
+                </header>
+                <section
+                  className="mobile-terminal-surface"
+                  style={{ minHeight: terminalMinHeight }}
+                >
                   <div className="mobile-terminal-frame">
                     {isLoading ? (
                       <div className="grid-empty">
@@ -940,17 +1010,85 @@ export function MobileWorkbenchPage({
                       </div>
                     )}
                   </div>
+                  <textarea
+                    aria-label="终端输入"
+                    className="mobile-terminal-ime"
+                    ref={imeRef}
+                    onCompositionEnd={(event) => {
+                      imeComposingRef.current = false;
+                      const text = mobileImeCommit({
+                        type: "compositionend",
+                        data: event.data,
+                      });
+                      event.currentTarget.value = "";
+                      sendCommitted(text);
+                    }}
+                    onCompositionStart={() => {
+                      imeComposingRef.current = true;
+                    }}
+                    onCompositionUpdate={(event) => {
+                      mobileImeCommit({
+                        type: "compositionupdate",
+                        data: event.data,
+                      });
+                    }}
+                    onInput={(event) => {
+                      const text = mobileImeCommit({
+                        type: "input",
+                        data: event.currentTarget.value,
+                        composing:
+                          imeComposingRef.current ||
+                          event.nativeEvent.isComposing,
+                      });
+                      if (!text) return;
+                      event.currentTarget.value = "";
+                      sendCommitted(text);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter" || event.nativeEvent.isComposing) {
+                        return;
+                      }
+                      event.preventDefault();
+                      sendCommitted("\r");
+                    }}
+                  />
                 </section>
-                <div className="mobile-terminal-controls">
-                  <MobileTerminalToolbar
-                    disabled={!activeSession}
-                    onSendInput={handleSendInput}
-                  />
-                  <MobileAgentComposer
-                    disabled={!activeSession}
-                    onSendInput={handleSendInput}
-                  />
-                </div>
+                <MobileTerminalAccessory
+                  disabled={!activeSession}
+                  onSendInput={handleSendInput}
+                />
+                {sessionPickerOpen && (
+                  <div
+                    aria-label="会话工具"
+                    className="mobile-terminal-drawer"
+                    role="dialog"
+                  >
+                    <MobileSessionSwitcher
+                      activeSession={activeSession}
+                      containerRef={sessionSwitcherRef}
+                      onOpenChanges={() => {
+                        setSessionPickerOpen(false);
+                        setChangesOpen(true);
+                      }}
+                      onOpenFiles={() => {
+                        setSessionPickerOpen(false);
+                        if (activeSession) setSessionFilesOpen(true);
+                      }}
+                      onOpenTranscript={() => {
+                        setSessionPickerOpen(false);
+                        if (activeSession) setTranscriptSession(activeSession);
+                      }}
+                      onSelectSession={(session) => {
+                        setSessionPickerOpen(false);
+                        openSession(session);
+                      }}
+                      onToggle={() => setSessionPickerOpen(false)}
+                      open
+                      sessions={sessionPickerSortedSessions}
+                      sessionGroups={sessionGroups}
+                    />
+                  </div>
+                )}
               </>
             )}
           </div>

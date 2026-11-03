@@ -22,6 +22,12 @@ import {
   measureTouchDistance,
   saveMobileTerminalFontSize,
 } from "../lib/mobile-terminal-touch";
+import { buildSgrMouseReport } from "../lib/mobile-terminal-pointer";
+import {
+  classifyTermuxFinger,
+  listenTermuxPointer,
+  termuxFlingRows,
+} from "../lib/termux-extra-keys";
 import {
   recordTerminalFrame,
   registerTerminalWebSocket,
@@ -318,6 +324,7 @@ export const TerminalView = memo(function TerminalView({
     let handleMobileTouchStart: ((event: TouchEvent) => void) | null = null;
     let handleMobileTouchMove: ((event: TouchEvent) => void) | null = null;
     let handleMobileTouchEnd: ((event: TouchEvent) => void) | null = null;
+    let stopTermuxPointer: (() => void) | null = null;
     let handleTerminalWheelCapture: ((event: WheelEvent) => void) | null = null;
     let handleDocumentWheelCapture: ((event: WheelEvent) => void) | null = null;
     let sendTmuxWheelFallback: ((event: WheelEvent) => boolean) | null = null;
@@ -1718,17 +1725,68 @@ export const TerminalView = memo(function TerminalView({
         scrollRemainder: number;
         startDistance: number;
         startFontSize: number;
+        startX: number;
+        startY: number;
+        moved: number;
+        longPressed: boolean;
+        lastMoveAt: number;
+        velocityY: number;
+        fingerActive: boolean;
       } = {
         lastY: 0,
         mode: "idle",
         scrollRemainder: 0,
         startDistance: 0,
         startFontSize: initialFontSize,
+        startX: 0,
+        startY: 0,
+        moved: 0,
+        longPressed: false,
+        lastMoveAt: 0,
+        velocityY: 0,
+        fingerActive: false,
+      };
+      let longPressTimer: ReturnType<typeof setTimeout> | null = null;
+      const clearLongPress = () => {
+        if (longPressTimer !== null) {
+          clearTimeout(longPressTimer);
+          longPressTimer = null;
+        }
+      };
+      const screenBox = () => {
+        const screen = container.querySelector(".xterm-screen");
+        return screen instanceof HTMLElement
+          ? screen.getBoundingClientRect()
+          : container.getBoundingClientRect();
+      };
+      const sendSgr = (
+        button: number,
+        release: boolean,
+        clientX: number,
+        clientY: number,
+      ) => {
+        const box = screenBox();
+        const report = buildSgrMouseReport({
+          button,
+          release,
+          clientX,
+          clientY,
+          screenLeft: box.left,
+          screenTop: box.top,
+          screenWidth: box.width,
+          screenHeight: box.height,
+          cols: term.cols,
+          rows: term.rows,
+        });
+        // Mobile view keeps xterm stdin off. Mouse reports still have to reach tmux.
+        if (report) sendTerminalTransportPayload(report);
       };
 
       const shouldIgnoreMobileTouch = (target: EventTarget | null) =>
         target instanceof HTMLElement &&
-        target.closest(".terminal-mobile-bottom-btn") !== null;
+        (target.closest(".terminal-mobile-bottom-btn") !== null ||
+          target.closest(".termux-extra-key") !== null ||
+          target.closest(".mobile-terminal-bar") !== null);
 
       const preventMobileTouchDefault = (event: TouchEvent) => {
         if (event.cancelable) {
@@ -1737,7 +1795,7 @@ export const TerminalView = memo(function TerminalView({
       };
 
       handleMobileTouchStart = (event) => {
-        if (shouldIgnoreMobileTouch(event.target)) {
+        if (shouldIgnoreMobileTouch(event.target) || !container.contains(event.target as Node)) {
           return;
         }
 
@@ -1745,7 +1803,18 @@ export const TerminalView = memo(function TerminalView({
           preventMobileTouchDefault(event);
           touchState.mode = "scroll";
           touchState.lastY = event.touches[0]!.clientY;
+          touchState.startX = event.touches[0]!.clientX;
+          touchState.startY = event.touches[0]!.clientY;
+          touchState.moved = 0;
+          touchState.longPressed = false;
           touchState.scrollRemainder = 0;
+          touchState.lastMoveAt = performance.now();
+          touchState.velocityY = 0;
+          touchState.fingerActive = true;
+          clearLongPress();
+          longPressTimer = setTimeout(() => {
+            touchState.longPressed = true;
+          }, 400);
           return;
         }
 
@@ -1764,13 +1833,43 @@ export const TerminalView = memo(function TerminalView({
       };
 
       handleMobileTouchMove = (event) => {
-        if (shouldIgnoreMobileTouch(event.target)) {
+        if (touchState.mode === "idle") {
           return;
         }
 
         if (event.touches.length === 1 && touchState.mode === "scroll") {
           preventMobileTouchDefault(event);
-          const nextY = event.touches[0]!.clientY;
+          const point = event.touches[0]!;
+          const now = performance.now();
+          const elapsed = Math.max(1, now - touchState.lastMoveAt);
+          touchState.velocityY = (point.clientY - touchState.lastY) / elapsed;
+          touchState.lastMoveAt = now;
+          touchState.moved = Math.max(
+            touchState.moved,
+            Math.hypot(point.clientX - touchState.startX, point.clientY - touchState.startY),
+          );
+          const action = classifyTermuxFinger({
+            moved: touchState.moved,
+            deltaY: point.clientY - touchState.lastY,
+            lineHeight: getTerminalLineHeight(),
+            longPress: false,
+            mouseTracking: tmuxMouseReportingRef.current,
+            alternateScreen: term.buffer.active.type === "alternate",
+          });
+          if (touchState.moved > 12) clearLongPress();
+          if (action.type === "wheel" || action.type === "arrows") {
+            const steps = Math.abs(action.rows);
+            for (let index = 0; index < steps; index += 1) {
+              if (action.type === "wheel") {
+                sendSgr(action.rows < 0 ? 64 : 65, false, point.clientX, point.clientY);
+              } else {
+                sendTerminalTransportPayload(action.rows < 0 ? "\x1b[A" : "\x1b[B");
+              }
+            }
+            touchState.lastY = point.clientY;
+            return;
+          }
+          const nextY = point.clientY;
           const deltaY = nextY - touchState.lastY;
           const result = computeMobileTerminalScrollLines({
             accumulatedDeltaY: touchState.scrollRemainder + deltaY,
@@ -1809,12 +1908,41 @@ export const TerminalView = memo(function TerminalView({
       };
 
       handleMobileTouchEnd = (event) => {
-        if (shouldIgnoreMobileTouch(event.target)) {
+        if (touchState.mode === "idle") {
           return;
         }
 
         if (event.touches.length === 0) {
+          const action = classifyTermuxFinger({
+            moved: touchState.moved,
+            deltaY: 0,
+            lineHeight: getTerminalLineHeight(),
+            longPress: touchState.longPressed,
+            mouseTracking: tmuxMouseReportingRef.current,
+            alternateScreen: term.buffer.active.type === "alternate",
+          });
+          clearLongPress();
+          if (action.type === "tap" && tmuxMouseReportingRef.current) {
+            sendSgr(0, false, touchState.startX, touchState.startY);
+            sendSgr(0, true, touchState.startX, touchState.startY);
+          } else if (action.type !== "tap") {
+            const extraRows = termuxFlingRows(
+              touchState.velocityY,
+              getTerminalLineHeight(),
+              term.rows,
+            );
+            const steps = Math.abs(extraRows);
+            for (let index = 0; index < steps; index += 1) {
+              if (tmuxMouseReportingRef.current) {
+                sendSgr(extraRows < 0 ? 64 : 65, false, touchState.startX, touchState.lastY);
+              } else if (term.buffer.active.type === "alternate") {
+                sendTerminalTransportPayload(extraRows < 0 ? "\x1b[A" : "\x1b[B");
+              }
+            }
+          }
+          touchState.fingerActive = false;
           touchState.mode = "idle";
+          touchState.moved = 0;
           touchState.scrollRemainder = 0;
           return;
         }
@@ -1837,22 +1965,99 @@ export const TerminalView = memo(function TerminalView({
             : initialFontSize;
       };
 
-      container.addEventListener(
+      const handleTermuxPointerDown = (event: PointerEvent) => {
+        if (touchState.fingerActive || event.pointerType === "touch") return;
+        if (!tmuxMouseReportingRef.current || touchState.mode !== "idle") return;
+        const target = event.target;
+        if (shouldIgnoreMobileTouch(target)) return;
+        const box = container.getBoundingClientRect();
+        const pointX = event.clientX;
+        const pointY = event.clientY;
+        const inside =
+          pointX >= box.left &&
+          pointX <= box.right &&
+          pointY >= box.top &&
+          pointY <= box.bottom;
+        if (!inside) return;
+        touchState.startX = pointX;
+        touchState.startY = pointY;
+        touchState.lastY = pointY;
+        touchState.mode = "scroll";
+        touchState.moved = 0;
+        touchState.longPressed = false;
+      };
+      const handleTermuxPointerMove = (event: PointerEvent) => {
+        if (touchState.fingerActive || event.pointerType === "touch") return;
+        if (touchState.mode !== "scroll") return;
+        touchState.moved = Math.max(
+          touchState.moved,
+          Math.hypot(event.clientX - touchState.startX, event.clientY - touchState.startY),
+        );
+        touchState.scrollRemainder += event.clientY - touchState.lastY;
+        touchState.lastY = event.clientY;
+        const action = classifyTermuxFinger({
+          moved: touchState.moved,
+          deltaY: touchState.scrollRemainder,
+          lineHeight: getTerminalLineHeight(),
+          longPress: false,
+          mouseTracking: tmuxMouseReportingRef.current,
+          alternateScreen: term.buffer.active.type === "alternate",
+        });
+        if (action.type === "wheel") {
+          touchState.scrollRemainder -= action.rows * getTerminalLineHeight();
+          const steps = Math.abs(action.rows);
+          for (let index = 0; index < steps; index += 1) {
+            sendSgr(action.rows < 0 ? 64 : 65, false, event.clientX, event.clientY);
+          }
+          touchState.lastY = event.clientY;
+        }
+      };
+      const handleTermuxPointerUp = (event: PointerEvent) => {
+        if (touchState.fingerActive || event.pointerType === "touch") return;
+        if (touchState.mode !== "scroll") return;
+        const releaseDelta = event.clientY - touchState.startY;
+        const releaseAction = classifyTermuxFinger({
+          moved: Math.abs(releaseDelta),
+          deltaY: releaseDelta,
+          lineHeight: getTerminalLineHeight(),
+          longPress: touchState.longPressed,
+          mouseTracking: tmuxMouseReportingRef.current,
+          alternateScreen: term.buffer.active.type === "alternate",
+        });
+        if (releaseAction.type === "wheel") {
+          const steps = Math.abs(releaseAction.rows);
+          for (let index = 0; index < steps; index += 1) {
+            sendSgr(releaseAction.rows < 0 ? 64 : 65, false, event.clientX, event.clientY);
+          }
+        } else if (tmuxMouseReportingRef.current) {
+          sendSgr(0, false, touchState.startX, touchState.startY);
+          sendSgr(0, true, touchState.startX, touchState.startY);
+        }
+        touchState.mode = "idle";
+        touchState.moved = 0;
+      };
+      stopTermuxPointer = listenTermuxPointer(document, {
+        down: (event) => handleTermuxPointerDown(event as PointerEvent),
+        move: (event) => handleTermuxPointerMove(event as PointerEvent),
+        up: (event) => handleTermuxPointerUp(event as PointerEvent),
+      });
+      const touchRoot = document;
+      touchRoot.addEventListener(
         "touchstart",
         handleMobileTouchStart,
         MOBILE_TOUCH_LISTENER_OPTIONS,
       );
-      container.addEventListener(
+      touchRoot.addEventListener(
         "touchmove",
         handleMobileTouchMove,
         MOBILE_TOUCH_LISTENER_OPTIONS,
       );
-      container.addEventListener(
+      touchRoot.addEventListener(
         "touchend",
         handleMobileTouchEnd,
         MOBILE_TOUCH_LISTENER_OPTIONS,
       );
-      container.addEventListener(
+      touchRoot.addEventListener(
         "touchcancel",
         handleMobileTouchEnd,
         MOBILE_TOUCH_LISTENER_OPTIONS,
@@ -2103,7 +2308,7 @@ export const TerminalView = memo(function TerminalView({
       }
     });
 
-    if (interactive) {
+    if (interactive && !mobileTouchMode) {
       handleTerminalBlurCapture = (event) => {
         const related = event.relatedTarget as HTMLElement | null;
         const relatedTerminal = related?.closest(
@@ -2476,27 +2681,28 @@ export const TerminalView = memo(function TerminalView({
       if (handleTerminalBlurCapture) {
         container.removeEventListener("blur", handleTerminalBlurCapture, true);
       }
+      stopTermuxPointer?.();
       if (handleMobileTouchStart) {
-        container.removeEventListener(
+        document.removeEventListener(
           "touchstart",
           handleMobileTouchStart,
           MOBILE_TOUCH_LISTENER_OPTIONS,
         );
       }
       if (handleMobileTouchMove) {
-        container.removeEventListener(
+        document.removeEventListener(
           "touchmove",
           handleMobileTouchMove,
           MOBILE_TOUCH_LISTENER_OPTIONS,
         );
       }
       if (handleMobileTouchEnd) {
-        container.removeEventListener(
+        document.removeEventListener(
           "touchend",
           handleMobileTouchEnd,
           MOBILE_TOUCH_LISTENER_OPTIONS,
         );
-        container.removeEventListener(
+        document.removeEventListener(
           "touchcancel",
           handleMobileTouchEnd,
           MOBILE_TOUCH_LISTENER_OPTIONS,

@@ -45,6 +45,80 @@ it("shows source immediately and toggles native wrapping without adding line num
   expect(document.querySelector("[data-line-number]")).toBeNull();
 });
 
+it("shows streaming source immediately and later replaces only the matching prefix", () => {
+  vi.useFakeTimers();
+  try {
+    const view = render(
+      <NativeCodeFence code="alpha" language="typescript" streaming />,
+    );
+    expect(screen.getByText("alpha")).toBeTruthy();
+    expect(callbacks).toHaveLength(0);
+    act(() => vi.advanceTimersByTime(120));
+    expect(callbacks).toHaveLength(1);
+    view.rerender(
+      <NativeCodeFence code={"alpha\nbeta"} language="typescript" streaming />,
+    );
+    expect(screen.getByText("beta")).toBeTruthy();
+    act(() => callbacks[0]('<span style="color:blue">alpha</span>'));
+    expect(screen.getByText("alpha").style.color).toBe("blue");
+    expect(screen.getByText("beta")).toBeTruthy();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("cancels a streaming highlight after the fence leaves the viewport", () => {
+  vi.useFakeTimers();
+  const observers: Array<{
+    callback: IntersectionObserverCallback;
+  }> = [];
+  const original = globalThis.IntersectionObserver;
+  class FakeObserver {
+    constructor(callback: IntersectionObserverCallback) {
+      observers.push({ callback });
+    }
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+    takeRecords() {
+      return [];
+    }
+  }
+  globalThis.IntersectionObserver =
+    FakeObserver as unknown as typeof IntersectionObserver;
+  try {
+    render(<NativeCodeFence code="alpha" language="typescript" streaming />);
+    const observer = observers[0];
+    act(() => {
+      observer.callback(
+        [{ isIntersecting: true } as IntersectionObserverEntry],
+        observer as unknown as IntersectionObserver,
+      );
+    });
+    act(() => {
+      observer.callback(
+        [{ isIntersecting: false } as IntersectionObserverEntry],
+        observer as unknown as IntersectionObserver,
+      );
+    });
+    act(() => vi.advanceTimersByTime(120));
+    expect(callbacks).toHaveLength(0);
+    act(() => vi.advanceTimersByTime(120));
+    expect(callbacks).toHaveLength(1);
+    act(() => {
+      observer.callback(
+        [{ isIntersecting: false } as IntersectionObserverEntry],
+        observer as unknown as IntersectionObserver,
+      );
+    });
+    act(() => callbacks[0]('<span style="color:blue">alpha</span>'));
+    expect(screen.getByText("alpha").style.color).not.toBe("blue");
+  } finally {
+    globalThis.IntersectionObserver = original;
+    vi.useRealTimers();
+  }
+});
+
 it("does not let a stale highlighter return replace the current code", async () => {
   const view = render(<NativeCodeFence code="first" language="typescript" />);
   view.rerender(<NativeCodeFence code="second" language="typescript" />);

@@ -21,6 +21,7 @@ vi.mock("@session/components/codex/stores", () => ({
 vi.mock("@session/services/apiAdapt/codex", () => ({
   allowSleep: vi.fn(),
   preventSleep: vi.fn(),
+  threadGoalSet: vi.fn(),
 }));
 
 beforeEach(() => {

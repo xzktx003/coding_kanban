@@ -25,7 +25,7 @@ type PreferenceStore = {
 };
 const SUBJECT_MODULES = import.meta.glob<Record<string, unknown>>("./useNativeModelPickerPreferencesStore.ts");
 const KEY = "kanban.session.native-model-picker-preferences";
-const DEFAULT = ["low", "medium", "high", "xhigh", "ultra", "persistent"];
+const DEFAULT = ["low", "medium", "high", "xhigh", "max", "ultra", "persistent"];
 const ALL = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra", "persistent"];
 const FOREIGN_KEYS = [
   "codex:persisted-atom:composer-model-picker-selection-mode-v1",

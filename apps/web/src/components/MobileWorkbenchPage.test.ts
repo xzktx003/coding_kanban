@@ -296,7 +296,7 @@ describe("MobileWorkbenchPage", () => {
     );
   });
 
-  it("opens directly on the current session instead of the board", () => {
+  it("lands on the board so a session opens into the fullscreen terminal", () => {
     installDocumentStub();
 
     const markup = renderToStaticMarkup(
@@ -333,17 +333,13 @@ describe("MobileWorkbenchPage", () => {
 
     assert.match(markup, /手机端 Coding Kanban/);
     assert.match(markup, /src="\/houmo-logo.png"/);
-    assert.match(markup, /电脑端 Coding Kanban/);
-    assert.match(markup, /href="\/"/);
+    assert.match(markup, /href="\/\?mode=session"/);
+    assert.match(markup, />会话</);
     assert.match(markup, /执行中的任务/);
-    assert.match(
-      markup,
-      /mobile-workbench-content mobile-workbench-content--session/,
-    );
-    assert.match(markup, /mobile-terminal-surface/);
-    assert.match(markup, /手机终端快捷键/);
-    assert.match(markup, /aria-label="当前会话" class="active"/);
-    assert.doesNotMatch(markup, /等待你的回答或确认/);
+    assert.match(markup, /手机工作区/);
+    assert.doesNotMatch(markup, /mobile-agent-composer/);
+    assert.doesNotMatch(markup, /mobile-terminal-surface/);
+    assert.match(markup, /aria-label="看板" class="active"/);
     assert.match(
       markup,
       /data-testid="mobile-agent-completion-notification-toggle"/,
@@ -389,23 +385,32 @@ describe("MobileWorkbenchPage", () => {
       }),
     );
     const css = readFileSync(new URL("../app.css", import.meta.url), "utf8");
+    const pageSource = readFileSync(
+      new URL("./MobileWorkbenchPage.tsx", import.meta.url),
+      "utf8",
+    );
 
-    assert.match(markup, /class="mobile-terminal-controls"/);
+    assert.match(markup, /手机工作区/);
     assert.match(
       css,
-      /\.mobile-terminal-controls\s*{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;[^}]*flex-shrink:\s*0;/s,
+      /\.termux-extra-keys\s*{[^}]*display:\s*flex;/s,
     );
     assert.match(
       css,
-      /\.mobile-workbench-page\[data-keyboard-open\]\s+\.mobile-workbench-content--session\s*{[^}]*padding-bottom:\s*0;/s,
+      /\.mobile-workbench-page\[data-session-open\]\s+\.mobile-primary-nav\s*{[^}]*display:\s*none;/s,
     );
     assert.match(
       css,
-      /\.mobile-workbench-page\[data-keyboard-open\]\s+\.mobile-primary-nav\s*{[^}]*display:\s*none;/s,
+      /\.mobile-terminal-surface\s*{[^}]*flex:\s*1;[^}]*min-height:\s*0;/s,
     );
+    assert.match(css, /\.mobile-terminal-ime\s*{[^}]*opacity:\s*0;/s);
     assert.match(
-      css,
-      /\.mobile-workbench-page\[data-keyboard-open\]\s+\.mobile-agent-composer\s*{[^}]*padding-bottom:\s*8px;/s,
+      pageSource,
+      /aria-label="输入"/,
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /onPointerDown=\{\(\) => imeRef\.current\?\.focus\(\)\}/,
     );
   });
 
@@ -562,5 +567,6 @@ describe("embedded mobile branding", () => {
     assert.doesNotMatch(markup, /src="\/houmo-logo.png"/);
     assert.doesNotMatch(markup, /手机端 Coding Kanban/);
     assert.match(markup, /mobile-workbench-desktop-link/);
+    assert.match(markup, /href="\/\?mode=session"/);
   });
 });

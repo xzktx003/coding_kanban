@@ -26,12 +26,10 @@ it("renders bounded live Markdown and switches to the final document without ass
     />,
   );
 
-  expect(
-    container.querySelector("[data-codex-streaming-text]")?.textContent,
-  ).toBe(text);
-  expect(
-    container.querySelector("[data-testid=markdown-renderer]")?.textContent,
-  ).toBe(text);
+  const liveText = container.querySelector("[data-codex-streaming-text]");
+  expect(liveText?.querySelector("strong")?.textContent).toBe("still streaming");
+  expect(liveText?.querySelector("code")?.textContent).toContain("const answer = 42;");
+  expect(container.querySelector("[data-testid=markdown-renderer]")).toBeNull();
   expect(container.querySelector(".codex-message-native-actions")).toBeNull();
 
   rerender(<AgentMessageItem text={text} threadId="thread" itemId="message" />);

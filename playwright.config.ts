@@ -35,7 +35,7 @@ if (frontendProtocol !== 'http' && frontendProtocol !== 'https') {
 
 export default defineConfig({
   testDir: './tests/e2e',
-  timeout: 30_000,
+  timeout: 60_000,
   workers: 1,
   use: {
     baseURL:

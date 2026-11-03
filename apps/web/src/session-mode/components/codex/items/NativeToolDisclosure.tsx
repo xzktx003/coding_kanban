@@ -37,7 +37,7 @@ export function NativeToolDisclosure({
     </span>
   );
   return (
-    <div className={`codex-native-tool ${className}`}>
+    <div className={`codex-native-tool ${className}`} data-tool-row="">
       <div className="codex-native-tool-header">
         {body && (
           <button
