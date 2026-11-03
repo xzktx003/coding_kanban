@@ -1,3 +1,11 @@
+- 2026-11-02（工作区路由发现超时被当成启动失败）：只读 `account/read` 按连接代际合成一次，失败不进快照。`-32603` 且正文为 `workspace routing discovery timed out` 是可重试，不是 `DAEMON_CONTEXT_UNSUPPORTED`，也不永久作废刷新宿主绑定。绑定超时默认 45 秒，两次确认读仍各自发出。不要把 `refreshToken` 改成 true，也不要为这次超时重启共享 app-server。
+
+- 2026-11-02（Potentially unintended activity）：上游 `misalignment_policy_violation`，出字前拒绝。同一会话的「继续」会重放被拒上下文。本地拦住裸继续，并暂停活跃目标。不能把它当成看板可关闭的安全开关。
+
+- 2026-11-02（会话菜单看不到 Max）：旧默认偏好没有 max，普通投影又固定去掉 ultra。目录广告的 max、ultra 现在进菜单；persistent 继续排除。只升级精确的旧默认六项。完整访问下选 ultra 必须先确认。
+
+- 2026-10-31（会话发送被“队列连接暂不可用”卡住）：官方适配器遇到公开 `POST /api/codex/thread/queue/list` 缺失时，只对 Fastify 精确缺路由正文回退到已有内部 guarded raw call，并带当前 scope；同时缺少 operation-context 时必须返回 `FOLLOWUP_READ_UNAVAILABLE`。明确旧健康签名直接选择旧文件队列。不要把任意 404 当成空队列、旧写入或伪造 scope。另行授权 `--restart-runtime` 后，PID 1478472 换成 2197180；交互式登录 shell 必须有超时，否则会占住启动锁。
+
 - 2026-10-30（断网重连后 Codex 停在「已在另一个应用中打开」）：官方 `writerConflict` 按界面语言渲染。观察器原先只匹配英文 `Retry` + “This is open in another app” / “Close it there to continue here.”，简体是「重试」+「已在另一个应用中打开」+「请先在那边关闭会话，才能在这里继续。」，因此 `blockedByOtherApp` 恒为假，释放旧实例的入口不会出现。第二层：字符级 lock watch 在 conversationId 出现 30 秒后停止，断线重连的提示通常晚于这个窗口。文案以 VSIX `26.51007.21434` 的 `local-conversation-thread` 与 `zh-CN`/`zh-HK`/`zh-TW` 包为准；单独的「重试」按钮不能当占用。占用未解除前不要停观察。
 
 - 2026-10-29（会话运行中卡顿的渲染/持久化/入站放大）：普通助手消息的空审查投影导致整map同步写盘，正文delta又反复触发导航渲染；大无语言代码块实测阻塞1.4–1.6秒，暂停rAF的多item队列无总量上限。现空/同值投影set前退出并恢复时清空旧空记录、导航订阅问题数量、超限代码块保留完整纯文本、队列128项/1MiB及32项/4ms分批。保留审批/问题/完成/草稿/原阅读保护；各路径先红后绿，现场持续冻结及旧长期RSS未完整归因，见[本轮证据](../../docs/session-render-work-budget.md)。
@@ -1836,3 +1844,7 @@ HistoryProjectsDialog 按需加载前，必须切断 browser-dialog/WorkspaceSwi
 - 2026-10-31（原会话“继续”已接收却无法干活，remote compact反复响应体解码失败）：真实复现首轮采样前压缩失败，手动压缩三次尝试约370秒后仍failed。存活原生客户端0.161.0走HTTP，已安装CLI0.165.0并未自动替换它；新版只读临时fork对同历史以WebSocket完成压缩和回复。核对26个加载线程空闲/失败、Goal全空、无执行/未知队列及其他Agent子进程后，受控重建自有运行层和网关，保留既有运行配置，启用原生0.165.0，原线程恢复“继续”后完成压缩、执行命令和创建子Agent。四分钟未再现相同错误，最终原轮次约408秒正常completed、error为null；其他暂停队列和共享daemon保留。版本和传输同时变化，不宣称唯一网络因果或长期根治。见 [原会话恢复验收](../../docs/session-remote-compaction-recovery.md)。
 
 - 2026-11-02（会话完成没有飞书通知）：新版网关读取通知正文时无条件调用旧 stdio 运行服务不支持的 operation-context，空正文404造成 JSON 解码错误并持续 pending。按明确健康协议选择兼容只读路径，读取前后复核运行实例；新版账号校验不降级、不伪造旧版账号授权。保留完成/Goal/队列/子Agent过滤与去重，补充旧版发送、恢复、重复事件及实例变化回归。见 [通知兼容说明](../../docs/session-codex-feishu-notifications.md#2026-11-02新版网关复用旧运行服务的通知恢复)。
+
+- 2026-11-02（会话输入框选区与 Skill 跳动）：格式栏应在会话内浮层跟随选区，不进入输入区布局；输入框的最小高度只匹配 contenteditable=true，Skill 标签自身也须适配行高。保留选区、键盘、输入法和草稿隔离；验证及旧回归边界见 [专项记录](../../docs/designs/session-render-alignment/composer-selection-stability-20261102.md)。
+
+- 2026-11-02（会话长时间无可见回复）：同一轮原生连接系统超时并自动重试，最终回复可从只读历史读取；看板另有无关事件过早清除重试提示的问题。运行轮次无可见内容时给出不判断失败的说明，原生重试信息保留至同轮进展或结束；上游网络根因尚未闭合。见 [排查与验收](../../docs/session-silent-response-diagnosis.md)。
