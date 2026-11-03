@@ -219,7 +219,7 @@ node --test scripts/codex-feishu-notify.test.mjs
 
 启动关联本身不改变普通定位、输入和审批。它只在唯一匹配时更新卡片登记的 `agentSessionId`，让完整记录和任务摘要留在这次新开的 Codex 上，避免句柄关闭后又回到更早的登记。卡片回复必须额外通过私聊用户、原消息绑定、当前终端可控性及原生 queue 的精确线程校验；进程内另开会话、使用会话选择器恢复历史等仍需原来的实时身份线索，不保证通过创建时间确定其当前输入目标。
 
-终端卡片的「完整记录」复用这一关联：`resolveActiveCodexSessionId(..., {historyOnly: true})` 在严格定位无结果时，先匹配本次非 resume 进程启动窗口内唯一创建的 thread，并且先于 shell snapshot 和仍被打开的旧 rollout。匹配不到时，不再使用本次进程启动前的已登记历史；`codex resume` 没有新 thread 时才保留目录一致的原登记。本地 tmux 的 Codex 卡片每 5 秒按同样规则重绑。多个候选、resume/fork、当前不是 Codex 或元数据缺失时不按目录猜测最近记录。这仍不能证明进程内切换后的输入目标。
+终端卡片的「完整记录」复用这一关联：`resolveActiveCodexSessionId(..., {historyOnly: true})` 在严格定位无结果时，先匹配本次非 resume 进程启动窗口内唯一创建的 thread，并且先于 shell snapshot 和仍被打开的旧 rollout。匹配不到时，不再使用本次进程启动前的已登记历史、启动时的 shell snapshot 或仍打开的旧 rollout；`codex resume` 没有新 thread 时才保留目录一致的原登记。本地 tmux 的 Codex 卡片每 5 秒按同样规则重绑。多个候选、resume/fork、当前不是 Codex 或元数据缺失时不按目录猜测最近记录。这仍不能证明进程内切换后的输入目标。
 
 新的输出／状态变化后，如果暂时定位不到完成、结构化读取报错或发送失败，通知器按既有 2 秒间隔最多恢复探测 3 次；同一轮多窗格失败只消耗一轮预算。成功回执与已观察的完成 ID 分开，失败仍可重试，成功后同 turn 不重复发送。新的真实输出重置预算；删除会话、关闭通知器清理计时器和状态。启动时的空结果／异常基线不后台补历史，`shouldNotify:false` 与内部续跑规则保持。终端通知仍不提供持久 outbox 保证。
 

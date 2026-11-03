@@ -209,6 +209,15 @@ function isCodexAppServer(args: readonly string[]): boolean {
   return args.includes("app-server");
 }
 
+function isFreshLaunchArguments(args: readonly string[]): boolean {
+  return (
+    !isCodexAppServer(args) &&
+    !args.includes("fork") &&
+    !args.includes("resume") &&
+    !args.includes("--resume")
+  );
+}
+
 function isBareResumeArguments(args: readonly string[]): boolean {
   if (args.includes("fork")) return false;
   let sawResume = false;
@@ -853,6 +862,9 @@ export class CodexSessionLocator {
       );
       if (launchBorn === "ambiguous") return undefined;
       if (launchBorn) return launchBorn;
+      // No thread was born with this process. A startup shell snapshot or an
+      // older rollout still held open belongs to the previous instance.
+      if (this.hasFreshLaunch(codexProcessIds)) return undefined;
     }
 
     // `codex resume` can close the rollout file between writes. In that case
@@ -956,6 +968,13 @@ export class CodexSessionLocator {
     return undefined;
   }
 
+
+  private hasFreshLaunch(codexProcessIds: readonly number[]): boolean {
+    return codexProcessIds.some((processId) => {
+      const args = readProcessArguments(this.procRoot, processId);
+      return args !== null && isFreshLaunchArguments(args);
+    });
+  }
 
   private freshLaunchPredates(
     codexProcessIds: readonly number[],

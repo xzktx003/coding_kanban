@@ -1841,3 +1841,6 @@ HistoryProjectsDialog 按需加载前，必须切断 browser-dialog/WorkspaceSwi
 
 - 2026-11-03（新开 Codex 后完整记录仍绑定旧对话）：同一 tmux 窗格关掉 Codex 再执行不带 resume/fork 的新实例时，只读恢复先返回卡片上的旧 `agentSessionId`，启动窗口内唯一的新 thread 被排在后面。句柄暂时打开时接口能看到新记录，句柄关闭后又回到旧记录；离线卡片的任务摘要刷新键也不含 thread ID，摘要停在旧对话。现在非 resume 的唯一启动线程优先于登记历史，多个候选直接放弃而不回退旧 ID；history-only 得到不同的精确 thread 时写回卡片并随 5 秒窗格同步重绑，任务摘要使用同一身份且在 thread 变化时刷新。普通输入、审批和有歧义的启动仍不猜测。回归覆盖启动优先、无新线程时保留旧登记、歧义不回退，以及 history-only 写回与本地 Codex 重绑范围。
 - 2026-11-04（新开 Codex 仍可能显示启动前的旧完整记录）：只读恢复虽然会比较启动线程，但仍可能先命中仍打开的旧 rollout 或 shell snapshot，匹配失败后又退回卡片上更早的 `agentSessionId`。现在非 resume/fork 的唯一启动线程优先于这两类旧关联；没有新线程时也不再显示本次进程启动前的登记。旧 rollout 即使仍被进程打开，也不能盖住新实例。resume 没有新 thread 时保留原登记。普通输入仍只认当前打开的 rollout，不跟随这条只读绑定。
+
+- 2026-11-04（新开 Codex 没有新线程时仍绑上旧 snapshot 或打开的旧 rollout）：只读定位在启动窗口没有唯一新 thread 时继续匹配 shell snapshot 和进程树里打开的旧文件。新进程不再使用这些旧线索；resume 的 snapshot 和普通输入仍按原规则。locator 27 项通过。
+- 2026-11-04：删除 9 个没有任何引用的会话模式移植文件；未挂载但有设计和测试的宿主/云面板保留。
