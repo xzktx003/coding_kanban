@@ -14,7 +14,7 @@
 | G02 | `/init` 缺 AGENTS.md 存在检查 | **已修复** | `slashCommands.ts:149` paths-exist + truncated + scope guard |
 | G03 | 会话动作菜单重命名 disabled | **已改变** | 无 `onRename` 时回退 `openOwnerForm("rename")` |
 | G04 | 快捷键无按键捕获/保存，Reset 报错 | **已修复** | `sessionKeyboardShortcuts` 服务含 record/save/reset/bindings |
-| G05 | 听写 starting disabled 却提示可取消 | 待复核宿主；`BrowserDictationButton` 已有 cancel 分支 | 需 E2E 确认文案与可操作性一致 |
+| G05 | 听写 starting disabled 却提示可取消 | **已核对** | `BrowserDictationButton.test` 证明 starting 态按钮非 disabled 且点击即取消；真实会话听写入口在 |
 | G06 | 归档列表固定 50 条无游标 | **已修复** | `ArchivedThreadSettings` 有 nextCursor + 加载更多 |
 | G07 | 流式正文纯文本，完成才 Markdown | **已修复** | `AgentMessageItem` 用 `StreamingCodexMarkdown` 渐进渲染 |
 | G08 | commentary 展示全过程 | **已实现** | func_list “正文默认最新进展并可展开全部”；turn 工作折叠 |
