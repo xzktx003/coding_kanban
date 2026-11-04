@@ -209,3 +209,46 @@ test("propagates queue submission failures to the caller", async () => {
     /queue offline/,
   );
 });
+
+test("a legacy runtime card queues against the runtime identity, not an account scope", async () => {
+  const submitted: FollowupSubmit[] = [];
+  const contexts: string[] = [];
+  let identity = { backend: "legacy-stdio", instance: "runtime-a", scopeToken: "legacy-token" };
+  const service = new SessionCodexFeishuReplyService({
+    context: async () => {
+      contexts.push("account");
+      return { scope: "modern-scope", namespace: "account-a" };
+    },
+    legacyRuntime: async () => identity,
+    readThread: async () => thread(),
+    submit: async (input) => {
+      submitted.push(input);
+    },
+  });
+  await service.send({ messageId: "om_legacy_reply", threadId: "thread-one", text: "继续处理", legacyRuntime: true });
+  assert.equal(submitted[0].expectedScope, "legacy-token");
+  assert.equal(submitted[0].threadId, "thread-one");
+  assert.deepEqual(contexts, []);
+  identity = { backend: "shared-daemon", instance: "runtime-a", scopeToken: "legacy-token" };
+  await assert.rejects(
+    service.send({ messageId: "om_modern_runtime", threadId: "thread-one", text: "不能改绑", legacyRuntime: true }),
+    (error: unknown) => error instanceof Error && error.name === "SessionReplyUnauthorizedError",
+  );
+  identity = { backend: "legacy-stdio", instance: "runtime-b", scopeToken: "next-token" };
+  let reads = 0;
+  const changing = new SessionCodexFeishuReplyService({
+    legacyRuntime: async () => {
+      reads += 1;
+      return reads === 1 ? { backend: "legacy-stdio", instance: "runtime-a", scopeToken: "legacy-token" } : identity;
+    },
+    readThread: async () => thread(),
+    submit: async (input) => {
+      submitted.push(input);
+    },
+  });
+  await assert.rejects(
+    changing.send({ messageId: "om_changed_runtime", threadId: "thread-one", text: "实例变了", legacyRuntime: true }),
+    (error: unknown) => error instanceof Error && error.name === "SessionReplyUnauthorizedError",
+  );
+  assert.equal(submitted.length, 1);
+});

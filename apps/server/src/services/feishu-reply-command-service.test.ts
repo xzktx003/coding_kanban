@@ -7,6 +7,7 @@ import {
   FeishuReplyCommandService,
   type FeishuInboundMessageEvent,
 } from "./feishu-reply-command-service.js";
+import { SessionReplyUnauthorizedError } from "./session-codex-feishu-reply-service.js";
 import type { FeishuReplyBinding } from "./feishu-reply-binding-store.js";
 
 const binding: FeishuReplyBinding = {
@@ -730,4 +731,30 @@ test("rejects a parent reply belonging to a different native target and respects
     },
   });
   assert.equal(await disabled.service.handle(validEvent), "ignored_disabled");
+});
+
+test("a session card without an account scope is offered to the legacy runtime and is not retried as a terminal", async () => {
+  const sent: any[] = [];
+  const fixture = createFixture({
+    resolvedBinding: { ...binding, sessionId: "session-codex:native-thread", sessionModeThreadId: "native-thread" },
+    sessionMode: async (input) => {
+      sent.push(input);
+    },
+  });
+  assert.equal(await fixture.service.handle(validEvent), "delivered");
+  assert.deepEqual(sent, [{ messageId: "om_reply", threadId: "native-thread", text: "继续运行测试", legacyRuntime: true }]);
+  assert.deepEqual(fixture.sessionLookups, []);
+  assert.deepEqual(fixture.writes, []);
+});
+
+test("a scopeless session card is ignored when the current runtime cannot authorize it", async () => {
+  const fixture = createFixture({
+    resolvedBinding: { ...binding, sessionId: "session-codex:native-thread", sessionModeThreadId: "native-thread" },
+    sessionMode: async () => {
+      throw new SessionReplyUnauthorizedError();
+    },
+  });
+  assert.equal(await fixture.service.handle(validEvent), "ignored_unavailable");
+  assert.equal(fixture.processed.size, 0);
+  assert.deepEqual(fixture.sessionLookups, []);
 });

@@ -1844,3 +1844,5 @@ HistoryProjectsDialog 按需加载前，必须切断 browser-dialog/WorkspaceSwi
 
 - 2026-11-04（新开 Codex 没有新线程时仍绑上旧 snapshot 或打开的旧 rollout）：只读定位在启动窗口没有唯一新 thread 时继续匹配 shell snapshot 和进程树里打开的旧文件。新进程不再使用这些旧线索；resume 的 snapshot 和普通输入仍按原规则。locator 27 项通过。
 - 2026-11-04：删除 9 个没有任何引用的会话模式移植文件；未挂载但有设计和测试的宿主/云面板保留。
+
+- 2026-11-04（会话模式飞书回复进不了对应窗口）：旧 stdio 运行层发出的完成卡片只有 `sessionModeThreadId`，没有账号 scope/namespace。回复命令把这种卡片直接记成 `ignored_unavailable`，消息没有进入会话队列。现在仅当当前协议仍是同一个 legacy-stdio 实例时，用该实例的运行范围入队；不调用旧服务没有的 operation-context，也不补造账号授权。新版运行层或实例变化仍拒绝这些旧卡片。回归覆盖旧运行层 `turn/start` 投递，以及新版无范围卡片继续忽略。

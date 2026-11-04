@@ -12,7 +12,15 @@ export interface SessionCodexFeishuReplyInput {
   threadId: string;
   text: string;
   nativeContext?: { scope: string; namespace: string };
+  /** A completion card saved by a legacy runtime has a thread but no account scope. */
+  legacyRuntime?: boolean;
   image?: FeishuImageResource;
+}
+
+export interface LegacySessionRuntimeIdentity {
+  backend: string;
+  instance: string;
+  scopeToken: string;
 }
 
 interface SessionCodexFeishuReplyServiceOptions {
@@ -20,6 +28,14 @@ interface SessionCodexFeishuReplyServiceOptions {
   submit(input: FollowupSubmit): Promise<unknown>;
   attachmentRoot?: string;
   context?(): Promise<{ scope: string; namespace: string }>;
+  legacyRuntime?(): Promise<LegacySessionRuntimeIdentity>;
+}
+
+export class SessionReplyUnauthorizedError extends Error {
+  constructor() {
+    super("目标会话不可用");
+    this.name = "SessionReplyUnauthorizedError";
+  }
 }
 
 export class SessionCodexFeishuReplyService {
@@ -27,18 +43,26 @@ export class SessionCodexFeishuReplyService {
   readonly #submit: (input: FollowupSubmit) => Promise<unknown>;
   readonly #attachmentRoot?: string;
   readonly #context: SessionCodexFeishuReplyServiceOptions["context"];
+  readonly #legacyRuntime: SessionCodexFeishuReplyServiceOptions["legacyRuntime"];
 
   constructor(options: SessionCodexFeishuReplyServiceOptions) {
     this.#readThread = options.readThread;
     this.#submit = options.submit;
     this.#attachmentRoot = options.attachmentRoot;
     this.#context = options.context;
+    this.#legacyRuntime = options.legacyRuntime;
   }
 
   async send(input: SessionCodexFeishuReplyInput): Promise<void> {
     const messageId = validMessageId(input.messageId);
     const threadId = validThreadId(input.threadId);
     if (typeof input.text !== "string") throw targetUnavailable();
+
+    if (input.legacyRuntime) {
+      if (input.nativeContext) throw new SessionReplyUnauthorizedError();
+      await this.#submit(await this.#legacySubmission(messageId, threadId, input));
+      return;
+    }
 
     const expected = input.nativeContext;
     const verify = async () => {
@@ -63,6 +87,50 @@ export class SessionCodexFeishuReplyService {
       mode: "queue",
       ...(this.#context && expected ? { expectedScope: expected.scope } : {}),
     });
+  }
+
+  async #legacySubmission(
+    messageId: string,
+    threadId: string,
+    input: SessionCodexFeishuReplyInput,
+  ): Promise<FollowupSubmit> {
+    if (!this.#legacyRuntime) throw new SessionReplyUnauthorizedError();
+    const before = await this.#readLegacyIdentity();
+    await this.#assertTarget(threadId);
+    const images = input.image ? [await this.#saveImage(messageId, input.image)] : [];
+    const after = await this.#readLegacyIdentity();
+    if (after.scopeToken !== before.scopeToken || after.instance !== before.instance) {
+      throw new SessionReplyUnauthorizedError();
+    }
+    return {
+      id: `feishu:${messageId}`,
+      threadId,
+      text: input.text,
+      images,
+      parameters: {},
+      mode: "queue",
+      expectedScope: before.scopeToken,
+    };
+  }
+
+  async #readLegacyIdentity(): Promise<LegacySessionRuntimeIdentity> {
+    let identity: LegacySessionRuntimeIdentity;
+    try {
+      identity = await this.#legacyRuntime!();
+    } catch (error) {
+      if (error instanceof SessionReplyUnauthorizedError) throw error;
+      throw error;
+    }
+    if (
+      identity?.backend !== "legacy-stdio" ||
+      typeof identity.instance !== "string" ||
+      !identity.instance ||
+      typeof identity.scopeToken !== "string" ||
+      !identity.scopeToken
+    ) {
+      throw new SessionReplyUnauthorizedError();
+    }
+    return identity;
   }
 
   async #assertTarget(threadId: string): Promise<void> {

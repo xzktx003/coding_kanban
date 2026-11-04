@@ -468,3 +468,96 @@ test("a trusted native completion card reply starts the original session once an
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("legacy session runtime delivers a scopeless Feishu reply to the original thread", async () => {
+  const { FeishuReplyBindingStore } = await import("../services/feishu-reply-binding-store.js");
+  const { FeishuReplyCommandService } = await import("../services/feishu-reply-command-service.js");
+  const root = await mkdtemp(join(tmpdir(), "kanban-legacy-reply-"));
+  const streams = new Set<ServerResponse>();
+  const starts: any[] = [];
+  const runtime = createServer(async (request, response) => {
+    const url = new URL(request.url!, "http://localhost");
+    if (url.pathname === "/health") {
+      return void response.end(JSON.stringify({ status: "ok", instance: "legacy-runtime", capabilities: { codexOwnership: true } }));
+    }
+    if (url.pathname === "/api/events") {
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.write(": ready\n\n");
+      streams.add(response);
+      request.on("close", () => streams.delete(response));
+      return;
+    }
+    let raw = "";
+    for await (const chunk of request) raw += chunk;
+    const thread = { id: "legacy-thread", name: "旧会话", cwd: root, status: { type: "idle" }, turns: [] };
+    if (url.pathname === "/api/codex/thread/metadata" || url.pathname === "/api/codex/thread/read") {
+      return void response.end(JSON.stringify({ thread }));
+    }
+    if (url.pathname === "/api/codex/thread/list") {
+      return void response.end(JSON.stringify({ data: [thread], nextCursor: null }));
+    }
+    if (url.pathname === "/api/codex/turn/start") {
+      const body = raw ? JSON.parse(raw) : {};
+      starts.push(body);
+      return void response.end(JSON.stringify({ turn: { id: "turn-from-feishu" } }));
+    }
+    response.writeHead(404).end(JSON.stringify({ error: "unsupported " + url.pathname }));
+  });
+  await new Promise<void>((resolve) => runtime.listen(0, "127.0.0.1", resolve));
+  const address = runtime.address();
+  assert.ok(address && typeof address !== "string");
+  const bindings = new FeishuReplyBindingStore({ statePath: join(root, "bindings.json") });
+  const app = Fastify({ logger: false });
+  const native = registerSessionModeRoutes(app, {
+    origin: `http://127.0.0.1:${address.port}`,
+    attachmentRoot: join(root, "uploads"),
+  });
+  const service = new FeishuReplyCommandService({
+    allowedUserId: "ou_owner",
+    settings: { get: () => ({ configured: true, enabled: true, destinationType: "user" as const, replyConfigured: true, replyEnabled: true }) },
+    bindings,
+    sessionMode: native,
+    registry: { get: () => { throw new Error("legacy session replies must not use the terminal registry"); } },
+    images: { download: async () => { throw new Error("not an image"); } },
+    codex: {
+      resolveSessionId: async () => undefined,
+      sendText: async () => { assert.fail("terminal path"); },
+      sendImage: async () => { assert.fail("terminal path"); },
+    },
+  });
+  bindings.record({
+    sessionId: "session-codex:legacy-thread",
+    sessionModeThreadId: "legacy-thread",
+    completionId: "completed-turn",
+    messages: [{ messageId: "om_legacy_notice", chatId: "oc_private" }],
+  });
+  const event = {
+    type: "im.message.receive_v1",
+    message_id: "om_legacy_reply",
+    reply_to: "om_legacy_notice",
+    root_id: "om_legacy_notice",
+    chat_id: "oc_private",
+    chat_type: "p2p",
+    sender_id: "ou_owner",
+    sender_type: "user",
+    message_type: "text",
+    content: "继续下一项任务",
+  };
+  try {
+    await app.ready();
+    await until(() => streams.size === 1);
+    assert.equal(await service.handle(event), "delivered");
+    await until(() => starts.length === 1);
+    assert.equal(starts[0].threadId, "legacy-thread");
+    assert.equal(starts[0].clientUserMessageId, "feishu:om_legacy_reply");
+    assert.equal(starts[0].input[0].text, "继续下一项任务");
+    assert.equal(await service.handle(event), "ignored_duplicate");
+    assert.equal(starts.length, 1);
+  } finally {
+    await app.close();
+    for (const stream of streams) stream.end();
+    runtime.closeAllConnections();
+    await new Promise<void>((resolve) => runtime.close(() => resolve()));
+    await rm(root, { recursive: true, force: true });
+  }
+});

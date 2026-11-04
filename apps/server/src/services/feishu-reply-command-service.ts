@@ -41,7 +41,7 @@ export type FeishuReplyCommandOutcome =
   | "ignored_invalid_image"
   | "ignored_unavailable";
 
-import type { SessionCodexFeishuReplyInput } from "./session-codex-feishu-reply-service.js";
+import { SessionReplyUnauthorizedError, type SessionCodexFeishuReplyInput } from "./session-codex-feishu-reply-service.js";
 
 interface FeishuReplyCommandServiceOptions {
   sessionMode?: { send(input: SessionCodexFeishuReplyInput): Promise<void> };
@@ -208,7 +208,10 @@ export class FeishuReplyCommandService {
 
     if (binding.sessionModeThreadId) {
       if (!this.#sessionMode) return "ignored_unavailable";
-      if (!binding.sessionModeScope || !binding.sessionModeNamespace) return "ignored_unavailable";
+      const hasScope = typeof binding.sessionModeScope === "string" && binding.sessionModeScope.length > 0;
+      const hasNamespace = typeof binding.sessionModeNamespace === "string" && binding.sessionModeNamespace.length > 0;
+      if (hasScope !== hasNamespace) return "ignored_unavailable";
+      const legacyCard = !hasScope;
       this.#inFlightMessageIds.add(event.message_id);
       try {
         const image = imageKey
@@ -217,13 +220,23 @@ export class FeishuReplyCommandService {
               imageKey,
             })
           : undefined;
-        await this.#sessionMode.send({
-          messageId: event.message_id,
-          threadId: binding.sessionModeThreadId,
-          text: image ? DEFAULT_FEISHU_IMAGE_PROMPT : prompt!,
-          nativeContext: { scope: binding.sessionModeScope, namespace: binding.sessionModeNamespace },
-          ...(image ? { image } : {}),
-        });
+        try {
+          await this.#sessionMode.send({
+            messageId: event.message_id,
+            threadId: binding.sessionModeThreadId,
+            text: image ? DEFAULT_FEISHU_IMAGE_PROMPT : prompt!,
+            ...(legacyCard
+              ? { legacyRuntime: true }
+              : { nativeContext: { scope: binding.sessionModeScope!, namespace: binding.sessionModeNamespace! } }),
+            ...(image ? { image } : {}),
+          });
+        } catch (error) {
+          // A legacy card has no account binding. A modern runtime must ignore
+          // it instead of attaching the card to the current account. Temporary
+          // delivery failures stay retryable and are not marked processed.
+          if (legacyCard && error instanceof SessionReplyUnauthorizedError) return "ignored_unavailable";
+          throw error;
+        }
         this.#bindings.recordProcessedReply({
           messageId: event.message_id,
           parent: binding,

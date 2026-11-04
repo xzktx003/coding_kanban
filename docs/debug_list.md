@@ -3370,3 +3370,5 @@ resize 才回来。
 - 2026-11-04（新开 Codex 没有新线程时，启动 snapshot 和仍打开的旧 rollout 仍被当成完整记录）：上一轮只在找到启动线程时提前返回，找不到时仍继续匹配两分钟内的 shell snapshot，以及进程树里仍打开的旧 rollout。新实例启动时 Codex 常会写下旧会话的 snapshot，或继续持有旧文件，于是完整记录又回到更早的对话。现在只要窗格里有非 resume/fork/app-server 的新进程且启动窗口内没有唯一新 thread，只读关联直接为空，不再使用这两类旧线索。带 resume 的 snapshot 定位、普通输入跟随打开的 rollout 保持不变。回归：`a fresh Codex without a new thread ignores startup snapshots and open old rollouts`。
 
 - 2026-11-04（会话模式里有一批从未接入的移植文件）：`Tips`、`SettingsSidebar`、`parseSessionJsonl`、`useAuthStore`、`useSkillGroupsStore`、`useTextSelection`、`formatDuration`、`formater` 和 `openAppIcons` 没有生产或测试引用。已删除这些文件。`LocalStorageDialog`、宿主面板和云面板仍保留：设计记录写明它们是未挂到菜单的真实实现，并有单独测试，不是这次能直接删的死代码。
+
+- 2026-11-04（会话模式飞书回复进不了对应窗口）：旧 stdio 运行层发出的完成卡片只有 `sessionModeThreadId`，没有账号 scope/namespace。回复命令把这种卡片直接记成 `ignored_unavailable`，消息没有进入会话队列。现在仅当当前协议仍是同一个 legacy-stdio 实例时，用该实例的运行范围入队；不调用旧服务没有的 operation-context，也不补造账号授权。新版运行层或实例变化仍拒绝这些旧卡片。回归覆盖旧运行层 `turn/start` 投递，以及新版无范围卡片继续忽略。

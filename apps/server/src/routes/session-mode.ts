@@ -481,9 +481,18 @@ export function registerSessionModeRoutes(
   const replyService = new SessionCodexFeishuReplyService({
     attachmentRoot: options.attachmentRoot,
     context: nativeContext,
+    legacyRuntime: async () => {
+      const selected = await protocol.read();
+      return { backend: selected.backend, instance: selected.instance, scopeToken: selected.scopeToken };
+    },
     submit: async (input) => {
-      const context = await nativeContext();
-      if (!input.expectedScope || input.expectedScope !== context.scope) throw new Error("原卡片的账号或运行范围已变化，消息尚未提交");
+      const selected = await protocol.read();
+      if (selected.backend === "legacy-stdio") {
+        if (input.expectedScope !== selected.scopeToken) throw new Error("运行实例已变化，消息尚未提交");
+      } else {
+        const context = await nativeContext();
+        if (!input.expectedScope || input.expectedScope !== context.scope) throw new Error("原卡片的账号或运行范围已变化，消息尚未提交");
+      }
       const result = await followups.enqueue(input);
       const message = result.items.find(row => row.id === input.id || row.nativeClientUserMessageId === input.id);
       if (!message || !["queued", "sending", "sent"].includes(message.status)) throw new Error(message?.error ?? "原会话送达结果待核对，不会重复发送");
