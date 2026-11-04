@@ -168,3 +168,50 @@ test("manual unread during a visibility dwell is not immediately undone without 
     vi.unstubAllGlobals();
   }
 });
+
+test("a visible Codex conversation clears unread when shared sync has no Codex namespace", async () => {
+  vi.useFakeTimers();
+  localStorage.clear();
+  const writes: unknown[] = [];
+  const urls: string[] = [];
+  const snapshot = {
+    revision: 0,
+    operationWindow: { id: "w", expiresAt: Date.now() + 60_000 },
+    namespaces: { codex: null, cc: "board", acp: "board" },
+    entries: [],
+  };
+  const close = startSessionManagementSync(async (url, init) => {
+    urls.push(String(url));
+    if (init?.method === "POST") writes.push(JSON.parse(String(init.body)));
+    return new Response(JSON.stringify(snapshot));
+  }, 1000);
+  const root = document.createElement("div");
+  root.className = "session-mode";
+  const marker = document.createElement("div");
+  root.append(marker);
+  document.body.append(root);
+  try {
+    await act(async () => vi.advanceTimersByTimeAsync(10));
+    useSessionAttentionStore.getState().complete("codex", "a", "reply");
+    const { unmount } = renderHook(() =>
+      useSessionReadReceipt("codex", "a", { current: marker }),
+    );
+    act(() => intersect([{ isIntersecting: true }]));
+    await act(async () => vi.advanceTimersByTimeAsync(300));
+    expect(
+      latestUnread(useSessionAttentionStore.getState().receipts["codex:a"]),
+    ).toBeNull();
+    await act(async () => vi.advanceTimersByTimeAsync(1100));
+    expect(
+      latestUnread(useSessionAttentionStore.getState().receipts["codex:a"]),
+    ).toBeNull();
+    expect(writes).toEqual([]);
+    expect(urls.some((url) => url.includes("/read-context?"))).toBe(false);
+    unmount();
+  } finally {
+    root.remove();
+    close();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  }
+});
