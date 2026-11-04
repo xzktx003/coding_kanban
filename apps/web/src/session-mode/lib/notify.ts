@@ -20,11 +20,19 @@ async function ensurePermission(): Promise<boolean> {
 export async function notifyDesktop(
   title: string,
   body?: string,
-  fallback?: () => void
+  fallback?: () => void,
+  options?: { silent?: boolean },
 ): Promise<void> {
   try {
     if (!isDesktopTauri() && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-      new Notification(title, { body, icon: '/houmo-logo.png', tag: title });
+      // The in-app completion beep is the only chime. A second system sound
+      // plays unless the accompanying notice is explicitly silent.
+      new Notification(title, {
+        body,
+        icon: '/houmo-logo.png',
+        tag: title,
+        silent: options?.silent === true,
+      });
       return;
     }
     if (isDesktopTauri() && (await ensurePermission())) {
