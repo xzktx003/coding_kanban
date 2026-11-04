@@ -8,6 +8,7 @@ import {
   buildAgentCompletionNotificationBody,
   collectAgentCompletionNotificationEvents,
   createVisibilityNotificationTracker,
+  dispatchAgentCompletionNotification,
   formatAgentCompletionNotificationsEnabled,
   getAgentCompletionNotificationPermission,
   loadAgentCompletionNotificationsEnabled,
@@ -236,3 +237,36 @@ describe("agent completion notifications", () => {
     }
   });
 });
+
+  it("asks the browser notification to stay silent", () => {
+    const options: NotificationOptions[] = [];
+    const previousNotification = globalThis.Notification;
+    function FakeNotification(_title: string, notificationOptions?: NotificationOptions) {
+      if (notificationOptions) options.push(notificationOptions);
+    }
+    Object.defineProperty(FakeNotification, "permission", {
+      configurable: true,
+      value: "granted",
+    });
+    Object.defineProperty(globalThis, "Notification", {
+      configurable: true,
+      value: FakeNotification,
+    });
+    try {
+      assert.equal(
+        dispatchAgentCompletionNotification({
+          id: "s1",
+          displayName: "Codex",
+          agentKind: "codex",
+          interactionState: "idle",
+        }),
+        true,
+      );
+      assert.equal(options[0]?.silent, true);
+    } finally {
+      Object.defineProperty(globalThis, "Notification", {
+        configurable: true,
+        value: previousNotification,
+      });
+    }
+  });

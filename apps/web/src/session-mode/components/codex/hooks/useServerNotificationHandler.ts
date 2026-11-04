@@ -21,8 +21,10 @@ import {
 import { useSessionAttentionStore } from "@session/stores/useSessionAttentionStore";
 import { revealNewQuestion } from "@session/features/async-questions/arrival";
 import { useSessionNameStore } from "../../../stores/useSessionNameStore";
-import { notifyDesktop } from "@session/lib/notify";
-import { isSessionModeActive } from "@session/session-dom";
+import {
+  isSessionCompletionAudible,
+  isSessionModeActive,
+} from "@session/session-dom";
 import { toast } from "sonner";
 import { type RefObject, useCallback, useEffect, useRef } from "react";
 import type { ServerNotification } from "@session/bindings/ServerNotification";
@@ -485,6 +487,7 @@ export function useServerNotificationHandler(
               claimCompletionChime(threadId, turnId));
           const playCompletionBeep =
             eligibleCompletion &&
+            isSessionCompletionAudible() &&
             shouldPlayCompletionBeep(
               refs.taskCompleteBeepModeRef.current,
               refs.isCodexThreadActiveRef.current,
@@ -493,12 +496,9 @@ export function useServerNotificationHandler(
             eligibleCompletion &&
             (document.hidden || !document.hasFocus() || !isSessionModeActive())
           ) {
-            void notifyDesktop(
-              "Codex 任务已完成",
-              undefined,
-              () => toast.success("Codex 任务已完成"),
-              { silent: true },
-            );
+            // The OS notification sound ignores Notification.silent here.
+            // The custom beep is the only completion sound; the toast is visual.
+            toast.success("Codex 任务已完成");
           }
           if (playCompletionBeep) playBeep();
         }

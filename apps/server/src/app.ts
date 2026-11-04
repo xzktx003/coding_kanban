@@ -50,6 +50,7 @@ import {
   AgentCompletionFeishuNotifier,
   type FeishuCompletionContentResolverLike,
   type FeishuCompletionSenderLike,
+  type StructuredCompletionChime,
 } from "./services/agent-completion-feishu-notifier.js";
 import { AppVersionService } from "./services/app-version-service.js";
 import { ClaudeImageMessageService } from "./services/claude-image-message-service.js";
@@ -139,6 +140,8 @@ interface BuildServerOptions {
   feishuNotificationSettingsService?: FeishuNotificationSettingsServiceLike;
   feishuCompletionSender?: FeishuCompletionSenderLike;
   feishuCompletionContentResolver?: FeishuCompletionContentResolverLike;
+  structuredCompletionProbeDelayMs?: number;
+  structuredCompletionProbeIntervalMs?: number;
   feishuReplyBindingStore?: FeishuReplyBindingStore;
   feishuQuickReplyStore?: Pick<FeishuQuickReplyStore, "read">;
   feishuReplyAllowedUserId?: string;
@@ -287,9 +290,23 @@ export function buildServer(options: BuildServerOptions = {}): {
         }
       })
     : null;
+  const completionChimeSockets = new Set<{
+    send(data: string): void;
+  }>();
+  const publishCompletionChime = (chime: StructuredCompletionChime) => {
+    const message = JSON.stringify({ type: "completion-chime", payload: chime });
+    for (const socket of completionChimeSockets) {
+      try {
+        socket.send(message);
+      } catch {
+        completionChimeSockets.delete(socket);
+      }
+    }
+  };
   const stopFeishuCompletionNotifier = options.feishuCompletionSender
     ? new AgentCompletionFeishuNotifier({
         source: registry,
+        onStructuredCompletion: publishCompletionChime,
         ...(restoredSnapshot ? { restoredSnapshot } : {}),
         settings: feishuNotificationSettingsService,
         sender: options.feishuCompletionSender,
@@ -337,6 +354,18 @@ export function buildServer(options: BuildServerOptions = {}): {
             codexTranscriptService,
             claudeTranscriptService,
           }),
+        ...(options.structuredCompletionProbeDelayMs === undefined
+          ? {}
+          : {
+              structuredCompletionProbeDelayMs:
+                options.structuredCompletionProbeDelayMs,
+            }),
+        ...(options.structuredCompletionProbeIntervalMs === undefined
+          ? {}
+          : {
+              structuredCompletionProbeIntervalMs:
+                options.structuredCompletionProbeIntervalMs,
+            }),
         logError(error, event) {
           app.log.error(
             { err: error, agentSessionId: event.sessionId },
@@ -668,6 +697,7 @@ export function buildServer(options: BuildServerOptions = {}): {
     instance.get("/ws/agent-sessions", { websocket: true }, (socket) => {
       let previousSnapshot: ReturnType<AgentSessionRegistry["list"]> | null =
         null;
+      completionChimeSockets.add(socket);
       const unsubscribe = registry.subscribe((snapshot) => {
         const event = createAgentSessionStreamEvent(previousSnapshot, snapshot);
         previousSnapshot = snapshot;
@@ -675,6 +705,7 @@ export function buildServer(options: BuildServerOptions = {}): {
       });
 
       socket.on("close", () => {
+        completionChimeSockets.delete(socket);
         unsubscribe();
       });
     });
