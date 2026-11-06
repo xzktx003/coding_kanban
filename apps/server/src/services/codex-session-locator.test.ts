@@ -1438,3 +1438,108 @@ test("completion startup matching never uses outer rewritten timestamps or mtime
     rmSync(f.root, { recursive: true, force: true });
   }
 });
+
+test("read-only completion ignores codex-relay sharing a pane with a later Codex", async () => {
+  const f = startupCompletionFixture();
+  try {
+    const relayStarted = f.started;
+    const codexStarted = f.started + 3 * 60 * 60 * 1000;
+    const current = f.candidate("current", codexStarted + 1_500);
+    f.candidate("relay-era", relayStarted + 1_500);
+    f.candidate("card-history", f.started - 60 * 60 * 1000);
+    const relay = join(f.procRoot, "700");
+    mkdirSync(join(relay, "task", "700"), { recursive: true });
+    writeFileSync(join(relay, "task", "700", "children"), "");
+    writeFileSync(
+      join(relay, "cmdline"),
+      "/usr/local/bin/codex-relay\0--upstream\0http://10.30.0.30:8000/v1\0--port\04446\0",
+    );
+    exposeProcessWorkingDirectory(f.procRoot, 700, "/workspace/shared");
+    utimesSync(relay, relayStarted / 1000, relayStarted / 1000);
+    writeFileSync(
+      join(f.procRoot, "601", "task", "601", "children"),
+      "602 700",
+    );
+    exposeOpenFile(f.procRoot, 602, current);
+    utimesSync(
+      join(f.procRoot, "602"),
+      codexStarted / 1000,
+      codexStarted / 1000,
+    );
+    const input = {
+      tmuxTarget: "%291",
+      workingDirectory: "/workspace/shared",
+      historySessionId: "codex-card-history",
+      readOnlyCompletion: true as const,
+    };
+    assert.equal(await f.locator.resolve(input), "codex-current");
+    assert.deepEqual(
+      await f.locator.resolveTmuxPanes("terminal", {
+        readOnlyCompletion: true,
+      }),
+      [
+        {
+          paneId: "%291",
+          sessionId: "codex-current",
+          workingDirectory: "/workspace/shared",
+        },
+      ],
+    );
+    assert.equal(
+      await f.locator.resolve({ ...input, readOnlyCompletion: false }),
+      "codex-current",
+    );
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("read-only completion uses the only Codex-held rollout when launch birth is ambiguous", async () => {
+  const f = startupCompletionFixture();
+  try {
+    const laterStarted = f.started + 3 * 60 * 60 * 1000;
+    const early = f.candidate("early", f.started + 1_500);
+    const current = f.candidate("current", laterStarted + 1_500);
+    f.candidate("card-history", f.started - 60 * 60 * 1000);
+    const later = join(f.procRoot, "800");
+    mkdirSync(join(later, "task", "800"), { recursive: true });
+    writeFileSync(join(later, "task", "800", "children"), "");
+    writeFileSync(join(later, "cmdline"), "/usr/local/bin/codex\0--yolo\0");
+    exposeProcessWorkingDirectory(f.procRoot, 800, "/workspace/shared");
+    exposeOpenFile(f.procRoot, 800, current);
+    utimesSync(later, laterStarted / 1000, laterStarted / 1000);
+    writeFileSync(
+      join(f.procRoot, "601", "task", "601", "children"),
+      "602 800",
+    );
+    const input = {
+      tmuxTarget: "%291",
+      workingDirectory: "/workspace/shared",
+      historySessionId: "codex-card-history",
+      readOnlyCompletion: true as const,
+    };
+    assert.equal(await f.locator.resolve(input), "codex-current");
+    assert.deepEqual(
+      await f.locator.resolveTmuxPanes("terminal", {
+        readOnlyCompletion: true,
+      }),
+      [
+        {
+          paneId: "%291",
+          sessionId: "codex-current",
+          workingDirectory: "/workspace/shared",
+        },
+      ],
+    );
+    exposeOpenFile(f.procRoot, 602, early);
+    utimesSync(join(f.procRoot, "602"), f.started / 1000, f.started / 1000);
+    assert.equal(await f.locator.resolve(input), undefined);
+    rmSync(join(f.procRoot, "602", "fd"), { recursive: true, force: true });
+    rmSync(join(f.procRoot, "800", "fd"), { recursive: true, force: true });
+    utimesSync(join(f.procRoot, "602"), f.started / 1000, f.started / 1000);
+    utimesSync(later, laterStarted / 1000, laterStarted / 1000);
+    assert.equal(await f.locator.resolve(input), undefined);
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});

@@ -177,16 +177,33 @@ function collectProcessTree(procRoot: string, rootPid: number): number[] {
   return [...visited];
 }
 
+function isCodexExecutable(executable: string): boolean {
+  // A relay shares the pane and can be born beside an older rollout, but it
+  // does not own a Codex thread. Other codex-* hosts stay eligible.
+  if (executable === "codex-relay") return false;
+  return executable === "codex" || executable.startsWith("codex-");
+}
+
+function codexOwnedLaunchSessionId(
+  launchBorn: string | "ambiguous" | undefined,
+  codexHeldSessionIds: ReadonlySet<string>,
+): string | undefined {
+  if (launchBorn && launchBorn !== "ambiguous") return launchBorn;
+  if (launchBorn === "ambiguous" && codexHeldSessionIds.size === 1) {
+    return [...codexHeldSessionIds][0];
+  }
+  return undefined;
+}
+
 function isCodexProcess(procRoot: string, processId: number): boolean {
   try {
     const commandLine = readFileSync(
       join(procRoot, String(processId), "cmdline"),
       "utf8",
     );
-    return commandLine.split("\0").some((argument) => {
-      const executable = argument.split("/").at(-1) ?? "";
-      return executable === "codex" || executable.startsWith("codex-");
-    });
+    return commandLine.split("\0").some((argument) =>
+      isCodexExecutable(argument.split("/").at(-1) ?? ""),
+    );
   } catch {
     return false;
   }
@@ -724,6 +741,7 @@ export class CodexSessionLocator {
         ? resolve(activePaneDirectory ?? input.workingDirectory!)
         : undefined;
     const candidates = new Map<string, OpenSessionCandidate>();
+    const codexHeldSessionIds = new Set<string>();
     const processIds = collectProcessTree(this.procRoot, panePid);
     const codexProcessIds = processIds.filter((processId) =>
       isCodexProcess(this.procRoot, processId),
@@ -764,6 +782,14 @@ export class CodexSessionLocator {
             resolve(candidate.cwd) !== normalizedDirectory)
         ) {
           continue;
+        }
+        const args = readProcessArguments(this.procRoot, processId);
+        if (
+          codexProcessIds.includes(processId) &&
+          args !== null &&
+          !isCodexAppServer(args)
+        ) {
+          codexHeldSessionIds.add(candidate.id);
         }
         candidates.set(target, candidate);
       }
@@ -860,11 +886,18 @@ export class CodexSessionLocator {
         codexProcessIds,
         sessionCandidates,
       );
-      if (launchBorn === "ambiguous") return undefined;
-      if (launchBorn) return launchBorn;
+      const ownedLaunch = codexOwnedLaunchSessionId(
+        launchBorn,
+        codexHeldSessionIds,
+      );
+      if (ownedLaunch) return ownedLaunch;
       // No thread was born with this process. A startup shell snapshot or an
       // older rollout still held open belongs to the previous instance.
-      if (this.hasFreshLaunch(codexProcessIds)) return undefined;
+      // Ambiguous births may use only the single rollout a real Codex process
+      // still has open; they must not fall through to registered history.
+      if (launchBorn === "ambiguous" || this.hasFreshLaunch(codexProcessIds)) {
+        return undefined;
+      }
     }
 
     // `codex resume` can close the rollout file between writes. In that case
@@ -913,8 +946,12 @@ export class CodexSessionLocator {
         codexProcessIds,
         sessionCandidates,
       );
+      const ownedLaunch = codexOwnedLaunchSessionId(
+        launchBorn,
+        codexHeldSessionIds,
+      );
+      if (ownedLaunch) return ownedLaunch;
       if (launchBorn === "ambiguous") return undefined;
-      if (launchBorn) return launchBorn;
       if (explicitResumeSessionIds.size === 0 && openCandidates.length > 0) {
         return openCandidates.sort(
           (left, right) => right.mtimeMs - left.mtimeMs,
