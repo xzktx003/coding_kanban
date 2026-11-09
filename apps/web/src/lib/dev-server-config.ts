@@ -129,6 +129,12 @@ export function resolveWebDevProxies(
       xfwd: true,
       ws: true,
     },
+    "/chatgpt-desktop": {
+      target: config.apiTarget,
+      changeOrigin: false,
+      xfwd: true,
+      ws: true,
+    },
     "/ws": { target: config.wsTarget, changeOrigin: false, ws: true },
   };
 }

@@ -194,12 +194,42 @@
 
 ### 独立 Codex 模式
 
-- 工作台现在包含会话、终端、Codex 三种模式，共用 `WorkbenchModeSwitch`，首次访问后保留各自挂载状态。原生插件适配开发集中在 `apps/web/src/codex-mode`，不得混入会话模式草稿/正文 store。
+- 工作台实现包含会话、终端、Codex、ChatGPT 四种模式，共用 `WorkbenchModeSwitch`；自 2026-11-09 起切换栏只显示前三种，ChatGPT 入口按用户要求隐藏。ChatGPT 代码和 `mode=chatgpt` 深链保留以便接续；在用户恢复开发前，不继续其功能实现或重启/清理相关服务。暂停进度见下节。
 - 官方 VSIX 保持不修改；宿主与自有伴随扩展位于 `packages/native-codex-host`，同源网关位于 `apps/server/src/routes/native-codex.ts`。配置与阶段验收见 `docs/codex-workbench-mode.md`。
 - surface 适配只能调整自有样式与观察，不得移动原生 iframe/父节点或替换 MessagePort；隐藏模式停止观察，保留 iframe。真实宿主验收使用隔离 HOME/fixture，不得停止正式 Agent。
 - Codex 宿主显式 `--auto-open-new-chats` 打开两个独立原生新聊天，禁止与 fixture 参数混用。连接副本模式只复制用户授权的登录配置到全新私有 HOME，不导入历史；`--shared-codex-home` 仅在用户明确授权后创建私有链接视图，共用授权的登录配置和持久历史，同时隔离 IPC、app-server control、临时目录、日志和缓存，且不得接管默认 CLI socket。项目历史 Resume 必须使用精确 thread UUID 和受限列号；公共 composer 只能向会话 store 当前选中的单个 thread 提交，不得广播。原生新资源首发后的内部路由不等于编辑器 URI 更新，刷新验收须单独核对原生历史恢复。
 - 项目历史 Resume 后，公共 composer 只有在 Session 当前 thread 与捕获的 native target 完全一致时，才经同源 gateway/companion 向官方插件当前 app-server 的精确 thread、项目和 editor 列发送；不得广播、回退到另一 Session writer 或覆盖 thread 原生设置。宿主只向自有 code-server 的 Node extensionHost 注入 `preload.cjs`，精确观察官方 custom editor provider 注册并在捕获后恢复钩子；官方 VSIX 保持不修改。伴随扩展桥接须按官方版本门控，发送前核对对应列中的原生 custom editor、thread cwd 和空闲状态；Session 队列存在 queued/sending/uncertain 条目、原生会话忙碌或回执未知时保留草稿并拒绝重复投递，空暂停队列不阻止原生发送。回执持久化不得保存正文。协议、验证与未完成的 queue/steer/replace 边界见 `docs/codex-workbench-mode.md`。
 
+
+### 第四 ChatGPT 桌面模式（已暂停）
+
+- 用户此前授权方案完成后自主开发并验收；2026-11-09 最新指令为暂停开发并隐藏入口。暂停前目标仍是优先复用指定 Mac 原资源，首期为完整 Codex 工作区；前端位于 `apps/web/src/chatgpt-mode`，宿主/协议位于 `packages/chatgpt-desktop-host`，状态与资源路由独立于原 Codex 模式。默认启动不创建原生宿主、不接管或发送现有任务。当前边界和恢复步骤见 `docs/designs/chatgpt-desktop-mode-20261103/paused-progress-20261109.md`。
+- 新模式项目、草稿和布局独立；真实 CLI 线程和任务共享必须通过执行域、配置和账号验证。仅初始化页面或取得 services 不代表任务、分屏/公共输入、SSH/云已验收；研究 CDP 代理不得作为正式 LAN 调用接口。
+- 用户 2026-11-04 明确批准点击已有会话后按桌面原版连接：精确线程的最小 resume 须有一次性明确点击/键盘激活意图，与发送/审批权限分开，不夹带配置覆盖。模式切换、刷新、后台恢复不得自动连接、发送或重启任务。连接会更新原生客户端/MCP 策略，不能描述成纯只读；本地输入 scope token 也不能替代 native 授权。
+- 共享连接仅发送 `{threadId,excludeTurns:true}`，须核验原生分页/tail hydration、空 turns 和两个必有 nullable cursor，缺失或未知不重发。原 sidebar 手势到请求的因果绑定和正式 daemon 工具配置仍未接通，不能据私有双客户端通过自动启用。
+- 服务端可显式提供 WeakSet 标记的 `sharedDesktopSource` 工厂，旧 raw `sharedThread` 容器入口继续拒绝。原 SDK connected 不等于共享 host ready；原连接、execution host 与 manager 注册须齐全。浏览器共享目录两个模块须同时维护 host exports 和路由 SOURCES 白名单，完整冻结资源同版；真实匿名 SDK 已初始化，实际 requiresOpenaiAuth=true 时原 manager 按规则 unavailable，不放宽 ready；尚未启用 8484，见 `docs/designs/chatgpt-desktop-mode-20261103/shared-sdk-progress-20261107.md`。
+- 共享 source 可显式选择 version 2 App Tools 回桥，保留原 eTw/ex5/handlers，经 owner IPC 接宿主 loopback 代理；工具 thread guard 必须穿过异步实例核验直到真正写前。最小 resume 不增加 MCP override，正式 daemon 的工具配置/执行域等价仍须独立证明，见 `docs/designs/chatgpt-desktop-mode-20261103/shared-sdk-mcp-checkpoint-20261107.md`。
+- 共享 source 可显式选 `executionDomainPolicy: 'preserve-native-cli'`、`nativeAppTools:false`，固定 CLI 0.166.0，通过原生配置/requirements 双读与文件闭包核验保留原权威；不接受外部布尔证明或 App Tools 注入，最小 resume 只在明确手势后消费一次。实际默认 daemon 本线程分页只读已通过；空线程 rollout 反例不代表全部分页失效，真实账号 SDK 初始化与共享发送仍待验收。见 `docs/designs/chatgpt-desktop-mode-20261103/shared-native-cli-preservation-20261107.md`。
+- 共享已绑定会话的只读 follower 与执行 proof 分开：config 变更不能丢最终/完成/审批提示；读取仍核原八字段、daemon/账号/view/held 根，write/审批回复/工具准入继续强 proof。read/write map 共享原 8192 entry 上限，账号/view/根失效全撤，不自动绑定/重核验/发送；见 `docs/designs/chatgpt-desktop-mode-20261103/shared-follow-read-binding-20261107.md`。
+- `preserve-native-cli` 配置过期只撤销执行证明，读取仍须原 daemon/账号/容器/held 根身份；仅原 native 明确 bind/新建 scope 可双读全部固定项目和文件闭包重核验。版本/一次性 clientId 与创建 ticket 阻止旧意图和迟到回执借新证明复活，失败保持不可写，不自动 resume/发送。构造期账号修订可尚未发布，实际绑定必须核对当前值；见 `docs/designs/chatgpt-desktop-mode-20261103/shared-proof-revalidation-20261107.md`。
+- 独立 candidate 两个构造入口支持固定 `sharedThread` 布尔选项，默认 false；与 `splitPane` 选择 2/3/4/5，HTTP 不改变配方。启用仅选择原资源/桥接，真实账号、原 registry 与同 writer 收发必须另验，见 `docs/designs/chatgpt-desktop-mode-20261103/shared-surface-factory-20261107.md`。
+- SSH 发现仅由服务端固定 `sshDiscovery` 启用，配置、原件路径和 home 不从 HTTP 接收。只复用固定原 parser/discovery，不运行 ssh-G/Match exec/连接命令，完整 profile 与归档版本先核验；缺配置不改原设置资源。实际原版路径是 Settings→Connections→SSH→Add；8484 已加载别名发现，最近状态返回 2 个 alias、0 个连接。真实主机仍未选定或连接，见 `docs/designs/chatgpt-desktop-mode-20261103/ssh-discovery-20261107.md` 和 `ssh-server-bridge-20261109.md`。
+- SSH 首连桥仅由 candidate 显式 `sshConnections: { runtimeRoot, sshBinary? }` 持有唯一 manager/child/UDS，只从 ready profile 的可选私有 serverSshSocketPath 读取 server-ssh.sock（host仅显式serverSsh:true发布），禁止从control父目录推导；原control/state与bridge的no-overlap保持；native/container 只作为 `/bridge/server-ssh.sock` client。CLI仅固定 CHATGPT_DESKTOP_SSH_RUNTIME_ROOT/CHATGPT_DESKTOP_SSH_BINARY，不接受 socket 目标；HTTP仅 metadata/alias 保存。受限 RPC 可创建/恢复线程、发送 turn，并只回复绑定活动 native request ID 的 command/file/permission approval；这些请求只经 UDS→假 SSH 专项验证。8484 尚未连接真实主机，因此真实远程项目、审批和模型回复仍待验收，见 `docs/designs/chatgpt-desktop-mode-20261103/ssh-server-bridge-20261109.md`。
+- 资源只从服务端固定 `CHATGPT_DESKTOP_PROFILE_FILE` 的 owned 0600 配置读取；HTTP 不接受任意 ASAR、socket、PID、命令或上游 URL。`ready` 仅为 profile 时点身份，不代表资源摘要、原生界面或模型已通过。ASAR 每资源与整包分别校验，响应结束/关闭/错误释放有界租约。
+- 正式桥用唯一 private view 和 AppHost MessagePort，不借用活跃原生窗口；每次写出重验实例，未知结果不重发。入口和固定清单 JS 的适配必须验证原/新 hash、使用新 ETag，并将适配响应租约与原 ASAR 预算分别计量。显式宿主管理器仅发布全新健康代次；关闭服务撤销持有 inode 和自有 view，不停止已发布 native。当前 Codex-only 新 wrapper 限制 Work executor，旧 wrapper/在线实例不因源码改变而受保护；协议见 `docs/designs/chatgpt-desktop-mode-20261103/host-and-bridge.md`。
+- `startContainerDesktopService` / `startContainerDesktopUpstream` 仅为服务端显式容器 API，固定镜像 digest、可执行文件 SHA、允许 CPU affinity 及新私有目录；默认空 HOME、network none、只读 root、cap-drop/NNP 与资源隔离，不走宿主 no-sandbox 回退。首次 grant 未知保留可能运行的 owner，关闭 profile/view 不停止 native。profile 发布窗口中的等待沿用调用者绝对 deadline/取消，不因迟到 ready 补发。LAN 浏览器须使用 HTTPS 安全上下文，不能用忽略证书或不安全 origin 开关代替验收。
+- 显式 bridge 网络可用固定授权账号源创建全新 tmpfs HOME，仅 id/access 与必要元数据、不刷新原登录、不复制历史。启动/重连 inspect 网络与挂载配置，逐写复核固定进程、文件/目录及 tmpfs HOME 身份；逐写不等于重新核验容器路由或 mountinfo。项目信任确认绑定实际 private view，不得落到隐藏启动窗口或过期视图。父 iframe 的模式激活租约与原 composer/footer 身份共同保护本地编辑，隐藏、文档替换和断线撤销；租约不授予 native 写入权。
+- 第四模式共享新建/续聊沿原 composer、实际注册的共享 manager 和同 daemon writer；原点击时文字/模型必须在授权 await 前捕获，clientUserMessageId 保留。创建回执按真实配置采纳并注册原 shared-follow，项目以实际 AppHost cwd 映射；失效选择 render 可恢复、submit 仍拒绝，不得静默回本地。见 `docs/designs/chatgpt-desktop-mode-20261103/shared-composer-submit-wiring-20261107.md`。
+- 原版 local 模型目录不能证明共享 daemon 支持所选模型；显式创建缺失证明时，仅用同一已核 observer 的固定只读 `model/list` 有界取证，保留原模型/effort，读后重核 ticket/账号/view，创建注册不跨 await。取消或变化不安装迟到目录，不因刷新/后台恢复创建或发送；见 `docs/designs/chatgpt-desktop-mode-20261103/shared-turn-selection-20261108.md`。
+- 第四模式组合验收使用完整冻结快照，包导出、服务端 sidecar 白名单、浏览器入口与 native wrapper 必须同版。`native-app-policy` 组合固定原件的 Work/SSH 限制、信任和动态工具路由；动态工具仍经原版真实请求/回复，不伪造空工具。原 composer 因配置等待保留的提交可能自动继续，未见 turn 不等于没有待发送；验收取消后不得对同一页面重新开放许可或重复点击。
+- 第四模式 broker 回站按固定最多八帧重新核验，再无 await 地逐帧写出；迟到消息属于下一批，原队列/字节/超时及实际 native 写前授权不放宽。默认固定 control-client 保留每次写前完整 profile 校验，其他 connector 仍需网关独立核验。首因诊断只保留固定枚举，不把原始参数、账号、路径或错误文本暴露到页面。
+- 第四模式的 Node 字节流按需 `read(n<=65536)`，不得把默认异步迭代合并的多行读取误当单次来源预算。普通调用期限保持；仅明确打开目录选择器的两个请求等待既有 120 秒决策期与 10 秒传输余量。新容器的 `pidsLimit` 仅由服务端私有配置选择 256（默认）或 512，启动/重连严格核对；不从 HTTP 改预算，不修改存活容器，不以资源分配替代任务授权。核心真实收发与恢复结果见第四模式的 `core-live-acceptance-20261105.md`。
+- 第四模式 native 回站 subscriber 的写出 Promise 必须传播至来源 reader，最多八个未完成后等待；不得 `void` 丢弃背压后靠扩大 broker 队列适配正常突发。关闭客户须释放在等 guard 的输出完成，保证读取仍能处理精确 viewClosed。broker 固定 error 与真正 scope/seq 不符分别处理，未知 error 拒绝，不得把队列错误覆盖成身份变化。
+- 第四模式 `projectRoots` 只由服务端固定注册：最多八个已存在 owned、非 world-writable 根，同路径 RW 非递归挂载，保护目录不交叠；新目录不得创建在账号 HOME 内。启动、重连和实际写入前核对 held FD、Docker inspect 与精确 init 身份下的实际挂载 inode，不把检查描述成路径原子保证。选择器的 activation epoch 不授予账号/任务权限，原目录复核和 Trust 保留；协议及真实关卡见第四模式文档。
+- 第四模式可显式配置 owned `0700`、非 tmpfs 的 `historyRoot`，持久化原生会话 rollout 和受限本地项目元数据；登录和任务队列不迁入。历史目录由账号摘要、排他租约及精确 native 进程身份共同保护，旧实例未确认退出不得复用或接管。项目快照只有在旧容器/native 确认退出、旧 HOME 与账号和固定项目根的身份可核验时才能封存恢复，未知保持原数据并明确失败；见 `docs/designs/chatgpt-desktop-mode-20261103/project-persistence-20261105.md`。`supervisor-init` / `supervise` 为私有配置显式管理新代次，状态未知拒绝重建；当前在线实例不自动切换。真实回复跨独立目录复制恢复已验证，机器重启后旧 HOME 消失与长期登录尚待验收，见 `docs/designs/chatgpt-desktop-mode-20261103/persistent-history.md`。
+- 新建 supervisor 若在启动时记录完整身份锚，可在原 manager 退出后、旧 view 为零且输出流干净时复附着同一 native，并重开其精确历史 owner；缺锚、残留 view、账号/身份变化或发布结果未知时拒绝，不启动第二个 native、不自动 resume 或发送。恢复后的项目监视状态明确报异常并保留 pending；真实账号及 8503 尚未启用，见 `docs/designs/chatgpt-desktop-mode-20261103/manager-reattachment-20261105.md`。
+- 第四模式原界面的错误重连按钮只在可信用户点击后读取固定 profile；同代刷新当前 iframe，换代更新目标，旧文档或隐藏模式的迟到结果不得生效，不能自动 resume 或发送。热更新须保留既有 iframe 与未发送草稿，验证和边界见 `docs/designs/chatgpt-desktop-mode-20261103/profile-reconnect.md`。
+- 恢复第四模式开发后，最小专项检查为 `pnpm --filter @agent-orchestrator/chatgpt-desktop-host run check`、该包 `test`、服务端 profile/路由测试及前端第四模式、三种可见模式切换、直接深链和窄屏回归。当前用户已暂停开发，未执行这些检查。真实原包、账号与 Mac 关卡须单列；缺少夹具的跳过不计通过。方案、协议和剩余关卡见 `docs/designs/chatgpt-desktop-mode-20261103/`。
 
 ### 开发source map契约
 
@@ -212,3 +242,15 @@
 
 - 本期完整多会话方案的用户Q5/Q8及 `docs/designs/session-mode-multisession-development-plan-20261029.md` §5.3要求：无持久偏好的设备默认启用有界关注近期页预热/保温（`warmFollowedSessions: true`）；聚焦、可见优先，资源不足可回收，不是永久保留全部历史。2026-10-30本轮用户再次明确“统一为：预算允许时持续保温”；已有true/false均保留，显式保存的false继续尊重。
 - 不得依据更早体验优化方案恢复“默认false/一律60秒后回收”，也不得为通过内存长测关闭默认保温。当前标准RSS红灯继续独立记录；修改该批准行为须有新的明确用户决定及对应验收，测试夹具必须真实核对所有已关注正文的预热前置条件。
+
+### 第四模式 GUI 候选入口
+
+- 主 8484 入口可在私有 `.env` 显式设置 `CHATGPT_DESKTOP_CANDIDATE_PORT`，只代理第四模式三类固定路径到已运行的 loopback 网关；空值/未配置与生产 build 不改变普通路由，不启动 native。2026-11-07 用户明确要求去掉 ChatGPT 模式密码：主入口显式使用 `CHATGPT_DESKTOP_ACCESS_MODE=workbench` 与固定 `CHATGPT_DESKTOP_WORKBENCH_ORIGIN`，不再要求额外 Cookie/口令；保留固定 HTTPS Host/Origin、跨站拒绝及原生账号/逐写校验。普通独立候选默认 token，不能从 HTTP 选择访问模式。必须保留原重定向和文档连续性，见 `docs/designs/chatgpt-desktop-mode-20261103/main-passwordless-20261107.md`。
+
+- 独立认证候选支持固定同源“登录工作台”及手输工作台口令；`scripts/prepare-chatgpt-candidate-web-env.mjs` 只从显式主看板配置复用 `WEB_BACKEND_HOST`/`WEB_BACKEND_PORT` 到全新 owned 0600 输出，native/login 路由仍优先固定候选。使用私有 env 部署，不把机器地址写进源码。分屏 v4 的真实五轮交付、关闭后台窗格草稿规则及当前工具沙箱阻塞见 `docs/designs/chatgpt-desktop-mode-20261103/core-split-usable-20261106.md`。
+
+- 独立 LAN Mac 候选的认证入口位于 `apps/server/chatgpt-candidate`，不随默认开发启动。运行 `node --import tsx chatgpt-candidate/chatgpt-desktop-candidate.ts`（cwd `apps/server`）须显式提供候选端口、固定 profile；默认 token 模式还要求 `CHATGPT_DESKTOP_CANDIDATE_AUTH_TOKEN_FILE`，owned `0600` 私有口令兑换限期 Cookie。显式 workbench 模式仅用于用户授权取消第二次登录的部署，必须配置固定 HTTPS origin，与 token 文件互斥；不读取或自动注入口令。测试为同目录 `candidate-{auth,workbench-access}.test.ts`、`tsconfig.json` 和前端 candidate proxy 测试。不得把未配置认证的旧隔离工厂当成 LAN 部署入口，见[候选访问认证](docs/designs/chatgpt-desktop-mode-20261103/candidate-access.md)。独立 CLI 的 `CHATGPT_DESKTOP_SPLIT_PANE=1` 固定启用 v4，未设/空/`0` 保持 v2，其他值拒绝；自定义 wrapper 需显式调用 factory 的 `splitPane: true`。HTTP/query/header/body 不得覆盖此服务端选择；回归见同目录 `candidate-surface.test.ts`。
+
+- 第四模式的 Linux GUI/VNC 为显式 opt-in 候选：`apps/web/vite.chatgpt-vnc.config.mjs` 只启动独立前端，`packages/chatgpt-desktop-host/gui-vnc-prototype/` 只提供 loopback broker，不启动或重启 native。机器配置与双重口令留在私有文件，默认 Mac 资源桥及其他模式不替换。GUI 验收必须等待真实像素并从浏览器实际收发；Connected/尺寸/模拟回包不能替代。最新部署与边界见 `docs/designs/chatgpt-desktop-mode-20261103/core-live-acceptance-20261106.md`。
+
+- 第四模式开发代理可由私有 `CHATGPT_DESKTOP_CANDIDATE_LEGACY_ROUTES` 显式保留至多四个精确 profile/generation→loopbackPort 旧路由，优先处理旧 tuple 的 HTTP/WSS，失联不回落新宿主；与主候选端口一起严格校验。配置仅来自服务端，不接受请求指定目标。Vite 配置重载会关闭物理 socket，文档连续性只阻止自动页面刷新，不得宣称物理 WS 无损迁移；升级前保留旧网关、native、目录与历史，并在新地址实测完整收发。

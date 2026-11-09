@@ -11,6 +11,7 @@
     "format": "prettier --write 'src/**/*.ts'"
   },
   "dependencies": {
+    "@agent-orchestrator/chatgpt-desktop-host": "workspace:*",
     "@agent-orchestrator/session-runtime": "workspace:*",
     "@agent-orchestrator/shared": "workspace:*",
     "@fastify/cors": "^11.1.0",

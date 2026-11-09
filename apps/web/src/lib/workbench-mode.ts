@@ -1,8 +1,10 @@
-export type WorkbenchMode = "terminal" | "session" | "codex";
+export type WorkbenchMode = "terminal" | "session" | "codex" | "chatgpt";
 export const WORKBENCH_MODE_KEY = "coding-kanban-workbench-mode-v1";
 
 export function parseWorkbenchMode(value: string | null): WorkbenchMode {
-  return value === "session" || value === "codex" ? value : "terminal";
+  return value === "session" || value === "codex" || value === "chatgpt"
+    ? value
+    : "terminal";
 }
 
 export function resolveWorkbenchMode(
@@ -12,7 +14,8 @@ export function resolveWorkbenchMode(
   const explicit = new URLSearchParams(search).get("mode");
   return explicit === "session" ||
     explicit === "terminal" ||
-    explicit === "codex"
+    explicit === "codex" ||
+    explicit === "chatgpt"
     ? explicit
     : parseWorkbenchMode(saved);
 }

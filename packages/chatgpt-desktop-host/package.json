@@ -1,0 +1,102 @@
+{
+  "name": "@agent-orchestrator/chatgpt-desktop-host",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./assets": {
+      "types": "./src/assets.d.mts",
+      "default": "./src/assets.mjs"
+    },
+    "./json-lines": "./src/json-lines.mjs",
+    "./wire-value": {
+      "types": "./src/wire-value.d.mts",
+      "default": "./src/wire-value.mjs"
+    },
+    "./browser-bridge": "./src/browser-bridge.mjs",
+    "./control-client": {
+      "types": "./src/control-client.d.mts",
+      "default": "./src/control-client.mjs"
+    },
+    "./browser-document": {
+      "types": "./src/browser-document.d.mts",
+      "default": "./src/browser-document.mjs"
+    },
+    "./browser-entry": "./src/browser-entry.mjs",
+    "./renderer-policy": {
+      "types": "./src/renderer-policy.d.mts",
+      "default": "./src/renderer-policy.mjs"
+    },
+    "./private-runtime": "./src/private-runtime.mjs",
+    "./control-service": "./src/control-service.mjs",
+    "./host-service": "./src/host-service.mjs",
+    "./profile-publisher": {
+      "types": "./src/profile-publisher.d.mts",
+      "default": "./src/profile-publisher.mjs"
+    },
+    "./container-service": {
+      "types": "./src/container-service.d.mts",
+      "default": "./src/container-service.mjs"
+    },
+    "./container-host-service": {
+      "types": "./src/container-host-service.d.mts",
+      "default": "./src/container-host-service.mjs"
+    },
+    "./desktop-pane-layout": {
+      "types": "./src/desktop-pane-layout.d.mts",
+      "default": "./src/desktop-pane-layout.mjs"
+    },
+    "./account-snapshot": {
+      "types": "./src/account-snapshot.d.mts",
+      "default": "./src/account-snapshot.mjs"
+    },
+    "./surface-activation": {
+      "types": "./src/surface-activation.d.mts",
+      "default": "./src/surface-activation.mjs"
+    },
+    "./surface-host-bridge": {
+      "types": "./src/surface-host-bridge.d.mts",
+      "default": "./src/surface-host-bridge.mjs"
+    },
+    "./desktop-surface-assets": {
+      "types": "./src/desktop-surface-assets.d.mts",
+      "default": "./src/desktop-surface-assets.mjs"
+    },
+    "./browser-surface-controller": "./src/browser-surface-controller.mjs",
+    "./browser-image-file-picker": "./src/browser-image-file-picker.mjs",
+    "./browser-ssh-alias-discovery": "./src/browser-ssh-alias-discovery.mjs",
+    "./browser-project-folder-picker": "./src/browser-project-folder-picker.mjs",
+    "./browser-isolated-pane-navigation": "./src/browser-isolated-pane-navigation.mjs",
+    "./browser-shared-thread-navigation": "./src/browser-shared-thread-navigation.mjs",
+    "./browser-shared-thread-submission": "./src/browser-shared-thread-submission.mjs",
+    "./browser-shared-project-selection": "./src/browser-shared-project-selection.mjs",
+    "./browser-shared-project-selection-assets": "./src/browser-shared-project-selection-assets.mjs",
+    "./browser-shared-catalog": "./src/browser-shared-catalog.mjs",
+    "./browser-shared-thread-directory": "./src/browser-shared-thread-directory.mjs",
+    "./browser-sidebar-navigation-probe": "./src/browser-sidebar-navigation-probe.mjs",
+    "./browser-react-root-probe": "./src/browser-react-root-probe.mjs",
+    "./browser-context-menu": "./src/browser-context-menu.mjs",
+    "./browser-rich-editor": "./src/browser-rich-editor.mjs",
+    "./browser-composer-capability": "./src/browser-composer-capability.mjs",
+    "./browser-composer-capability-entry": "./src/browser-composer-capability-entry.mjs",
+    "./desktop-layout-browser": "./src/desktop-layout-browser.mjs",
+    "./desktop-layout-core": "./src/desktop-layout-core.mjs",
+    "./desktop-selected-pane-core": "./src/desktop-selected-pane-core.mjs",
+    "./desktop-selected-pane-browser": "./src/desktop-selected-pane-browser.mjs",
+    "./desktop-split-pane-core": "./src/desktop-split-pane-core.mjs",
+    "./desktop-split-pane-browser": "./src/desktop-split-pane-browser.mjs",
+    "./desktop-home-registrar": "./src/desktop-home-registrar.mjs"
+  },
+  "scripts": {
+    "check": "node --check src/assets.mjs && node --check src/json-lines.mjs && node --check src/wire-value.mjs && node --check src/browser-bridge.mjs && node --check src/browser-document.mjs && node --check src/browser-entry.mjs && node --check src/control-client.mjs && node --check src/control-service.mjs && node --check src/control-bind-helper.cjs && node --check src/private-runtime.mjs && node --check src/native-bootstrap.cjs && node --check src/native-view-shim.js && node --check src/native-view-registry.cjs && node --check src/renderer-policy.mjs && node --check src/codex-surface-policy.cjs && node --check src/host-service.mjs && node --check src/profile-publisher.mjs && node --check src/container-service.mjs && node --check src/container-host-service.mjs && node --check src/container-native.mjs && node --check src/container-recovery-identity.mjs && node --check src/container-recovery-wire.mjs && node --check src/container-write-guard.mjs && node --check src/browser-context-menu.mjs && node --check src/browser-input-scope.mjs && node --check src/desktop-layout-adapter.mjs && node --check src/desktop-layout-browser.mjs && node --check src/desktop-layout-core.mjs && node --check src/daemon-cli-adapter.mjs && node --check src/desktop-pane-layout.mjs && node --check src/account-snapshot.mjs && node --check src/surface-activation.mjs && node --check src/surface-host-bridge.mjs && node --check src/project-consent-routing.cjs && node --check src/browser-rich-editor.mjs && node --check src/composer-capability-asset-adapter.mjs && node --check src/browser-composer-capability.mjs && node --check src/browser-composer-capability-entry.mjs && node --check src/shared-thread-policy.mjs && node --check src/shared-thread-history.mjs && node --check src/ssh-bootstrap-policy.cjs && node --check src/desktop-surface-assets.mjs && node --check src/browser-surface-controller.mjs && node --check src/browser-image-file-picker.mjs && node --check src/browser-image-file-picker-assets.mjs && node --check src/browser-project-folder-picker.mjs && node --check src/native-host-policy.cjs && node --check src/native-app-policy.cjs && node --check src/dynamic-tools-routing.cjs && node --check src/connection-policy.mjs && node --check src/service-cli.mjs && node --check src/account-sync.mjs && node --check src/persistent-history.mjs && node --check src/persistent-projects.mjs && node --check src/stable-profile-alias.mjs && node --check src/supervisor-config.mjs && node --check src/supervisor-service.mjs && node --check src/desktop-selected-pane-core.mjs && node --check src/desktop-selected-pane-browser.mjs && node --check src/desktop-split-pane-core.mjs && node --check src/desktop-split-pane-browser.mjs && node --check src/desktop-home-registrar.mjs && node --check src/fixed-project-mounts.mjs && node --check src/project-folder-picker-native.cjs && node --check src/project-folder-picker-policy.cjs && node --check src/browser-isolated-pane-navigation.mjs && node --check src/browser-shared-thread-navigation.mjs && node --check src/browser-shared-thread-submission.mjs && node --check src/browser-shared-project-selection.mjs && node --check src/browser-shared-project-selection-assets.mjs && node --check src/native-shared-thread-submission.cjs && node --check src/browser-sidebar-navigation-probe.mjs && node --check src/browser-react-root-probe.mjs && node --check src/shared-thread-navigation-assets.mjs && node --check src/native-shared-thread-routing.cjs && node --check src/native-shared-thread-policy.cjs && node --check src/shared-daemon-rpc-gate.mjs && node --check src/shared-thread-approval.cjs && node --check src/shared-thread-authority-channel.cjs && node --check src/shared-thread-authority-wire.cjs && node --check src/native-shared-thread-integration.cjs && node --check src/container-shared-authority.mjs && node --check src/native-shared-desktop-transport.cjs && node --check src/native-shared-host-factory.cjs && node --check src/native-shared-host-policy.cjs && node --check src/shared-host-registration.cjs && node --check src/shared-desktop-daemon-session.mjs && node --check src/owned-shared-thread-authority.mjs && node --check src/owned-shared-desktop-source.mjs && node --check src/container-shared-frame-router.mjs && node --check src/container-shared-source-coordinator.mjs && node --check src/native-thread-read-identity.cjs && node --check src/browser-ssh-alias-assets.mjs && node --check src/browser-ssh-alias-discovery.mjs && node --check src/shared-mcp-wire.cjs && node --check src/native-shared-mcp-relay.cjs && node --check src/shared-mcp-proxy.mjs && node --check src/shared-permissions-schema.cjs",
+    "test": "node --test test/*.test.mjs test/*.test.cjs",
+    "service": "node src/service-cli.mjs start",
+    "status": "node src/service-cli.mjs status"
+  },
+  "dependencies": {
+    "ws": "8.20.0"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  }
+}

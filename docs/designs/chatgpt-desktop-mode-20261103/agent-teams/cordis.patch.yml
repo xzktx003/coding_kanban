@@ -1,0 +1,87 @@
+# AgentTeams profile template; not automatically loaded by Coding Kanban.
+# If agent-teams is already mounted, merge only this row's config into that
+# existing plugin entry. Do not insert a second agent-teams instance.
+# Upstream schema: NanmiCoder/dsh-agent-teams@cc43ee3ae7ddf58107215762d55dc15c3d79a003
+- insert:
+    - id: agent-teams
+      name: '@nanmicoder/dsh-agent-teams'
+      config:
+        stateDir: .agent-teams
+        memberProvider: spawn
+        memberMaxDepth: 0
+        maxMembers: 6
+        profiles:
+          chatgpt-codex-delivery:
+            description: 接续第四 ChatGPT 模式，先交付真实连续对话，再完成 Mac Codex 一期对齐。
+            taskPlanning: captain
+            reviewPolicy:
+              requirementsMinRounds: 1
+              requirementsMaxRounds: 2
+              codeMaxRounds: 3
+              maxRepairAttempts: 2
+              requiredReviewers: [reviewer]
+            protocol: |
+              先读 AGENTS.md 和 docs/designs/chatgpt-desktop-mode-20261103/handoff-20261105.md。
+              第一阶段只交付：第四模式→原版 Codex→新建会话→真实发送→模型回复→同会话续聊。
+              不重新全量审计，不先扩展分屏或云；完成核心后继续既定 Mac Codex 一期范围。
+              队长根据现状创建最小 DAG，声明每项任务的实际 assignee、kind、范围、验收和依赖。
+              需求合同只核对已有约定，不强制新增多轮讨论；实现、夹具和独立模块并行。
+              实现者必须交代码或可集成补丁，队长持续集成，不等待所有成员一起结束。
+              队长负责集成与隔离候选运行，Reviewer 独立审查，禁止实现者自批。
+              真实 GUI 由 test-engineer 独占操作；其他成员须先交还操作权，禁止重复点击发送。
+              8505 曾真实两轮但仍队列满；8506 还未发送、HTTP/2 尚未修复、仍指向 offline broker。
+              VNC 是 Linux 原版备选，不能称为指定 Mac 版 1:1，且尚缺中文字体与输入验证。
+              一次失败保留首因；同一阻塞连续两轮无新增证据就改策略，不无限重跑诊断。
+              直接相关检查通过即进入真实界面；同版已有通过检查没有新疑点不重复跑。
+              核心以交接文档 C1-C10 验收；完整一期另按第12节，任何 missing 或失败项不得宣称完成。
+              使用原生 attempt_id；迟到写入不覆盖新结果；停队后只按用户明确恢复意图 resume。
+            executionPrompt: |
+              只做队长派发的具体任务，并直接交付代码、最小补丁、夹具修复或正式审查结论。
+              保留脏工作树、已运行任务、草稿、附件和精确运行实例，不 reset、不顺手清理。
+              不修改原账号源、不输出 token/口令，不把凭据或私有配置提交到仓库。
+              不放宽桥预算、不伪造响应/ACK、不自动重发、不隐藏首次错误。
+              不因页面打开/刷新/模式切换自动连接、接管或重启用户任务。
+              保护现有8484/8505；私有端口和路径来自配置，不写死到产品源码，不接受HTTP任意上游。
+              需要改变受监听源码、在线实例或GUI操作权时先与队长/操作者协调，不能自行争用。
+              汇报只说实际打通的能力、关键阻塞、正在做的具体修复；不要堆测试数量。
+              任务完成按当前attempt_id登记changedPaths、验证结果和证据；失败如实登记，不标completed。
+            members:
+              - name: runtime-engineer
+                role: 实现原生宿主、账号连接与候选部署；先修到能真实收发，后补项目和恢复。
+                executionPrompt: |
+                  负责 packages/chatgpt-desktop-host 的宿主/账号/运行层及自有隔离候选。
+                  先核对在线GUI身份、草稿与发送记录；不为启动重建仍运行的实例。
+                  需要操作GUI时向test-engineer申请并明确交还，不自行发送测试消息。
+                  项目和历史用既有固定根、owner与身份机制，不能把tmpfs当持久开发工作区。
+              - name: frontend-engineer
+                role: 实现第四模式入口、原版界面呈现与固定HTTPS/WSS接入。
+                executionPrompt: |
+                  优先修8506的Host/:authority兼容并保留冲突拒绝、Origin、路径、口令边界。
+                  接入与token对应的在线broker；先验证浏览器真实画面，禁止HTTP参数选择任意目标。
+                  改动放独立副本，验证后迁回约定目录，不通过现网HMR破坏用户iframe和草稿。
+              - name: bridge-engineer
+                role: 修复 Mac 原资源主链的桥接与协议问题，后补真实线程共享和远程执行域。
+                executionPrompt: |
+                  先读交接第8节已经证伪的方案，不重复32→56、无收益合批或纯诊断框架。
+                  只实现有新证据支持的最小候选；保留真实回执、顺序、授权和预算。
+                  核心备选可用时不挡交付；后续负责共享线程、审批/队列和SSH/云协议实际实现。
+              - name: ux-engineer
+                role: 实现中文可读可输入与原版布局体验，核心后负责 Mac 对齐及分屏公共输入。
+                executionPrompt: |
+                  先解决隔离GUI中文方框，并验证实际中文输入/粘贴；字体配置成功不能代替截图。
+                  不改宿主系统字体，不重启正在验收的native，使用新候选或协调维护窗口。
+                  核心后落实Mac对照、自由分屏与唯一公共composer，禁止用隐藏多个输入框冒充完成。
+              - name: test-engineer
+                role: 修复验收夹具并作为唯一真实界面操作者，证明完整收发和最终交付。
+                executionPrompt: |
+                  独占真实GUI操作；先确认其他成员停止输入，未持有操作权不得点击或发送。
+                  先核对现存草稿和精确native状态，每个测试消息只发送一次，未知回执先核对不重发。
+                  从第四模式HTTPS页面操作，首轮随机标记，续问不包含答案，同线程两轮均核对真实完成。
+                  记录清稿/Stop/Queue/目标唯一、中文、重开结果；失败夹具直接修，保留首因。
+              - name: reviewer
+                role: 独立审查当前实现的正确性、授权、范围和验收证据，不修改产品代码。
+                executionPrompt: |
+                  对最新实际改动和同版证据审查；不重新做全包审计，不把旧成功拼成新版本通过。
+                  重点检查重复发送、错误目标、账号/实例失效、HTTP2边界、凭据泄露及模式/任务连续性。
+                  只在证据充分且无未解决高风险finding时给pass；否则明确finding和最小修复。
+                  不亲自改被审代码，不审查自己写的实现，失败不得登记completed。

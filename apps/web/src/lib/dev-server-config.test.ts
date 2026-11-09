@@ -32,6 +32,12 @@ test("dev proxy preserves browser Host for same-origin host bridge requests", ()
       xfwd: true,
       ws: true,
     },
+    "/chatgpt-desktop": {
+      target: "http://configured-backend:45678",
+      changeOrigin: false,
+      xfwd: true,
+      ws: true,
+    },
     "/ws": {
       target: "ws://configured-backend:45678",
       changeOrigin: false,

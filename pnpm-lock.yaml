@@ -23,6 +23,9 @@ importers:
 
   apps/server:
     dependencies:
+      '@agent-orchestrator/chatgpt-desktop-host':
+        specifier: workspace:*
+        version: link:../../packages/chatgpt-desktop-host
       '@agent-orchestrator/session-runtime':
         specifier: workspace:*
         version: link:../../packages/session-runtime
@@ -93,6 +96,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@agent-orchestrator/chatgpt-desktop-host':
+        specifier: workspace:*
+        version: link:../../packages/chatgpt-desktop-host
       '@agent-orchestrator/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -436,6 +442,12 @@ importers:
       vitest:
         specifier: 4.1.10
         version: 4.1.10(@types/node@24.12.0)(jsdom@30.0.1)(vite@7.3.1(@types/node@24.12.0)(jiti@2.7.0)(lightningcss@1.30.2)(terser@5.51.2)(tsx@4.21.0)(yaml@2.9.1))
+
+  packages/chatgpt-desktop-host:
+    dependencies:
+      ws:
+        specifier: 8.20.0
+        version: 8.20.0
 
   packages/codex-host-bridge: {}
 

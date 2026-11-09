@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import http from "node:http";
 import { resolve } from "node:path";
 
-import { defineConfig, loadEnv, type Plugin } from "vite";
+import { defineConfig, loadEnv, type Plugin, type UserConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { sessionCssScope } from "../../scripts/session-css-scope.mjs";
@@ -11,6 +11,7 @@ import { resolveWebDevCacheDir, webDevReactOptions } from "../../scripts/vite-de
 import { viteDocumentContinuity } from "../../scripts/vite-document-continuity.mjs";
 import { lucideImportOptimizer } from "../../scripts/vite-icon-imports.mjs";
 import { viteExternalSourceMaps } from "../../scripts/vite-external-sourcemaps.mjs";
+import { configureChatGptCandidate, parseChatGptCandidateLegacyRoutes } from "./chatgpt-candidate-proxy.mjs";
 
 import {
   resolveHttpsFallbackRedirectLocation,
@@ -182,7 +183,7 @@ export default defineConfig(({ command, mode }) => {
   const WEB_HOST = env.WEB_HOST?.trim() || "0.0.0.0";
   const httpsCaCertificate = readHttpsCaCertificate(env);
 
-  return {
+  const base = {
     // Separate optimizers from other Vite processes sharing node_modules.
     // This process keeps its cache identity through normal config reloads.
     cacheDir:
@@ -209,5 +210,18 @@ export default defineConfig(({ command, mode }) => {
       https: readHttpsConfig(env),
       proxy: resolveWebDevProxies(webConfig),
     },
-  };
+  } satisfies UserConfig;
+  const candidatePort = env.CHATGPT_DESKTOP_CANDIDATE_PORT;
+  if (command !== "serve") return base;
+  const legacyRoutes = parseChatGptCandidateLegacyRoutes(env.CHATGPT_DESKTOP_CANDIDATE_LEGACY_ROUTES);
+  if (candidatePort === undefined || candidatePort === "") {
+    if (legacyRoutes.length) throw new Error("ChatGPT candidate legacy routes require a primary candidate port");
+    return base;
+  }
+  if (!/^[1-9][0-9]{0,4}$/.test(candidatePort))
+    throw new Error("Invalid ChatGPT candidate port");
+  const candidate = configureChatGptCandidate(base, Number(candidatePort), legacyRoutes);
+  // Main dev retains its existing plugins, HTTP fallback and server policy.
+  // Only these fixed, authenticated fourth-mode namespaces take precedence.
+  return { ...base, server: { ...base.server, proxy: candidate.server.proxy } };
 });

@@ -3,7 +3,7 @@ import { expect, it, vi } from "vitest";
 import { WorkbenchModeSwitch } from "../../../components/WorkbenchModeSwitch";
 import type { WorkbenchMode } from "../../../lib/workbench-mode";
 
-it("offers exactly three peer buttons without a binary switch", () => {
+it("offers three visible peer buttons and hides the paused ChatGPT entry", () => {
   const change = vi.fn();
   const view = render(<WorkbenchModeSwitch mode="session" onChange={change} />);
   const group = screen.getByRole("group", { name: "工作模式" });
@@ -13,6 +13,7 @@ it("offers exactly three peer buttons without a binary switch", () => {
     "终端",
     "Codex",
   ]);
+  expect(within(group).queryByRole("button", { name: "ChatGPT" })).toBeNull();
   expect(within(group).queryByRole("switch")).toBeNull();
 
   for (const [index, mode] of (
@@ -25,6 +26,12 @@ it("offers exactly three peer buttons without a binary switch", () => {
     fireEvent.click(buttons[index]);
     expect(change).toHaveBeenLastCalledWith(mode);
   }
+  view.rerender(<WorkbenchModeSwitch mode="chatgpt" onChange={change} />);
+  expect(buttons.map((button) => button.getAttribute("aria-pressed"))).toEqual([
+    "false",
+    "false",
+    "false",
+  ]);
 });
 
 it("selects peer buttons with arrows, Home and End", () => {
@@ -46,6 +53,10 @@ it("selects peer buttons with arrows, Home and End", () => {
     key: "End",
   });
   expect(change).toHaveBeenLastCalledWith("codex");
+  fireEvent.keyDown(screen.getByRole("button", { name: "Codex" }), {
+    key: "ArrowRight",
+  });
+  expect(change).toHaveBeenLastCalledWith("codex");
 });
 
 it("blocks disabled mode changes for clicks and keys", () => {
@@ -59,4 +70,5 @@ it("blocks disabled mode changes for clicks and keys", () => {
   expect(
     screen.getByRole("button", { name: "Codex" }).hasAttribute("disabled"),
   ).toBe(true);
+  expect(screen.queryByRole("button", { name: "ChatGPT" })).toBeNull();
 });

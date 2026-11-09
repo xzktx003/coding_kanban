@@ -34,8 +34,8 @@ export function WorkbenchModeSwitch({
         )
           return;
         event.preventDefault();
-        if (event.key === "Home") choose("session");
-        else if (event.key === "End") choose("codex");
+        if (event.key === "Home") choose(modes[0].mode);
+        else if (event.key === "End") choose(modes[modes.length - 1].mode);
         else {
           const target = event.target as HTMLElement;
           const focusedMode =

@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { installSessionUxFixture } from "./session-ux-fixture";
 
-test("three peer mode buttons preserve focus and drafts on desktop and phones", async ({
+test("three visible mode buttons preserve focus and drafts on desktop and phones", async ({
   page,
 }) => {
   test.setTimeout(90000);
@@ -9,9 +9,17 @@ test("three peer mode buttons preserve focus and drafts on desktop and phones", 
   await page.route("**/api/native-codex/status", (route) =>
     route.fulfill({ json: { available: false, reason: "隔离模式测试" } }),
   );
+  await page.route("**/api/chatgpt-desktop/status", (route) =>
+    route.fulfill({ json: { state: "unconfigured" } }),
+  );
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto("/?mode=session");
+  // The development module graph can load after DOM ready. Start the composer
+  // and mode-interaction checks only once the isolated workbench is mounted.
+  await expect(
+    page.getByRole("navigation", { name: "会话工作台导航" }),
+  ).toBeVisible({ timeout: 30_000 });
   const editor = page.locator(".session-mode [contenteditable=true]").first();
   await expect(editor).toBeVisible();
   await editor.fill("三个按钮切换后保留的草稿");
@@ -24,17 +32,26 @@ test("three peer mode buttons preserve focus and drafts on desktop and phones", 
       "终端",
       "Codex",
     ]);
+    await expect(
+      group.getByRole("button", { name: "ChatGPT", exact: true }),
+    ).toHaveCount(0);
     await expect(group.getByRole("switch")).toHaveCount(0);
     const geometry = await group.getByRole("button").evaluateAll((buttons) =>
       buttons.map((button) => {
         const rect = button.getBoundingClientRect();
-        return { y: rect.y, width: rect.width, height: rect.height };
+        return {
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+          fits: button.scrollWidth <= button.clientWidth,
+        };
       }),
     );
     for (const button of geometry) {
       expect(Math.abs(button.y - geometry[0].y)).toBeLessThanOrEqual(1);
-      expect(Math.abs(button.width - geometry[0].width)).toBeLessThanOrEqual(1);
+      expect(button.width).toBeGreaterThanOrEqual(44);
       expect(button.height).toBe(geometry[0].height);
+      expect(button.fits).toBe(true);
     }
     await expect(group).toBeInViewport();
     await group.screenshot({
@@ -43,6 +60,7 @@ test("three peer mode buttons preserve focus and drafts on desktop and phones", 
 
     await group.getByRole("button", { name: "终端", exact: true }).click();
     const terminal = group.getByRole("button", { name: "终端", exact: true });
+    await expect(terminal).toBeVisible({ timeout: 30_000 });
     await expect(terminal).toHaveAttribute("aria-pressed", "true");
     await expect(terminal).toBeFocused();
     await group.screenshot({
@@ -50,6 +68,7 @@ test("three peer mode buttons preserve focus and drafts on desktop and phones", 
     });
     await terminal.press("End");
     const codex = group.getByRole("button", { name: "Codex", exact: true });
+    await expect(codex).toBeVisible({ timeout: 30_000 });
     await expect(codex).toHaveAttribute("aria-pressed", "true");
     await expect(codex).toBeFocused();
     await expect(group.getByRole("switch")).toHaveCount(0);

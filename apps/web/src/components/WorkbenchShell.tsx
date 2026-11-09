@@ -25,6 +25,7 @@ import "../workbench.css";
 const TerminalApp = lazy(() => import("../App"));
 const SessionApp = lazy(loadSessionWorkbench);
 const CodexApp = lazy(() => import("../codex-mode/CodexWorkbench"));
+const ChatgptApp = lazy(() => import("../chatgpt-mode/ChatgptModeApp"));
 
 export class WorkbenchBoundary extends Component<
   {
@@ -78,6 +79,7 @@ export function WorkbenchShell() {
   const [terminalVisited, setTerminalVisited] = useState(mode === "terminal");
   const [sessionVisited, setSessionVisited] = useState(mode === "session");
   const [codexVisited, setCodexVisited] = useState(mode === "codex");
+  const [chatgptVisited, setChatgptVisited] = useState(mode === "chatgpt");
   const restoreModeFocus = useRef(false);
   useEffect(() => {
     if (!restoreModeFocus.current) return;
@@ -87,7 +89,9 @@ export function WorkbenchShell() {
           ? '.workbench-terminal:not([hidden]) .mode-switch-label[data-choice="terminal"]'
           : mode === "session"
             ? '.session-mode:not([hidden]) .mode-switch-label[data-choice="session"]'
-            : ".codex-mode:not([hidden]) .mode-switch-codex";
+            : mode === "codex"
+              ? ".codex-mode:not([hidden]) .mode-switch-codex"
+              : ".chatgpt-mode:not([hidden]) .mode-switch-chatgpt";
       const target = document.querySelector<HTMLButtonElement>(selector);
       if (!target) return false;
       target.focus({ preventScroll: true });
@@ -114,6 +118,7 @@ export function WorkbenchShell() {
       if (next === "session") setSessionVisited(true);
       if (next === "terminal") setTerminalVisited(true);
       if (next === "codex") setCodexVisited(true);
+      if (next === "chatgpt") setChatgptVisited(true);
     };
     window.addEventListener("popstate", sync);
     return () => window.removeEventListener("popstate", sync);
@@ -165,6 +170,7 @@ export function WorkbenchShell() {
     if (next === "session") setSessionVisited(true);
     if (next === "terminal") setTerminalVisited(true);
     if (next === "codex") setCodexVisited(true);
+    if (next === "chatgpt") setChatgptVisited(true);
     try {
       localStorage.setItem(WORKBENCH_MODE_KEY, next);
     } catch {
@@ -257,6 +263,31 @@ export function WorkbenchShell() {
               }
             >
               <CodexApp active={mode === "codex"} onModeChange={select} />
+            </Suspense>
+          </WorkbenchBoundary>
+        </div>
+      )}
+      {chatgptVisited && (
+        <div
+          className="chatgpt-mode"
+          hidden={mode !== "chatgpt"}
+          inert={mode !== "chatgpt"}
+        >
+          <WorkbenchBoundary
+            modeName="ChatGPT"
+            onTerminal={() => select("terminal")}
+          >
+            <Suspense
+              fallback={
+                <div className="workbench-state" role="status">
+                  正在加载 ChatGPT 工作台…
+                  <button onClick={() => select("terminal")}>
+                    切换到终端模式
+                  </button>
+                </div>
+              }
+            >
+              <ChatgptApp active={mode === "chatgpt"} onModeChange={select} />
             </Suspense>
           </WorkbenchBoundary>
         </div>

@@ -24,6 +24,17 @@ test("Codex deep links and device preferences select the third workbench", () =>
   );
 });
 
+test("ChatGPT deep links and device preferences select the fourth workbench", () => {
+  assert.equal(resolveWorkbenchMode("?mode=chatgpt", "session"), "chatgpt");
+  assert.equal(resolveWorkbenchMode("?mode=terminal", "chatgpt"), "terminal");
+  assert.equal(resolveWorkbenchMode("?mode=unknown", "chatgpt"), "chatgpt");
+  assert.equal(parseWorkbenchMode("chatgpt"), "chatgpt");
+  assert.equal(
+    workbenchModeUrl("/mobile?session=abc&mode=codex#details", "chatgpt"),
+    "/mobile?session=abc&mode=chatgpt#details",
+  );
+});
+
 test("invalid persisted or URL values fall back safely", () => {
   assert.equal(parseWorkbenchMode("unknown"), "terminal");
   assert.equal(resolveWorkbenchMode("?mode=unknown", "session"), "session");

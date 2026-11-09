@@ -35,6 +35,9 @@ import { registerFeishuNotificationSettingsRoutes } from "./routes/feishu-notifi
 import { registerSshHostsRoutes } from "./routes/ssh-hosts.js";
 import { registerVsCodeWebProxyRoutes } from "./routes/vscode-web-proxy.js";
 import { registerNativeCodexRoutes } from "./routes/native-codex.js";
+import { registerChatGptDesktopBridgeRoutes } from './routes/chatgpt-desktop-bridge.js';
+import { createChatGptDesktopSurfaceOptions } from './routes/chatgpt-desktop-surface-config.js';
+import { registerChatGptDesktopRoutes } from "./routes/chatgpt-desktop.js";
 import { registerCodexTabsRoutes } from "./routes/codex-tabs.js";
 import { registerTerminalHttpMultiplexerRoutes } from "./routes/terminal-http-multiplexer.js";
 import { AgentSessionRegistry } from "./services/agent-session-registry.js";
@@ -641,6 +644,8 @@ export function buildServer(options: BuildServerOptions = {}): {
       vsCodeWebManager,
     });
     await instance.register(registerNativeCodexRoutes);
+    await instance.register(registerChatGptDesktopRoutes, createChatGptDesktopSurfaceOptions());
+    await instance.register(registerChatGptDesktopBridgeRoutes);
     registerCodexTabsRoutes(instance, {
       file: options.sessionAttachmentRoot
         ? resolve(options.sessionAttachmentRoot, "..", "codex-followed-threads.json")
