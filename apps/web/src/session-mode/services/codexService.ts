@@ -1,3 +1,4 @@
+import { readNewChatModelConfig, resolveNewChatModelConfig } from "./newChatModelConfig";
 import { selectCodexInputTarget } from "@session/components/codex/stores/codexInputTarget";
 import {
   readExecutionContext,
@@ -348,6 +349,7 @@ function captureThreadStart() {
   const {
     model,
     modelProvider,
+    modelSelectionMode,
     approvalPolicy,
     approvalsReviewer,
     sandbox,
@@ -370,6 +372,7 @@ function captureThreadStart() {
     config: structuredClone({
       model,
       modelProvider,
+      modelSelectionMode,
       approvalPolicy,
       approvalsReviewer,
       sandbox,
@@ -380,6 +383,9 @@ function captureThreadStart() {
       webSearchRequest,
       threadCwdMode,
     }),
+    modelConfigRead: modelSelectionMode === "follow-config"
+      ? readNewChatModelConfig(useWorkspaceStore.getState().cwd ?? "").then(value => ({value}), error => ({error}))
+      : null,
     agentsConfig: structuredClone(buildAgentsConfigFragment()),
   };
 }
@@ -775,6 +781,11 @@ export const codexService = {
         throw new Error(
           "连接目标已切换，尚未创建会话；草稿已保留，请核对原连接后重试。",
         );
+      const modelConfigResult = captured.modelConfigRead ? await captured.modelConfigRead : null;
+      if (modelConfigResult && "error" in modelConfigResult) throw new MutationNotStartedError(modelConfigResult.error instanceof Error ? modelConfigResult.error.message : "无法核实模型配置");
+      const selectedConfig = modelConfigResult && "value" in modelConfigResult
+        ? resolveNewChatModelConfig(captured.config, modelConfigResult.value)
+        : captured.config;
       const {
         model,
         modelProvider,
@@ -787,7 +798,7 @@ export const codexService = {
         collaborationMode,
         webSearchRequest,
         threadCwdMode,
-      } = captured.config;
+      } = selectedConfig;
       const { cwd } = captured;
       if (!cwd) throw new MutationNotStartedError("请先选择项目目录。");
       const executionContext = await readExecutionContext();

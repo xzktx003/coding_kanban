@@ -160,6 +160,7 @@ async function commandItem(label: typeof COMMANDS[number]) {
 const tuple = (entry: { model: string; reasoningEffort: ReasoningEffort | null; serviceTier?: string | null }) => ({ model: entry.model, reasoningEffort: entry.reasoningEffort, serviceTier: entry.serviceTier });
 
 beforeEach(() => {
+  useConfigStore.setState({modelSelectionMode:"manual"});
   vi.restoreAllMocks(); vi.resetAllMocks();
   vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("Unexpected E6 transport")));
   api.listOtherModels.mockResolvedValue([]); api.listConfigProviders.mockResolvedValue([]); api.listProviderPresets.mockResolvedValue([]);

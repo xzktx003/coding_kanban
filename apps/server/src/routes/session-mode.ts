@@ -37,6 +37,7 @@ import WebSocket from "ws";
 interface SessionModeRouteOptions {
   loadAuxiliaryHistory?: () => Promise<typeof import("@agent-orchestrator/session-runtime/auxiliary-history")>;
   loadDetailChannel?: () => Promise<{
+    registerLocalMagpieCatalog?: (app: FastifyInstance) => void;
     registerLocalItemDetailChannel: (app: FastifyInstance, dataDir: string) => void;
     registerLocalChatHistoryChannel?: (app: FastifyInstance, dataDir: string, fallback: (request: FastifyRequest, reply: FastifyReply) => unknown, readCurrentTurn?: (threadId: string, signal: AbortSignal) => Promise<Awaited<ReturnType<typeof readSessionCodexActivity>>["turn"]>) => void;
   }>;
@@ -237,6 +238,7 @@ export function registerSessionModeRoutes(
         registerSessionItemDetail(detailScope, () => origin, fetchUpstream);
         return;
       }
+      channel.registerLocalMagpieCatalog?.(detailScope);
       channel.registerLocalItemDetailChannel(detailScope, resolve(options.attachmentRoot!, "..", ".codexia"));
       channel.registerLocalChatHistoryChannel?.(detailScope, resolve(options.attachmentRoot!, "..", ".codexia"), async (request, reply) => {
         if (!origin) return reply.code(503).send({ error: "会话服务尚未启动" });

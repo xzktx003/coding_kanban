@@ -1,3 +1,4 @@
+import { useConfigStore } from "../stores/useConfigStore";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, it, expect, vi } from "vitest";
 import { NativeModelSelector } from "./NativeModelSelector";
@@ -10,6 +11,7 @@ const calls = vi.hoisted(() => ({
   currentThreadId: "original" as string | null,
 }));
 beforeEach(() => {
+  useConfigStore.setState({modelSelectionMode:"manual"});
   calls.effortValue = "high";
   calls.options = ["low", "medium", "high"];
   calls.currentThreadId = "original";

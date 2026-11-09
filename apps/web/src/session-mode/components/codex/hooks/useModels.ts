@@ -49,7 +49,8 @@ export const useModelCacheStore = create<ModelCacheStore>()((set, get) => ({
       const providers = await listConfigProviders();
       if (!Array.isArray(providers))
         throw new Error("服务返回的提供商列表无效");
-      set({ configProviders: providers });
+      set({ configProviders: providers, loaded: false });
+      await get().load();
     } catch (error) {
       set({ error: error instanceof Error ? error.message : String(error) });
     }

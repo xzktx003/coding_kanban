@@ -98,7 +98,7 @@ beforeEach(() => {
     accountNamespace: "account-before",
   });
   useWorkspaceStore.setState({ cwd: "/fixture-original" });
-  useConfigStore.setState({ ...settings, threadCwdMode: "local" } as any);
+  useConfigStore.setState({modelSelectionMode: "manual", ...settings, threadCwdMode: "local" } as any);
   api.threadGoalGet.mockResolvedValue({ goal: null });
   boundary.getSettings.mockReturnValue({ ...settings, model: null });
   boundary.capture.mockReturnValue({

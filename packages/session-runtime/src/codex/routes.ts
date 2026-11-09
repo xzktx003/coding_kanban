@@ -1,3 +1,4 @@
+import { readModelConfig } from "./model-config.js";
 import { registerCodexOperationRoutes } from "./operation-context.js";
 import { PluginMutations } from "./plugin-mutations.js";
 import { join } from "node:path";
@@ -60,6 +61,7 @@ export function registerCodexRoutes(
         reply.raw.once("close", aborted);
       }
       try {
+        if (path === "model/config/read") reply.header("cache-control", "no-store");
         const result = sanitizeCodexHistory(await handler(bodyObject(request.body), controller?.signal));
         return reply.type("application/json").send(JSON.stringify(result));
       } finally {
@@ -188,6 +190,9 @@ export function registerCodexRoutes(
       () => searchOccurrences(body, service.raw),
       ["thread/searchOccurrences"],
     ),
+  );
+  post("model/config/read", (body) =>
+    readonly(() => readModelConfig(body, service.raw), ["config/read"]),
   );
   post("config/read", (body) =>
     readonly(() => readConfig(body, service.raw), ["config/read"]),

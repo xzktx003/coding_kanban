@@ -1,5 +1,7 @@
 # Coding Kanban Project Overview
 
+会话模式的新聊天可选择跟随 Codex 有效模型配置，适配 Magpie 等外部配置切换；手动偏好和已有线程保持独立。旧运行层缺少只读接口时明确提示，不自动替换服务，见[外部模型配置](session-external-model-config.md)。
+
 新版会话运行层直接连接官方共享 Codex daemon，默认缺失时可按配置调用官方启动命令；与 CLI 共享实时任务和官方线程队列，看板退出或替换只释放自有连接。已有 CLI 任务通过显式入口连接实时交互；后台历史恢复保持只读。共享置顶和阅读状态绑定实际执行域，草稿、选择与分屏仍属于当前设备。完整非IDE/非云任务方案正在实施，专项绿灯、剩余性能与组合验收分别见[实施台账](designs/session-mode-implementation-20261029/README.md)，不把构建产物视为正式运行服务已切换。
 
 Claude/ACP进程仍由看板运行层管理；自动更新遇自有连接、初始化或活动缺测时保留旧运行层，显式维护才按已授权范围结束其任务。相同源码入口的其他SESSION_DATA_HOME只列为只读候选，不按“孤儿”自动清理，见[运行层替换保护](designs/session-mode-implementation-20261029/runtime-replacement.md)。

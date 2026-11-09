@@ -45,3 +45,7 @@
 - 相关 6 个测试文件、32 项单测通过，覆盖兼容强度保留、不兼容回退、未知目录、提供商切换、A/B 会话与新聊天默认值隔离。
 - 局域网 HTTPS 页面 `https://10.30.0.24:8484/?mode=session` 的 375px/1440px 两项浏览器回归通过；连续切换默认强度不同的模型后仍为 `high`，刷新后保留，实际提交参数为 `high`，B 的 `low` 和两份草稿互不影响。
 - 浏览器/API 采用隔离夹具，未向正式 Agent 发消息、修改原生模型配置或重启运行服务。结果位于 `.dev-runtime/reasoning-effort/green-browser`；前端构建日志位于 `.dev-runtime/reasoning-effort/build.log`。
+
+## 外部配置切换（2026-11-09）
+
+新聊天新增“跟随 Codex 配置”与手动模式；旧保存选择保守保留。配置模型、发送捕获、旧运行服务支持边界见[外部模型配置](session-external-model-config.md)。已有线程的设置与持久化规则不变。

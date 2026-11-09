@@ -1,3 +1,6 @@
+import { useMagpieCatalog } from "../hooks/useMagpieCatalog";
+import { useConfigStore } from "../stores/useConfigStore";
+import { useNewChatModelConfig } from "../hooks/useNewChatModelConfig";
 import { commitModelSelectionWithNotice } from "./ModelChangeNotice";
 import {
   useCallback,
@@ -116,6 +119,10 @@ export function NativeModelSelector({
   const { openAiModels, providerItems, loading, error, reload, modelStatus, hasModelSnapshot } =
     useModels();
   const [open, setOpen] = useState(false);
+  const magpie = useMagpieCatalog(open && threadId === null);
+  const selectionMode = useConfigStore(s => s.modelSelectionMode);
+  const configured = useNewChatModelConfig(threadId === null && selectionMode === "follow-config", open);
+  const followsConfig = threadId === null && selectionMode === "follow-config";
   const [completionTooltipHeld, setCompletionTooltipHeld] = useState(false);
   const [advanced, setAdvanced] = useState(false);
   const [searching, setSearching] = useState(false);
@@ -451,6 +458,7 @@ export function NativeModelSelector({
               : {}),
           }
         : null;
+    if (followsConfig) useConfigStore.getState().setModelSelectionMode("manual");
     if (jointNativeSelection) {
       settings.setModelSelection(jointNativeSelection);
     } else {
@@ -705,7 +713,8 @@ export function NativeModelSelector({
   };
   function changeOpen(value: boolean) {
     viewPointerType.current = null;
-    if (value && modelPending) return;
+    if (value && modelPending && !followsConfig) return;
+    if (value && followsConfig) void reload();
     clearTimeout(viewReset.current);
     viewReset.current = undefined;
     keyboardViewFocus.current = false;
@@ -824,7 +833,8 @@ export function NativeModelSelector({
           completionTooltipHeld={completionTooltipHeld}
           onBlur={handleCompletionTriggerBlur}
           onPointerLeave={handleCompletionTriggerPointerLeave}
-          disabled={modelPending}
+          disabled={modelPending && !followsConfig}
+          configurationLabel={followsConfig ? `跟随配置 · ${configured.value?.model ?? (configured.error ? "无法核实" : "读取中…")}` : undefined}
           pickerOpen={enhancedTrigger && open}
           pickerSimple={enhancedTrigger && !showAdvanced}
           pickerOpenLabel={enhancedTrigger ? triggerOpenLabel : undefined}
@@ -932,6 +942,41 @@ export function NativeModelSelector({
             target.editor.focus({ preventScroll: true });
           }}
         >
+          {threadId === null && (
+            <div className="session-native-model-list">
+              <DropdownMenuItem onSelect={() => useConfigStore.getState().setModelSelectionMode("follow-config")}>
+                {followsConfig ? "✓ " : ""}跟随 Codex 配置
+              </DropdownMenuItem>
+              {configured.value && (
+                <>
+                  <p role="status">配置模型：{configured.value.model ?? "原生默认"} · {configured.value.modelProvider ?? "原生默认提供商"}</p>
+                  {configured.value.model && <DropdownMenuItem onSelect={() => {
+                    const config = configured.value!;
+                    const store = useConfigStore.getState();
+                    store.setModelProvider(config.modelProvider ?? "openai");
+                    store.setModel(config.model!);
+                    if (config.reasoningEffort) store.setReasoningEffort(config.reasoningEffort);
+                  }}>固定使用 {configured.value.model}</DropdownMenuItem>}
+                </>
+              )}
+              {configured.error && <p role="status">{configured.error}</p>}
+              <DropdownMenuItem onSelect={event => { event.preventDefault(); void configured.refresh(); void reload(); }}>刷新配置与模型</DropdownMenuItem>
+            </div>
+          )}
+          {threadId === null && (magpie.models.length > 0 || magpie.error || magpie.loading) && (
+            <div className="session-native-model-list" aria-label="Magpie 模型">
+              <p className="session-native-model-heading">Magpie · 本地转发</p>
+              {magpie.loading && <p role="status">正在读取 Magpie 模型…</p>}
+              {magpie.error && <p role="status">{magpie.error}</p>}
+              {magpie.models.map(item => <DropdownMenuItem key={item.id} onSelect={() => {
+                if (currentScope.current.identity !== scopeIdentity || !isAgentInteractionVisible()) return;
+                const store = useConfigStore.getState();
+                store.setModelProvider("magpie");
+                store.setModel(item.id);
+                changeOpen(false);
+              }}>{item.id}</DropdownMenuItem>)}
+            </div>
+          )}
           {showAdvanced ? (
             <div
               className="session-native-model-list"
