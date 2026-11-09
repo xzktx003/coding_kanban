@@ -4,8 +4,10 @@ import test from "node:test";
 import type { AgentSessionRecord } from "@agent-orchestrator/shared";
 
 import {
+  rebindLocalCodexTranscripts,
   resolveActiveCodexSessionId,
   resolveCodexSessionIds,
+  shouldRebindLocalCodexTranscript,
   verifyBoundCodexQueueThread,
 } from "./active-codex-session-resolver.js";
 
@@ -90,7 +92,7 @@ test("history-only resolution cannot replace the registered input target", async
   );
 });
 
-test("history reads do not mutate registered IDs even with a precise live match", async () => {
+test("history reads adopt a precise live thread that differs from the registered ID", async () => {
   const session = { ...makeSession(), agentSessionId: "registered-thread" };
   const updates: unknown[] = [];
   const dependencies = {
@@ -108,21 +110,25 @@ test("history reads do not mutate registered IDs even with a precise live match"
     }),
     "live-thread",
   );
-  assert.deepEqual(updates, []);
+  assert.deepEqual(updates, [
+    ["kanban-session", { agentSessionId: "live-thread" }],
+  ]);
   assert.equal(
     await resolveActiveCodexSessionId(session, dependencies),
     "live-thread",
   );
-  assert.equal(updates.length, 1);
+  assert.equal(updates.length, 2);
 });
 
 test("history can recover a unique startup thread without granting an input target", async () => {
   const session = makeSession();
   const calls: unknown[] = [];
+  const updates: unknown[] = [];
   const dependencies = {
     registry: {
-      updateSession: () => {
-        throw new Error("history must not write registry");
+      updateSession: (...args: unknown[]) => {
+        updates.push(args);
+        return session;
       },
     },
     codexSessionLocator: {
@@ -138,10 +144,14 @@ test("history can recover a unique startup thread without granting an input targ
     }),
     "startup-thread",
   );
+  assert.deepEqual(updates, [
+    ["kanban-session", { agentSessionId: "startup-thread" }],
+  ]);
   assert.equal(
     await resolveActiveCodexSessionId(session, dependencies),
     undefined,
   );
+  assert.equal(updates.length, 1);
   assert.deepEqual(calls, [
     { tmuxTarget: "%1", tmuxSession: "split", workingDirectory: undefined },
     {
@@ -152,6 +162,33 @@ test("history can recover a unique startup thread without granting an input targ
     },
     { tmuxTarget: "%1", tmuxSession: "split", workingDirectory: undefined },
   ]);
+});
+
+test("periodic rebind updates only local tmux Codex cards", async () => {
+  const updates: unknown[] = [];
+  const codex = { ...makeSession(), id: "codex-card", agentKind: "codex", agentSessionId: "old-thread" };
+  const shell = makeSession();
+  const remote = {
+    ...codex,
+    id: "remote-card",
+    hostId: "remote-host",
+  };
+  await rebindLocalCodexTranscripts([shell, remote, codex], {
+    registry: {
+      updateSession: (...args: unknown[]) => {
+        updates.push(args);
+        return codex;
+      },
+    },
+    codexSessionLocator: {
+      resolve: async (input: { readOnlyCompletion?: boolean }) =>
+        input.readOnlyCompletion ? "new-thread" : undefined,
+    },
+  });
+  assert.equal(shouldRebindLocalCodexTranscript(shell), false);
+  assert.equal(shouldRebindLocalCodexTranscript(remote), false);
+  assert.equal(shouldRebindLocalCodexTranscript(codex), true);
+  assert.deepEqual(updates, [["codex-card", { agentSessionId: "new-thread" }]]);
 });
 
 test("bound card queue checks only its exact local live thread without changing input routing", async () => {

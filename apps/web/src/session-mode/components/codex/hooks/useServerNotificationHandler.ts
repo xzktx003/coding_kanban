@@ -21,8 +21,10 @@ import {
 import { useSessionAttentionStore } from "@session/stores/useSessionAttentionStore";
 import { revealNewQuestion } from "@session/features/async-questions/arrival";
 import { useSessionNameStore } from "../../../stores/useSessionNameStore";
-import { notifyDesktop } from "@session/lib/notify";
-import { isSessionModeActive } from "@session/session-dom";
+import {
+  isSessionCompletionAudible,
+  isSessionModeActive,
+} from "@session/session-dom";
 import { toast } from "sonner";
 import { isProviderSafetyBlock } from "@session/services/providerSafetyBlock";
 import { type RefObject, useCallback, useEffect, useRef } from "react";
@@ -69,6 +71,25 @@ interface NotificationHandlerRefs {
 }
 
 const PENDING_DELTA_MAX_ITEMS = 128;
+const HEARD_COMPLETION_TURNS = 256;
+const heardCompletionTurns = new Set<string>();
+
+export function resetCompletionChimeClaims(): void {
+  heardCompletionTurns.clear();
+}
+
+function claimCompletionChime(threadId: string, turnId: string): boolean {
+  const key = `${threadId}\0${turnId}`;
+  if (heardCompletionTurns.has(key)) return false;
+  heardCompletionTurns.add(key);
+  while (heardCompletionTurns.size > HEARD_COMPLETION_TURNS) {
+    const oldest = heardCompletionTurns.values().next().value;
+    if (oldest === undefined) break;
+    heardCompletionTurns.delete(oldest);
+  }
+  return true;
+}
+
 const PENDING_DELTA_MAX_BYTES = 1024 * 1024;
 const DELTA_BATCH_ITEMS = 32;
 const DELTA_FRAME_BUDGET_MS = 4;
@@ -453,31 +474,34 @@ export function useServerNotificationHandler(
           });
 
           const turnStatus = payload.params.turn.status;
+          const turnId = payload.params.turn.id;
           if (known && turnStatus === "completed")
             useSessionAttentionStore
               .getState()
-              .complete("codex", threadId, payload.params.turn.id);
-          if (
+              .complete("codex", threadId, turnId);
+          const eligibleCompletion =
             known &&
             turnStatus === "completed" &&
             !useSubagentStore.getState().nodes[threadId] &&
-            (document.hidden || !document.hasFocus() || !isSessionModeActive())
-          ) {
-            void notifyDesktop("Codex 任务已完成", undefined, () =>
-              toast.success("Codex 任务已完成"),
-            );
-          }
-          if (
-            known &&
-            turnStatus === "completed" &&
-            !useSubagentStore.getState().nodes[threadId] &&
+            (typeof turnId !== "string" ||
+              turnId.length === 0 ||
+              claimCompletionChime(threadId, turnId));
+          const playCompletionBeep =
+            eligibleCompletion &&
+            isSessionCompletionAudible() &&
             shouldPlayCompletionBeep(
               refs.taskCompleteBeepModeRef.current,
               refs.isCodexThreadActiveRef.current,
-            )
+            );
+          if (
+            eligibleCompletion &&
+            (document.hidden || !document.hasFocus() || !isSessionModeActive())
           ) {
-            playBeep();
+            // The OS notification sound ignores Notification.silent here.
+            // The custom beep is the only completion sound; the toast is visual.
+            toast.success("Codex 任务已完成");
           }
+          if (playCompletionBeep) playBeep();
         }
 
         if (method === "error" && !payload.params.willRetry) {

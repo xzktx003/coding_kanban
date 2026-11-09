@@ -1,3 +1,4 @@
+import { useConfigStore } from "../stores/useConfigStore";
 import { useShallow } from "zustand/react/shallow";
 import {
   Check,
@@ -697,6 +698,7 @@ export function ModelReasonSelector({
   useEffect(() => {
     if (
       !currentThreadId &&
+      useConfigStore.getState().modelSelectionMode !== "follow-config" &&
       modelProvider === "openai" &&
       !providerModels.openai &&
       openAiModels.length > 0

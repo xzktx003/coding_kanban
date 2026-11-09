@@ -52,7 +52,7 @@ beforeEach(() => {
     turnTimingMap: {},
     threadStatusMap: {},
   });
-  useConfigStore.setState({
+  useConfigStore.setState({modelSelectionMode: "manual",
     model: "new-chat-default",
     modelProvider: "openai",
     reasoningEffort: "medium",

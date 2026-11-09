@@ -46,6 +46,10 @@ import type {
 
 import { recordAgentSnapshotFrame } from "./resource-diagnostics";
 import {
+  parseAgentCompletionChime,
+  type AgentCompletionChime,
+} from "./agent-completion-chime";
+import {
   applyAgentSessionStreamEvent,
   parseAgentSessionStreamEvent,
 } from "./agent-session-stream";
@@ -441,6 +445,7 @@ export type ConnectionStatus =
 export function subscribeAgentSessions(
   onSnapshot: (snapshot: ListAgentSessionsResponse) => void,
   onStatusChange?: (status: ConnectionStatus) => void,
+  onCompletionChime?: (chime: AgentCompletionChime) => void,
 ): () => void {
   let closed = false;
   let closeAfterOpen = false;
@@ -464,6 +469,12 @@ export function subscribeAgentSessions(
           : null;
 
     if (!text || closed) {
+      return;
+    }
+
+    const chime = parseAgentCompletionChime(text);
+    if (chime) {
+      onCompletionChime?.(chime);
       return;
     }
 

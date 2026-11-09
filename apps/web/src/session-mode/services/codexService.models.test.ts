@@ -37,7 +37,7 @@ beforeEach(() => {
     turnTimingMap: {},
     threadStatusMap: {},
   });
-  useConfigStore.setState({
+  useConfigStore.setState({modelSelectionMode: "manual",
     model: "new-chat-default",
     modelProvider: "openai",
     reasoningEffort: "medium",
@@ -217,4 +217,32 @@ it("sends the selected thread personality and leaves another thread unchanged", 
   expect(followupParameters("model-b").personality).toBeUndefined();
   changeThreadModel("bare", { personality: "pragmatic" });
   expect(getThreadModelSettings("bare").personality).toBe("pragmatic");
+});
+
+it('following config captures the native read before later UI changes and sends the configured model', async () => {
+  const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({status:'ready',model:'houmo/h200',modelProvider:'magpie',reasoningEffort:'high'})));
+  useConfigStore.setState({modelSelectionMode:'follow-config'});
+  const captured=codexService.captureThreadStart();
+  useConfigStore.getState().setModel('later-choice');
+  api.threadStart.mockResolvedValue({thread:{id:'configured-thread',cwd:'/project',preview:'',turns:[]},model:'houmo/h200',modelProvider:'magpie',reasoningEffort:'high'});
+  await codexService.threadStart({captured,shouldActivate:()=>false});
+  expect(api.threadStart.mock.calls.at(-1)?.[0]).toMatchObject({model:'houmo/h200',modelProvider:'magpie',config:{model_reasoning_effort:'high'}});
+  expect(useConfigStore.getState().model).toBe('later-choice');
+  fetcher.mockRestore();
+});
+it('unsupported following fails before thread creation and preserves manual defaults', async()=>{
+ const fetcher=vi.spyOn(globalThis,'fetch').mockResolvedValue(new Response('{}',{status:405}));
+ useConfigStore.setState({modelSelectionMode:'follow-config'});
+ await expect(codexService.threadStart()).rejects.toThrow('当前运行服务');
+ expect(api.threadStart).not.toHaveBeenCalled();
+ expect(useConfigStore.getState().model).toBe('new-chat-default');
+ fetcher.mockRestore();
+});
+
+it('a manual Magpie catalog choice sends its provider and exact model ID',async()=>{
+ useConfigStore.getState().setModelProvider('magpie');
+ useConfigStore.getState().setModel('kimi/k3');
+ api.threadStart.mockResolvedValue({thread:{id:'magpie-thread',cwd:'/project',preview:'',turns:[]},model:'kimi/k3',modelProvider:'magpie',reasoningEffort:'medium'});
+ await codexService.threadStart({shouldActivate:()=>false});
+ expect(api.threadStart.mock.calls.at(-1)?.[0]).toMatchObject({model:'kimi/k3',modelProvider:'magpie'});
 });

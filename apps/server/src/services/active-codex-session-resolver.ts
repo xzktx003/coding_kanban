@@ -17,6 +17,49 @@ export function isRemoteAgentSession(
   );
 }
 
+function adoptResolvedCodexThread(
+  agentSession: AgentSessionRecord,
+  dependencies: ActiveCodexSessionResolverDependencies,
+  activeSessionId: string | undefined,
+): string | undefined {
+  if (activeSessionId && activeSessionId !== agentSession.agentSessionId) {
+    dependencies.registry.updateSession(agentSession.id, {
+      agentSessionId: activeSessionId,
+    });
+  }
+  return activeSessionId;
+}
+
+export function shouldRebindLocalCodexTranscript(
+  session: Pick<
+    AgentSessionRecord,
+    "agentKind" | "hostId" | "sshTarget" | "transportRef"
+  >,
+): boolean {
+  if (isRemoteAgentSession(session)) return false;
+  if (!session.transportRef?.tmuxPane && !session.transportRef?.tmuxSession) {
+    return false;
+  }
+  const executable = session.agentKind.trim().split(/[\\/]/).at(-1) ?? "";
+  return executable === "codex" || executable.startsWith("codex-");
+}
+
+export async function rebindLocalCodexTranscripts(
+  sessions: readonly AgentSessionRecord[],
+  dependencies: ActiveCodexSessionResolverDependencies,
+): Promise<void> {
+  for (const session of sessions) {
+    if (!shouldRebindLocalCodexTranscript(session)) continue;
+    try {
+      await resolveActiveCodexSessionId(session, dependencies, {
+        historyOnly: true,
+      });
+    } catch {
+      // One pane's process lookup must not stop the other cards.
+    }
+  }
+}
+
 export async function resolveActiveCodexSessionId(
   agentSession: AgentSessionRecord,
   dependencies: ActiveCodexSessionResolverDependencies,
@@ -46,30 +89,40 @@ export async function resolveActiveCodexSessionId(
     ...(tmuxClientProcessId !== undefined ? { tmuxClientProcessId } : {}),
     workingDirectory: agentSession.workingDirectory,
   };
-  const activeSessionId =
+  let activeSessionId =
     await dependencies.codexSessionLocator.resolve(locatorInput);
   if (!activeSessionId && options.historyOnly) {
-    // History may display the unique thread born with the live Codex process.
-    // It remains read-only evidence and must not become an ordinary input target.
-    return dependencies.codexSessionLocator.resolve({
+    // History may display the unique thread born with the live Codex process,
+    // or the single rollout rewritten by a bare resume. Persist that exact
+    // thread on the card so a later closed handle does not snap back to an
+    // older registration. Ordinary input calls do not set historyOnly, so
+    // this still does not grant them a guessed target.
+    activeSessionId = await dependencies.codexSessionLocator.resolve({
       ...locatorInput,
       ...(agentSession.agentSessionId
         ? { historySessionId: agentSession.agentSessionId }
         : {}),
       readOnlyCompletion: true,
     });
+    return adoptResolvedCodexThread(
+      agentSession,
+      dependencies,
+      activeSessionId,
+    );
   }
   if (!activeSessionId) {
     // A live tmux card can be showing a non-Codex pane. Falling back to the
     // previous pane's ID would deliver the image to the wrong conversation.
     return tmuxSession ? undefined : agentSession.agentSessionId;
   }
-  if (!options.historyOnly && activeSessionId !== agentSession.agentSessionId) {
-    dependencies.registry.updateSession(agentSession.id, {
-      agentSessionId: activeSessionId,
-    });
+  if (options.historyOnly) {
+    return adoptResolvedCodexThread(
+      agentSession,
+      dependencies,
+      activeSessionId,
+    );
   }
-  return activeSessionId;
+  return adoptResolvedCodexThread(agentSession, dependencies, activeSessionId);
 }
 
 export async function resolveCodexSessionIds(
@@ -112,8 +165,9 @@ export async function verifyBoundCodexQueueThread(
     return false;
   }
 
-  // The locator's startup recovery requires a live Codex process and a unique
-  // creation-time match. Keep that read-only proof confined to card-bound queues.
+  // The locator's read-only recovery requires a live Codex process and either a
+  // unique creation-time match or the single rollout rewritten by a bare resume.
+  // Keep that proof confined to card-bound queues.
   const panes = await dependencies.codexSessionLocator.resolveTmuxPanes(
     tmuxSession,
     { readOnlyCompletion: true },

@@ -95,8 +95,13 @@ export async function prepareVisibleSessionRead(
 ) {
   const sync = active;
   if (!sync) return undefined; // Isolated/older local-only workbenches retain local receipts.
-  const namespace = sync.projection()?.namespaces.codex;
-  if (!namespace) throw new Error("尚未确认当前 Codex 账号范围，请连接后重试");
+  const snapshot = sync.projection();
+  if (!snapshot) throw new Error("尚未确认当前 Codex 账号范围，请连接后重试");
+  const namespace = snapshot.namespaces.codex;
+  // A live legacy runtime can keep shared sync active while the account
+  // namespace stays null. The visible read still clears the local receipt.
+  // It must not invent a native revision or call the native read endpoint.
+  if (!namespace) return undefined;
   const query = new URLSearchParams({ threadId, replyId, namespace });
   const response = await (activeFetch ?? fetch)(
     `/api/session/management/read-context?${query}`,
@@ -130,16 +135,20 @@ export function withVisibleSessionReadProof<T>(
   proof: SessionReadProof | undefined,
   work: () => T,
 ): T | undefined {
+  const snapshot = active?.projection();
+  const namespace = snapshot?.namespaces.codex;
+  const localOnlyCodex = kind === "codex" && Boolean(snapshot) && !namespace;
   if (
     kind === "codex" &&
     active &&
-    (!proof ||
-      proof.threadId !== id ||
-      proof.namespace !== active.projection()?.namespaces.codex)
+    !localOnlyCodex &&
+    (!proof || proof.threadId !== id || proof.namespace !== namespace)
   )
     return;
   const target = key(kind, id);
-  if (proof) readProofs.set(target, proof);
+  // Confirmed absence of a Codex namespace is local-only. A supplied proof
+  // must not be retained or uploaded as a native read.
+  if (proof && !localOnlyCodex) readProofs.set(target, proof);
   try {
     return work();
   } finally {

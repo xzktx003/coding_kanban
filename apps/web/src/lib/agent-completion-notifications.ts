@@ -131,6 +131,7 @@ export function dispatchAgentCompletionNotification(
   new notificationApi("Coding Kanban 任务完成", {
     body: buildAgentCompletionNotificationBody(event),
     tag: `agent-completion-${event.id}`,
+    silent: true,
   });
   return true;
 }

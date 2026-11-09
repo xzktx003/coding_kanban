@@ -28,6 +28,7 @@ export interface ConfigData {
   reasoningEffort: ReasoningEffort;
   serviceTier: string | null;
   webSearchRequest: boolean;
+  modelSelectionMode: "follow-config" | "manual";
   modelProvider: Provider;
   model: string;
   // Last-used model id per provider key (e.g. { openai: 'o3', custom: 'my-model' })
@@ -38,6 +39,7 @@ export interface ConfigData {
 }
 
 export interface ConfigStore extends ConfigData {
+  setModelSelectionMode: (mode: "follow-config" | "manual") => void;
   setModel: (model: string) => void;
   setModelSelection: (selection: ModelSelection) => void;
   setModelProvider: (provider: Provider) => void;
@@ -97,6 +99,7 @@ const defaults: ConfigData = {
   approvalsReviewer: "user",
   reasoningEffort: "medium",
   serviceTier: null,
+  modelSelectionMode: "follow-config",
   modelProvider: "openai",
   model: "",
   providerModels: {},
@@ -131,6 +134,7 @@ const validators: Record<Field, (value: unknown) => boolean> = {
   reasoningEffort: (value) => typeof value === "string" && value !== "",
   serviceTier: (value) => value === null || typeof value === "string",
   webSearchRequest: (value) => typeof value === "boolean",
+  modelSelectionMode: oneOf("follow-config", "manual"),
   modelProvider: (value) => typeof value === "string" && value !== "",
   model: (value) => typeof value === "string",
   providerModels: (value) =>
@@ -197,6 +201,10 @@ function readAll(): ConfigData {
     const value = readField(field, legacy);
     if (value !== undefined) Object.assign(state, { [field]: value });
   }
+  // Older saved choices have no intent marker: preserve them conservatively.
+  if (readField("modelSelectionMode", legacy) === undefined &&
+      (readField("model", legacy) !== undefined || readField("modelProvider", legacy) !== undefined))
+    state.modelSelectionMode = "manual";
   return state;
 }
 
@@ -229,8 +237,11 @@ const store = create<ConfigStore>()((set, get) => {
   return {
     ...initial,
 
+    setModelSelectionMode: (modelSelectionMode) => choose({ modelSelectionMode }),
+
     setModel: (model: string) => {
       choose({
+        modelSelectionMode: "manual",
         model,
         providerModels: {
           ...get().providerModels,
@@ -242,12 +253,14 @@ const store = create<ConfigStore>()((set, get) => {
     setModelSelection: ({ model, reasoningEffort, serviceTier }) => {
       const state = get();
       if (
+        state.modelSelectionMode === "manual" &&
         state.model === model &&
         state.reasoningEffort === reasoningEffort &&
         (serviceTier === undefined || state.serviceTier === serviceTier)
       )
         return;
       choose({
+        modelSelectionMode: "manual",
         model,
         reasoningEffort,
         ...(serviceTier === undefined ? {} : { serviceTier }),
@@ -260,6 +273,7 @@ const store = create<ConfigStore>()((set, get) => {
 
     setModelProvider: (modelProvider: Provider) => {
       choose({
+        modelSelectionMode: "manual",
         modelProvider,
         model: get().providerModels[modelProvider] ?? "",
       });

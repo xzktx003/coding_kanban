@@ -39,6 +39,7 @@ beforeEach(() => {
   useThreadModelStore.setState({ threads: {} });
   useWorkspaceStore.setState({ cwd: "/project" });
   useConfigStore.setState({
+    modelSelectionMode: "manual",
     threadCwdMode: "worktree",
     model: "",
     approvalsReviewer: "user",

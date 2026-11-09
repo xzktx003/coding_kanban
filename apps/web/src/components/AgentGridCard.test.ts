@@ -68,6 +68,20 @@ test("continuous terminal output does not invalidate card summaries", () => {
       lastOutputAt: "2026-08-14T15:00:15.000Z",
     }),
   );
+  assert.notEqual(
+    getAgentCardTaskSummaryRefreshKey(session),
+    getAgentCardTaskSummaryRefreshKey({
+      ...session,
+      agentSessionId: "codex-new-thread",
+    }),
+  );
+  assert.equal(
+    getAgentCardGitSummaryRefreshKey(session),
+    getAgentCardGitSummaryRefreshKey({
+      ...session,
+      agentSessionId: "codex-new-thread",
+    }),
+  );
   assert.equal(
     getAgentCardGitSummaryRefreshKey(session),
     getAgentCardGitSummaryRefreshKey({

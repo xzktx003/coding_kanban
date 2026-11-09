@@ -7,7 +7,10 @@ import {
   startSessionManagementSync,
   setSharedSessionUnread,
   markSharedSessionsRead,
+  prepareVisibleSessionRead,
+  withVisibleSessionReadProof,
 } from "./sessionManagementClient";
+import { latestUnread } from "../stores/useSessionAttentionStore";
 
 let close: (() => void) | undefined;
 beforeEach(() => {
@@ -284,4 +287,71 @@ test("a late native proof cannot move an old unread intent into a newly selected
   await rejected;
   expect(native).toEqual([]);
   expect((await backend.snapshot()).entries).toEqual([]);
+});
+
+test("an active sync without a Codex namespace clears the local read and records no native proof", async () => {
+  const writes: unknown[] = [];
+  const urls: string[] = [];
+  const backend = new SessionManagement({ accountScope: async () => null });
+  close = startSessionManagementSync(async (url, init) => {
+    urls.push(String(url));
+    if (init?.method === "POST") writes.push(JSON.parse(String(init.body)));
+    return new Response(
+      JSON.stringify(
+        init?.method === "POST"
+          ? await backend.apply(JSON.parse(String(init.body)))
+          : await backend.snapshot(),
+      ),
+    );
+  }, 100);
+  await vi.advanceTimersByTimeAsync(10);
+  expect((await backend.snapshot()).namespaces.codex).toBeNull();
+  useSessionAttentionStore.getState().complete("codex", "thread-1", "reply-1");
+  const controller = new AbortController();
+  const proof = await prepareVisibleSessionRead(
+    "thread-1",
+    "reply-1",
+    controller.signal,
+  );
+  expect(proof).toBeUndefined();
+  const ran = withVisibleSessionReadProof("codex", "thread-1", proof, () => {
+    useSessionAttentionStore.getState().read("codex", "thread-1", "reply-1");
+    return "local";
+  });
+  expect(ran).toBe("local");
+  expect(
+    latestUnread(useSessionAttentionStore.getState().receipts["codex:thread-1"]),
+  ).toBeNull();
+  await vi.advanceTimersByTimeAsync(250);
+  expect(writes).toEqual([]);
+  expect(urls.some((url) => url.includes("/read-context?"))).toBe(false);
+  expect(
+    latestUnread(useSessionAttentionStore.getState().receipts["codex:thread-1"]),
+  ).toBeNull();
+  expect(
+    JSON.stringify(writes).includes("nativeReadRevision") ||
+      JSON.stringify(writes).includes("nativeScope"),
+  ).toBe(false);
+});
+
+test("a confirmed Codex namespace still refuses a local read without native proof", async () => {
+  const backend = new SessionManagement({ accountScope: async () => "account-a" });
+  close = startSessionManagementSync(async (_url, init) => {
+    return new Response(
+      JSON.stringify(
+        init?.method === "POST"
+          ? await backend.apply(JSON.parse(String(init.body)))
+          : await backend.snapshot(),
+      ),
+    );
+  }, 100);
+  await vi.advanceTimersByTimeAsync(10);
+  expect((await backend.snapshot()).namespaces.codex).toEqual(expect.any(String));
+  useSessionAttentionStore.getState().complete("codex", "thread-1", "reply-1");
+  expect(
+    withVisibleSessionReadProof("codex", "thread-1", undefined, () => "local"),
+  ).toBeUndefined();
+  expect(
+    latestUnread(useSessionAttentionStore.getState().receipts["codex:thread-1"]),
+  ).toBe("reply-1");
 });

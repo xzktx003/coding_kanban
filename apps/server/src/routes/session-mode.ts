@@ -37,6 +37,7 @@ import WebSocket from "ws";
 interface SessionModeRouteOptions {
   loadAuxiliaryHistory?: () => Promise<typeof import("@agent-orchestrator/session-runtime/auxiliary-history")>;
   loadDetailChannel?: () => Promise<{
+    registerLocalMagpieCatalog?: (app: FastifyInstance) => void;
     registerLocalItemDetailChannel: (app: FastifyInstance, dataDir: string) => void;
     registerLocalChatHistoryChannel?: (app: FastifyInstance, dataDir: string, fallback: (request: FastifyRequest, reply: FastifyReply) => unknown, readCurrentTurn?: (threadId: string, signal: AbortSignal) => Promise<Awaited<ReturnType<typeof readSessionCodexActivity>>["turn"]>) => void;
   }>;
@@ -237,6 +238,7 @@ export function registerSessionModeRoutes(
         registerSessionItemDetail(detailScope, () => origin, fetchUpstream);
         return;
       }
+      channel.registerLocalMagpieCatalog?.(detailScope);
       channel.registerLocalItemDetailChannel(detailScope, resolve(options.attachmentRoot!, "..", ".codexia"));
       channel.registerLocalChatHistoryChannel?.(detailScope, resolve(options.attachmentRoot!, "..", ".codexia"), async (request, reply) => {
         if (!origin) return reply.code(503).send({ error: "会话服务尚未启动" });
@@ -481,9 +483,18 @@ export function registerSessionModeRoutes(
   const replyService = new SessionCodexFeishuReplyService({
     attachmentRoot: options.attachmentRoot,
     context: nativeContext,
+    legacyRuntime: async () => {
+      const selected = await protocol.read();
+      return { backend: selected.backend, instance: selected.instance, scopeToken: selected.scopeToken };
+    },
     submit: async (input) => {
-      const context = await nativeContext();
-      if (!input.expectedScope || input.expectedScope !== context.scope) throw new Error("原卡片的账号或运行范围已变化，消息尚未提交");
+      const selected = await protocol.read();
+      if (selected.backend === "legacy-stdio") {
+        if (input.expectedScope !== selected.scopeToken) throw new Error("运行实例已变化，消息尚未提交");
+      } else {
+        const context = await nativeContext();
+        if (!input.expectedScope || input.expectedScope !== context.scope) throw new Error("原卡片的账号或运行范围已变化，消息尚未提交");
+      }
       const result = await followups.enqueue(input);
       const message = result.items.find(row => row.id === input.id || row.nativeClientUserMessageId === input.id);
       if (!message || !["queued", "sending", "sent"].includes(message.status)) throw new Error(message?.error ?? "原会话送达结果待核对，不会重复发送");

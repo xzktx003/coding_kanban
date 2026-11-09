@@ -54,6 +54,12 @@ import {
   type AgentCompletionNotificationPermission,
 } from "./lib/agent-completion-notifications";
 import {
+  claimTerminalCompletionChime,
+  readTaskCompleteBeepMode,
+  shouldPlayTerminalCompletionChime,
+} from "./lib/agent-completion-chime";
+import { playBeep } from "./session-mode/utils/beep";
+import {
   addDiscoveredTmux,
   applyAppUpdatePull,
   checkForAppUpdate,
@@ -445,6 +451,8 @@ export default function App({
   const previousNotificationSessionsRef = useRef<AgentSessionRecord[] | null>(
     null,
   );
+  const terminalActiveRef = useRef(Boolean(active));
+  terminalActiveRef.current = Boolean(active);
   const notificationReadyAtRef = useRef(Date.now() + 5_000);
   const restoreAttemptedRuntimeIdsRef = useRef(new Set<string>());
 
@@ -570,6 +578,21 @@ export default function App({
         if (status === "connected") {
           setIsLoading(false);
         }
+      },
+      (chime) => {
+        if (!claimTerminalCompletionChime(chime.sessionId, chime.completionId)) {
+          return;
+        }
+        if (
+          !shouldPlayTerminalCompletionChime(
+            readTaskCompleteBeepMode(),
+            terminalActiveRef.current,
+            { hidden: document.hidden, focused: document.hasFocus() },
+          )
+        ) {
+          return;
+        }
+        playBeep();
       },
     );
 

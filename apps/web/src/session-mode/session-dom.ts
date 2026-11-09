@@ -48,6 +48,13 @@ export function isSessionModeActive(): boolean {
   return Boolean(root && !root.hidden);
 }
 
+/** Standalone pages have no workbench root and keep their own beep.
+ * A hidden session tab must stay quiet so the visible terminal tab can own the sound. */
+export function isSessionCompletionAudible(): boolean {
+  const root = sessionPortalContainer();
+  return !root || !root.hidden;
+}
+
 export function listenInSessionMode(
   target: Window | Document,
   type: string,

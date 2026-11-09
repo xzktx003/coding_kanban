@@ -1,3 +1,4 @@
+import { useConfigStore } from "../stores/useConfigStore";
 import {
   act,
   fireEvent,
@@ -66,6 +67,7 @@ vi.mock("../hooks/useModels", () => ({
   }),
 }));
 beforeEach(() => {
+  useConfigStore.setState({modelSelectionMode:"manual"});
   vi.clearAllMocks();
   state.thread = "first";
   state.effortValue = "high";

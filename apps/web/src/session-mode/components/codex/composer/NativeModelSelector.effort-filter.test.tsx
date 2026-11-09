@@ -1,3 +1,4 @@
+import { useConfigStore } from "../stores/useConfigStore";
 import { useNativeModelPickerPreferencesStore } from "@session/stores/settings/useNativeModelPickerPreferencesStore";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -98,6 +99,7 @@ function surface() {
 }
 
 beforeEach(() => {
+  useConfigStore.setState({modelSelectionMode:"manual"});
   // Explicit initial enabled membership preserves the original none/minimal/max
   // counterexamples. Advertised ultra stays visible.
   useNativeModelPickerPreferencesStore.getState().setEnabledReasoningEfforts([

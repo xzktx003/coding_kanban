@@ -83,6 +83,12 @@ interface FeishuCompletionDeliveryRecorderLike {
   ): void;
 }
 
+export interface StructuredCompletionChime {
+  sessionId: string;
+  completionId: string;
+  agentKind: string;
+}
+
 interface AgentCompletionFeishuNotifierOptions {
   source: SnapshotSourceLike;
   restoredSnapshot?: ListAgentSessionsResponse;
@@ -90,6 +96,7 @@ interface AgentCompletionFeishuNotifierOptions {
   sender: FeishuCompletionSenderLike;
   deliveryRecorder?: FeishuCompletionDeliveryRecorderLike;
   contentResolver?: FeishuCompletionContentResolverLike;
+  onStructuredCompletion?: (chime: StructuredCompletionChime) => void;
   structuredCompletionProbeDelayMs?: number;
   structuredCompletionProbeIntervalMs?: number;
   logError?: (error: unknown, event: FeishuCompletionEvent) => void;
@@ -194,6 +201,10 @@ export class AgentCompletionFeishuNotifier {
   readonly #sender: FeishuCompletionSenderLike;
   readonly #deliveryRecorder?: FeishuCompletionDeliveryRecorderLike;
   readonly #contentResolver?: FeishuCompletionContentResolverLike;
+  readonly #onStructuredCompletion?: (
+    chime: StructuredCompletionChime,
+  ) => void;
+  readonly #announcedCompletionChimes = new Set<string>();
   readonly #structuredCompletionProbeDelayMs: number;
   readonly #structuredCompletionProbeIntervalMs: number;
   readonly #logError: (error: unknown, event: FeishuCompletionEvent) => void;
@@ -220,6 +231,7 @@ export class AgentCompletionFeishuNotifier {
     this.#sender = options.sender;
     this.#deliveryRecorder = options.deliveryRecorder;
     this.#contentResolver = options.contentResolver;
+    this.#onStructuredCompletion = options.onStructuredCompletion;
     this.#structuredCompletionProbeDelayMs = Math.max(
       0,
       options.structuredCompletionProbeDelayMs ?? 500,
@@ -310,6 +322,7 @@ export class AgentCompletionFeishuNotifier {
       this.#deliveredCompletionIds.clear();
       this.#baselinedSessionIds.clear();
       this.#observedSessionIds.clear();
+      this.#announcedCompletionChimes.clear();
       for (const timer of this.#completionProbeTimers.values()) {
         clearTimeout(timer);
       }
@@ -527,6 +540,11 @@ export class AgentCompletionFeishuNotifier {
         this.#retryableCompletionDeliveries.delete(deliveryKey);
         continue;
       }
+      this.#announceStructuredCompletion(
+        probe.event,
+        observation,
+        deliveryKey,
+      );
       const delivered = await this.#deliverObservation(
         probe.event,
         observation,
@@ -658,6 +676,7 @@ export class AgentCompletionFeishuNotifier {
               this.#retryableCompletionDeliveries.delete(deliveryKey);
               continue;
             }
+            this.#announceStructuredCompletion(event, observation, deliveryKey);
             await this.#deliverObservation(event, observation);
           }
           return;
@@ -742,6 +761,34 @@ export class AgentCompletionFeishuNotifier {
     return `${streamKey}\u0000${completionId}`;
   }
 
+  #announceStructuredCompletion(
+    event: FeishuCompletionEvent,
+    observation: FeishuCompletionObservation,
+    deliveryKey: string,
+  ): void {
+    if (
+      !this.#onStructuredCompletion ||
+      this.#announcedCompletionChimes.has(deliveryKey)
+    ) {
+      return;
+    }
+    this.#announcedCompletionChimes.add(deliveryKey);
+    while (this.#announcedCompletionChimes.size > 512) {
+      const oldest = this.#announcedCompletionChimes.values().next().value;
+      if (oldest === undefined) break;
+      this.#announcedCompletionChimes.delete(oldest);
+    }
+    try {
+      this.#onStructuredCompletion({
+        sessionId: event.sessionId,
+        completionId: observation.completionId,
+        agentKind: event.agentKind,
+      });
+    } catch (error) {
+      this.#logError(error, event);
+    }
+  }
+
   #clearCompletionState(sessionId: string): void {
     const prefix = `${sessionId}\u0000`;
     for (const key of this.#observedCompletionIds.keys()) {
@@ -757,6 +804,11 @@ export class AgentCompletionFeishuNotifier {
     for (const key of this.#retryableCompletionDeliveries.keys()) {
       if (key === sessionId || key.startsWith(prefix)) {
         this.#retryableCompletionDeliveries.delete(key);
+      }
+    }
+    for (const key of this.#announcedCompletionChimes) {
+      if (key === sessionId || key.startsWith(prefix)) {
+        this.#announcedCompletionChimes.delete(key);
       }
     }
     this.#completionProbeRetryCounts.delete(sessionId);

@@ -591,7 +591,11 @@ export async function registerAgentSessionRoutes(
         return { available: false, updatedAt: null };
       }
 
-      const sessionId = await resolveCodexSessionId(agentSession);
+      const sessionId = await resolveActiveCodexSessionId(
+        agentSession,
+        { registry, codexSessionLocator },
+        { historyOnly: true },
+      );
       const summaryCacheKey = `${agentSession.id}:${sessionId ?? "active-pane-unavailable"}`;
 
       const cached = taskSummaryCache.get(summaryCacheKey);

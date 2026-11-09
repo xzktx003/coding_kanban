@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { isSessionModeActive, listenInSessionMode } from "./session-dom";
+import { isSessionCompletionAudible, isSessionModeActive, listenInSessionMode } from "./session-dom";
 
 afterEach(() => { document.querySelectorAll(".session-mode").forEach(node => node.remove()); });
 describe("mode keyboard ownership", () => {
@@ -13,5 +13,17 @@ describe("mode keyboard ownership", () => {
     expect(listener).toHaveBeenCalledTimes(1); expect(isSessionModeActive()).toBe(true);
     cleanup(); window.dispatchEvent(new KeyboardEvent("keydown", { key: ",", ctrlKey: true }));
     expect(listener).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("completion audibility", () => {
+  it("keeps a standalone page audible and silences a hidden session tab", () => {
+    expect(isSessionCompletionAudible()).toBe(true);
+    const root = document.createElement("div");
+    root.className = "session-mode";
+    document.body.append(root);
+    expect(isSessionCompletionAudible()).toBe(true);
+    root.hidden = true;
+    expect(isSessionCompletionAudible()).toBe(false);
   });
 });

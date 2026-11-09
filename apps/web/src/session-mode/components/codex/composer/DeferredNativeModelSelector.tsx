@@ -1,3 +1,5 @@
+import { useConfigStore } from "../stores/useConfigStore";
+import { useNewChatModelConfig } from "../hooks/useNewChatModelConfig";
 import { lazy, Suspense, useState } from "react";
 import { activeDraftOwner } from "@session/stores/useInputStore";
 import { isSessionInteractionVisible } from "@session/session-dom";
@@ -12,7 +14,9 @@ export function DeferredNativeModelSelector(props: { threadId: string | null; dr
   const owner = `${props.threadId ?? ""}\0${props.draftOwner ?? ""}`;
   const [requested, setRequested] = useState<{ owner: string; scope: CodexOperationScope } | null>(null);
   const current = requested?.owner === owner;
-  const trigger = <NativeModelTrigger aria-busy={current || undefined} onClick={(event) => {
+  const follows = useConfigStore(s => props.threadId === null && s.modelSelectionMode === "follow-config");
+  const configured = useNewChatModelConfig(follows && !current, false);
+  const trigger = <NativeModelTrigger configurationLabel={follows ? `跟随配置 · ${configured.value?.model ?? (configured.error ? "无法核实" : "读取中…")}` : undefined} aria-busy={current || undefined} onClick={(event) => {
     if (!isSessionInteractionVisible() || event.currentTarget.closest("[hidden], [inert]") || (props.draftOwner && activeDraftOwner() !== props.draftOwner)) return;
     setRequested({ owner, scope: captureCodexOperationScope() });
   }} />;

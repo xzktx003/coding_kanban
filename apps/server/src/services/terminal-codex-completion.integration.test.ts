@@ -459,7 +459,8 @@ test("terminal transcript API recovers launch history and pagination without cha
       older.json<AgentTranscriptResponse>().entries.map((entry) => entry.text),
       ["fixture question"],
     );
-    assert.deepEqual(registry.get(session.id), before);
+    assert.equal(registry.get(session.id)?.agentSessionId, threadId);
+    assert.equal(registry.get(session.id)?.agentKind, before?.agentKind);
     assert.equal(
       await resolveActiveCodexSessionId(session, {
         registry,
@@ -467,14 +468,15 @@ test("terminal transcript API recovers launch history and pagination without cha
       }),
       undefined,
     );
-    // Without a live Codex process, its old directory history remains unavailable.
+    // Leaving Codex must not keep displaying that thread, and must not fall
+    // back to an older directory record. The binding stays for the next launch.
     writeFileSync(join(procRoot, "602", "cmdline"), "/usr/bin/bash\0");
     const shell = await app.inject({
       method: "GET",
       url: `/api/agent-sessions/${session.id}/transcript`,
     });
     assert.equal(shell.json<AgentTranscriptResponse>().available, false);
-    assert.deepEqual(registry.get(session.id), before);
+    assert.equal(registry.get(session.id)?.agentSessionId, threadId);
   } finally {
     await app.close();
     rmSync(root, { recursive: true, force: true });

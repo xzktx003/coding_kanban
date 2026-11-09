@@ -83,7 +83,10 @@ function getSummaryRefreshKey(
 export function getAgentCardTaskSummaryRefreshKey(
   session: AgentSessionRecord,
 ): string {
-  return getSummaryRefreshKey(session, TASK_SUMMARY_REFRESH_INTERVAL_MS);
+  return [
+    getSummaryRefreshKey(session, TASK_SUMMARY_REFRESH_INTERVAL_MS),
+    session.agentSessionId ?? "",
+  ].join(":");
 }
 
 export function getAgentCardGitSummaryRefreshKey(

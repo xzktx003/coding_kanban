@@ -20,6 +20,7 @@ import {
 } from "./nativeReasoningOptions";
 
 type NativeModelTriggerProps = React.ComponentProps<typeof Button> & {
+  configurationLabel?: string;
   pickerOpen?: boolean;
   pickerSimple?: boolean;
   pickerOpenLabel?: string;
@@ -34,6 +35,7 @@ export const NativeModelTrigger = forwardRef<
   NativeModelTriggerProps
 >(function NativeModelTrigger(
   {
+    configurationLabel,
     pickerOpen = false,
     pickerSimple = false,
     pickerOpenLabel,
@@ -106,15 +108,16 @@ export const NativeModelTrigger = forwardRef<
     "选择模型";
   const effort = displayedEffort || "默认";
   const enhancedTrigger =
+    !configurationLabel &&
     pickerOpenLabel !== undefined &&
     modelProvider === "openai" &&
     !modelPending &&
     modelStatus !== "error";
   const showPurpose = enhancedTrigger && pickerOpen && pickerSimple;
   const triggerProps: React.ComponentProps<typeof Button> = {
-    "aria-label": modelPending
+    "aria-label": configurationLabel ?? (modelPending
       ? "Loading model…"
-      : `模型：${model || "选择模型"}，${effort}`,
+      : `模型：${model || "选择模型"}，${effort}`),
     ...props,
   };
   if (showPurpose) {
@@ -136,13 +139,13 @@ export const NativeModelTrigger = forwardRef<
         collapse="none"
         className="session-native-model-label session-model-name"
       >
-        {modelPending
+        {configurationLabel ?? (modelPending
           ? "Loading model…"
           : isUnknownOpenAiModel
             ? "自定义"
-            : label}
+            : label)}
       </ComposerFooterLabel>
-      {!modelPending && (
+      {!modelPending && !configurationLabel && (
         <ComposerFooterLabel
           collapse="sm"
           className="session-native-model-effort session-model-effort"
@@ -154,7 +157,7 @@ export const NativeModelTrigger = forwardRef<
   );
   return (
     <ComposerTooltip
-      label={enhancedTrigger ? pickerOpenLabel : `${label} · ${effort}`}
+      label={configurationLabel ?? (enhancedTrigger ? pickerOpenLabel : `${label} · ${effort}`)}
       popupOpen={enhancedTrigger && (pickerOpen || completionTooltipHeld)}
     >
       <Button
@@ -164,7 +167,7 @@ export const NativeModelTrigger = forwardRef<
         size="sm"
         className="session-model-trigger session-native-model-trigger"
         {...triggerProps}
-        disabled={modelPending || props.disabled}
+        disabled={(!configurationLabel && modelPending) || props.disabled}
         aria-busy={modelPending || undefined}
       >
         {enhancedTrigger ? (

@@ -103,3 +103,5 @@ export function registerLocalItemDetailChannel(
 }
 
 export { registerChatHistoryChannel, registerLocalChatHistoryChannel } from "./chat-history-channel.js";
+
+export { registerLocalMagpieCatalog } from "./magpie-catalog.js";
