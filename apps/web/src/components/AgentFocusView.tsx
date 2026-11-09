@@ -2046,6 +2046,7 @@ export function AgentFocusView({
               </span>
             </>
           )}
+          <div className="focus-main-header-controls">
           <button
             aria-label={`查看 ${activeHeaderSession.displayName} 的完整记录`}
             aria-pressed={transcriptOpen}
@@ -2271,6 +2272,7 @@ export function AgentFocusView({
                 )}
             </>
           )}
+          </div>
         </div>
         <div className="focus-main-terminal">
           <div

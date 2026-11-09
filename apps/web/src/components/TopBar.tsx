@@ -1,3 +1,4 @@
+import { TerminalContentMenus } from './TerminalContentMenus';
 import {
   useCallback,
   useEffect,
@@ -571,36 +572,14 @@ export function TopBar({
             )}
           </div>
         </div>
-        <div className="top-bar-context-actions">
-          <button
-            className={`top-bar-action${fileBrowserOpen ? " top-bar-action--active" : ""}`}
-            data-testid="file-browser-toggle"
-            disabled={!fileBrowserAvailable}
-            onClick={onToggleFileBrowser}
-            title={
-              fileBrowserAvailable
-                ? "打开当前终端的文件浏览器"
-                : "仅在终端聚焦态可用"
-            }
-            type="button"
-          >
-            📁 文件
-          </button>
-          <button
-            className={`top-bar-action${vscodeOpen ? " top-bar-action--active" : ""}`}
-            data-testid="vscode-toggle"
-            disabled={!vscodeAvailable}
-            onClick={onToggleVsCode}
-            title={
-              vscodeAvailable
-                ? "打开当前终端的 VS Code Web"
-                : "仅在终端聚焦态可用"
-            }
-            type="button"
-          >
-            <span>VS Code</span>
-          </button>
-        </div>
+        <TerminalContentMenus
+          fileBrowserAvailable={fileBrowserAvailable}
+          fileBrowserOpen={fileBrowserOpen}
+          vscodeAvailable={vscodeAvailable}
+          vscodeOpen={vscodeOpen}
+          onToggleFileBrowser={onToggleFileBrowser}
+          onToggleVsCode={onToggleVsCode}
+        />
         <div className="top-bar-secondary-actions">
           <label
             className="top-bar-terminal-font-control"

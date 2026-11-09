@@ -512,6 +512,8 @@ importers:
 
   packages/codex-host-bridge: {}
 
+  packages/harness-feishu: {}
+
   packages/harness-kanban: {}
 
   packages/native-codex-adapter: {}

@@ -1,0 +1,5 @@
+- insert:
+    - id: harness-feishu
+      name: harness-feishu
+      config:
+        enabled: false

@@ -471,7 +471,9 @@ export function registerSessionFollowupRoutes(
         const page = await upstream("/api/codex/thread/list", {
           limit: 100,
           cursor,
-          modelProviders: null,
+          // null restricts released threads to the configured provider. An
+          // empty list explicitly includes all providers, including relays.
+          modelProviders: [],
           cwd: null,
           useStateDbOnly: true,
           sortKey: "updated_at",
