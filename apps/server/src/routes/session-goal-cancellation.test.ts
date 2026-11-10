@@ -19,6 +19,7 @@ for (const path of ["set", "clear", "clear-completed"]) {
     });
     const requests: string[] = [];
     upstream.addHook("onRequest", async request => { requests.push(request.method + " " + request.url); });
+    upstream.get("/health", async () => ({ status: "ok", instance: "fixture-modern", runtime: "typescript", codexBackend: "shared-daemon" }));
     upstream.get("/api/internal/codex/operation-context", async () => ({ scope: "fixture-native-scope", namespace: "fixture-account-history" }));
     upstream.post("/api/codex/thread/goal/" + path, async (_request, reply) => {
       reply.raw.once("close", () => {
@@ -49,7 +50,7 @@ for (const path of ["set", "clear", "clear-completed"]) {
         new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`Goal did not enter upstream within 1s; observed ${requests.join(", ")}`)), 1000); }),
       ]);
       clearTimeout(timer);
-      assert.deepEqual(requests, ["GET /api/internal/codex/operation-context", "POST /api/codex/thread/goal/" + path]);
+      assert.deepEqual(requests, ["GET /health", "GET /api/internal/codex/operation-context", "POST /api/codex/thread/goal/" + path]);
       controller.abort();
       await request;
       await Promise.race([

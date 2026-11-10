@@ -13,8 +13,10 @@ test("the fixed lifecycle context exposes only a validated optional native daemo
     origin: "http://127.0.0.1:1",
     loadDetailChannel: async () => ({ registerLocalItemDetailChannel() {}, registerLocalChatHistoryChannel() {} }),
     fetch: async (url) => {
-      calls.push(String(url));
-      assert.equal(new URL(String(url)).pathname, "/api/internal/codex/operation-context");
+      const path = new URL(String(url)).pathname;
+      calls.push(path);
+      if (path === "/health") return Response.json({ status: "ok", instance: "fixture-modern", runtime: "typescript", codexBackend: "shared-daemon" });
+      assert.equal(path, "/api/internal/codex/operation-context");
       return new Response(JSON.stringify({ scope, namespace, ...(identity === undefined ? {} : { daemonIdentity: identity }), authToken: "DO_NOT_EXPOSE" }), { headers: { "content-type": "application/json" } });
     },
   });
@@ -27,5 +29,5 @@ test("the fixed lifecycle context exposes only a validated optional native daemo
     assert.equal(response.statusCode, 200, response.body);
     assert.deepEqual(response.json(), { scopeToken: scope, namespace });
   }
-  assert.equal(calls.length, 5);
+  assert.deepEqual(calls, Array.from({ length: 5 }, () => ["/health", "/api/internal/codex/operation-context"]).flat());
 });

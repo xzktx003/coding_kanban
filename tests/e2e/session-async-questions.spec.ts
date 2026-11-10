@@ -322,7 +322,7 @@ for (const width of [320, 375, 390, 1440]) {
       page.locator('.session-mode [contenteditable="true"]'),
     ).toHaveCount(1);
     await expect(composer.locator("xpath=ancestor::*[@inert]")).toHaveCount(1);
-    await panel.getByRole("radio").first().check();
+    await panel.getByRole("radio").first().click();
     expect(submissions).toHaveLength(0);
     await expect(
       panel.getByText("还有什么需要补充？", { exact: true }),
@@ -436,7 +436,7 @@ test("async answer rejection retries, uncertain delivery reconciles, and complet
   await load(page);
   const panel = page.locator("[data-session-async-panel]");
   await openQuestions(page);
-  await panel.getByRole("radio").first().check();
+  await panel.getByRole("radio").first().click();
   await expect(
     panel.getByText("还有什么需要补充？", { exact: true }),
   ).toBeVisible();
@@ -553,7 +553,7 @@ test("remote answers preserve local drafts; split panes send to their own thread
     await openQuestions(page);
     await panel.getByRole("textbox").fill("本地尚未提交的方案");
     await openQuestions(other);
-    await otherPanel.getByRole("radio").first().check();
+    await otherPanel.getByRole("radio").first().click();
     await expect(
       otherPanel.getByText("还有什么需要补充？", { exact: true }),
     ).toBeVisible();
@@ -614,7 +614,7 @@ test("remote answers preserve local drafts; split panes send to their own thread
       .getByRole("button", { name: "回答问题" })
       .click();
     await expect(panel.getByRole("textbox")).toHaveValue("");
-    await panel.getByRole("radio").last().check();
+    await panel.getByRole("radio").last().click();
     await expect(
       panel.getByText("还有什么需要补充？", { exact: true }),
     ).toBeVisible();

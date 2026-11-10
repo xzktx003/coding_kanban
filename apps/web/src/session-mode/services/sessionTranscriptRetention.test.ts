@@ -13,10 +13,15 @@ import { useSessionAttentionStore } from "../stores/useSessionAttentionStore";
 
 const cancelCodexHistoryRead = vi.hoisted(() => vi.fn());
 const trafficPressure = vi.hoisted(() => vi.fn(() => false));
+const pressureListeners = vi.hoisted(() => new Set<() => void>());
 
 vi.mock("./codexService", () => ({ cancelCodexHistoryRead }));
 vi.mock("./sessionMemoryPressure", () => ({
   hasTranscriptTrafficPressure: trafficPressure,
+  subscribeTranscriptTrafficPressure: (listener: () => void) => {
+    pressureListeners.add(listener);
+    return () => pressureListeners.delete(listener);
+  },
 }));
 
 import type { Thread } from "../bindings/v2";
@@ -118,6 +123,7 @@ const transcriptEvents = (threadId: string, turns: number, body: string) =>
 
 beforeEach(() => {
   vi.clearAllMocks();
+  pressureListeners.clear();
   trafficPressure.mockReturnValue(false);
   useSettingsStore.setState({ warmFollowedSessions: true });
   for (const id of trackedCodexTranscripts()) forgetCodexTranscript(id);
@@ -185,6 +191,42 @@ it("keeps followed recent pages warm within the display budget after sixty secon
     stop();
     release();
   }
+});
+
+it("honors a pressure burst even if the event loop is blocked past its window", async () => {
+  vi.useFakeTimers();
+  useAgentCenterStore.setState({
+    sharedTabsInitialized: true,
+    cards: ["visible", "cold"].map((id) => ({
+      kind: "codex",
+      id,
+      cwd: "/repo",
+    })),
+  });
+  const events = transcriptEvents("cold", 2, "retained body");
+  useCodexStore.setState({
+    events: { cold: events, visible: events },
+    historyLoadedMap: { cold: true, visible: true },
+  });
+  const release = retainCodexTranscript("visible");
+  const stop = startSessionTranscriptRetention();
+  try {
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(useCodexStore.getState().events.cold).toBe(events);
+    expect(pressureListeners.size).toBe(1);
+    for (const listener of pressureListeners) listener();
+    // Clock advances while timers and the queued callback cannot execute.
+    vi.setSystemTime(Date.now() + 6_000);
+    vi.runAllTicks();
+    await flushRetention();
+    expect(useCodexStore.getState().events.cold).toBeUndefined();
+    expect(useCodexStore.getState().events.visible).toBe(events);
+    expect(isCodexTranscriptDormant("cold")).toBe(true);
+  } finally {
+    stop();
+    release();
+  }
+  expect(pressureListeners.size).toBe(0);
 });
 
 it("restores the original sixty-second policy when the device setting disables warm retention", async () => {

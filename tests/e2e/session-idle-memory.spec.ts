@@ -300,23 +300,38 @@ for (const warm of [undefined, true, false])
           for (const id of ["ux-1", "ux-2"])
             expect((await snapshot(page)).counts[id]).toBeGreaterThan(0);
           await observe("resource-sufficient-warm-120s");
-          // Exercise the existing incoming-display-traffic pressure detector with
-          // actual completed-item EventSource snapshots. Live deltas are clipped and
-          // coalesced before this detector, so a burst of one live item is not a valid
-          // pressure precondition. Every frame remains below the 16 MiB ceiling.
-          for (let i = 0; i < 9; i++)
-            stream.emit(++pressureSequence, {
-              method: "item/completed",
-              params: {
-                threadId: "ux-0",
-                turnId: "pressure-probe",
-                item: {
-                  type: "agentMessage",
-                  id: "pressure-reply",
-                  text: "p".repeat(1024 * 1024),
-                },
+          await expect.poll(() => stream.connections(), {
+            timeout: 15_000,
+          }).toBeGreaterThan(0);
+          // Observe the actual detector instead of assuming separately delivered
+          // frames all reach it within its five-second window. The single 8 MiB
+          // ASCII frame remains below the 16 MiB SSE ceiling and its UTF-16
+          // display estimate crosses the unchanged 16 MiB traffic threshold.
+          await page.evaluate(async () => {
+            const path = "/src/session-mode/services/sessionMemoryPressure.ts";
+            const url =
+              performance.getEntriesByType("resource").findLast(
+                (entry) => new URL(entry.name).pathname === path,
+              )?.name ?? path;
+            const { subscribeTranscriptTrafficPressure } = await import(url);
+            (window as any).__idlePressureObserved = false;
+            (window as any).__stopIdlePressureObserver =
+              subscribeTranscriptTrafficPressure(() => {
+                (window as any).__idlePressureObserved = true;
+              });
+          });
+          stream.emit(++pressureSequence, {
+            method: "item/completed",
+            params: {
+              threadId: "ux-0",
+              turnId: "pressure-probe",
+              item: {
+                type: "agentMessage",
+                id: "pressure-reply",
+                text: "p".repeat(8 * 1024 * 1024),
               },
-            });
+            },
+          });
           const pressureTurn = {
             id: "pressure-probe",
             status: "completed",
@@ -335,6 +350,10 @@ for (const warm of [undefined, true, false])
             method: "turn/completed",
             params: { threadId: "ux-0", turn: pressureTurn },
           });
+          await expect.poll(
+            () => page.evaluate(() => (window as any).__idlePressureObserved),
+            { timeout: 15_000 },
+          ).toBe(true);
         } else {
           // A saved device opt-out uses the original real-time release.
           // No injected traffic pressure, fake clock, GC or direct release call.
@@ -430,6 +449,7 @@ for (const warm of [undefined, true, false])
         expect(errors).toEqual([]);
         await observe("read-only-reactivated");
       } finally {
+        await page.evaluate(() => (window as any).__stopIdlePressureObserver?.());
         writeFileSync(
           info.outputPath("idle-memory-observations.json"),
           JSON.stringify(

@@ -25,7 +25,10 @@ import {
   hasCodexTranscriptWarmReader,
 } from "./codexTranscriptActivity";
 import { estimateTranscriptBytes } from "./codexTranscriptMemoryBudget";
-import { hasTranscriptTrafficPressure } from "./sessionMemoryPressure";
+import {
+  hasTranscriptTrafficPressure,
+  subscribeTranscriptTrafficPressure,
+} from "./sessionMemoryPressure";
 import { planWarmTranscriptRetention } from "./sessionWarmRetention";
 import { useSettingsStore } from "../stores/settings/useSettingsStore";
 import { collectProviderTranscriptCandidates,releaseProviderTranscript,warmProviderTranscript,isProviderTranscriptCandidate } from "./sessionProviderTranscriptRetention";
@@ -265,6 +268,7 @@ export function releaseInvisibleTranscripts(
 export function startSessionTranscriptRetention() {
   let stopped = false;
   let queued = false;
+  let pressureQueued = false;
   const schedule = () => {
     if (stopped || queued) return;
     queued = true;
@@ -275,6 +279,16 @@ export function startSessionTranscriptRetention() {
   };
   compactObservedHiddenTranscriptEvents();
   const stops = [
+    subscribeTranscriptTrafficPressure(() => {
+      if (stopped || pressureQueued) return;
+      pressureQueued = true;
+      // A busy event loop can outlast the five-second pressure window. Keep
+      // the observed signal until this owner gets a safe chance to act.
+      queueMicrotask(() => {
+        pressureQueued = false;
+        if (!stopped) releaseInvisibleTranscripts({ pressure: true });
+      });
+    }),
     useAgentCenterStore.subscribe(schedule),
     useCodexStore.subscribe((state, previous) => {
       if (

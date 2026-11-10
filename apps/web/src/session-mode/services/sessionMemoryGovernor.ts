@@ -1,7 +1,10 @@
 import { useCodexStore } from "../components/codex/stores";
 import { useSessionSyncStore } from "../stores/useSessionSyncStore";
 import { cachedTranscriptBaselines } from "./sessionCacheState";
-import { hasTranscriptTrafficPressure } from "./sessionMemoryPressure";
+import {
+  hasTranscriptTrafficPressure,
+  subscribeTranscriptTrafficPressure,
+} from "./sessionMemoryPressure";
 import {
   compactCodexTranscript,
   estimateTranscriptBytes,
@@ -223,6 +226,7 @@ export function startSessionMemoryGovernor() {
   let stopped = false;
   let pending: ReturnType<typeof setTimeout> | undefined;
   let releaseInProgress = false;
+  let pressureQueued = false;
   const overPublishedEventLimit = (
     state: ReturnType<typeof useCodexStore.getState>,
     previous: ReturnType<typeof useCodexStore.getState>,
@@ -236,15 +240,23 @@ export function startSessionMemoryGovernor() {
     }
     return false;
   };
-  const run = () => {
+  const run = (pressure = false) => {
     if (stopped || releaseInProgress) return;
     releaseInProgress = true;
     try {
-      releaseSessionMemory();
+      releaseSessionMemory(pressure ? { pressure: true } : {});
     } finally {
       releaseInProgress = false;
     }
   };
+  const stopPressure = subscribeTranscriptTrafficPressure(() => {
+    if (stopped || pressureQueued) return;
+    pressureQueued = true;
+    queueMicrotask(() => {
+      pressureQueued = false;
+      if (!stopped) run(true);
+    });
+  });
   const stop = useCodexStore.subscribe((state, previous) => {
     if (state.events === previous.events || stopped || releaseInProgress) return;
     // Avoid rendering an oversized recovery snapshot and then replacing it
@@ -269,6 +281,7 @@ export function startSessionMemoryGovernor() {
   run();
   return () => {
     stopped = true;
+    stopPressure();
     stop();
     if (pending) clearTimeout(pending);
     clearInterval(interval);

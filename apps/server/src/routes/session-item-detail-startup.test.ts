@@ -51,6 +51,7 @@ test("a missing default detail artifact preserves a custom legacy service and it
       });
     },
     fetch: async (url, init) => {
+      if (new URL(String(url)).pathname === "/health") return Response.json({ status: "ok", instance: "fixture-modern", runtime: "typescript", codexBackend: "shared-daemon" });
       reads++;
       assert.equal(
         String(url),

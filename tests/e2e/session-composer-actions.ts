@@ -23,7 +23,7 @@ export async function openQuestions(page: Page) {
   const panel = page.locator("[data-session-async-panel]");
   if (await panel.isVisible()) return;
   try {
-    await composerAction(page, /^回答问题 · /, 1000);
+    await composerAction(page, /^回答问题 · /);
   } catch (error) {
     if (!(await panel.isVisible())) throw error;
   }

@@ -294,6 +294,7 @@ it("shrinks display history on high ingress even when the browser heap sample st
   expect(result.afterBytes).toBeLessThan(2 * 1024 * 1024);
 });
 
+
 it("keeps a just-recovered history page under heap pressure so paging can make progress", async () => {
   const { pinMemoryHistoryPage, memoryHistoryWindows } = await import(
     "./sessionMemoryHistory"
@@ -392,5 +393,32 @@ it("does not self-trigger repeated publications for an unchanged protected attac
     if (previousMemory)
       Object.defineProperty(performance, "memory", previousMemory);
     else delete (performance as Performance & { memory?: unknown }).memory;
+  }
+});
+
+it("retains a pressure signal until a blocked event loop can reclaim memory", async () => {
+  const { recordTranscriptTraffic } = await import("./sessionMemoryPressure");
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2030-01-01T00:00:00Z"));
+  const events = Array.from({ length: 35 }, (_, i) =>
+    message(`blocked-${i}`, "x".repeat(80000)),
+  );
+  useCodexStore.setState({
+    events: { background: events },
+    currentThreadId: "other",
+  });
+  const stop = startSessionMemoryGovernor();
+  try {
+    expect(useCodexStore.getState().events.background).toBe(events);
+    recordTranscriptTraffic(16 * 1024 * 1024);
+    // Simulate one long synchronous event handler without firing any timers.
+    vi.setSystemTime(Date.now() + 6_000);
+    vi.runAllTicks();
+    await Promise.resolve();
+    expect(useCodexStore.getState().events.background.length).toBeLessThan(
+      events.length,
+    );
+  } finally {
+    stop();
   }
 });
