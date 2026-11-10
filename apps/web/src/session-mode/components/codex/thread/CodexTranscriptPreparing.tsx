@@ -5,6 +5,7 @@ import {
   streamingTranscriptPreview,
   transcriptPreview,
 } from "./transcriptPreview";
+import { TranscriptFallbackMarkdown } from "./TranscriptFallbackMarkdown";
 
 const EMPTY_EVENTS: ServerNotification[] = [];
 
@@ -85,7 +86,7 @@ export function CodexTranscriptPreparing({
             data-owner-thread={threadId}
             className={`whitespace-pre-wrap break-words leading-relaxed ${row.role === "user" ? "self-end max-w-[85%] rounded-2xl bg-muted px-4 py-2" : "w-full min-w-0"}`}
           >
-            {row.text}
+            <TranscriptFallbackMarkdown value={row.text} />
           </div>
         ))}
         {streaming && (
@@ -93,7 +94,7 @@ export function CodexTranscriptPreparing({
             data-owner-thread={threadId}
             className="whitespace-pre-wrap break-words leading-relaxed"
           >
-            {streaming}
+            <TranscriptFallbackMarkdown value={streaming} />
           </div>
         )}
       </div>
