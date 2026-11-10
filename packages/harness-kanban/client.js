@@ -75,8 +75,6 @@ window.__ModuleLoader__.load({
       .hkb[hidden] { display:none !important; }
       .hkb-workspace { position:fixed; display:flex; flex-direction:column; min-width:0; min-height:0; pointer-events:auto; background:var(--dsw-alias-bg-layer-1,#fff); z-index:10; overflow:hidden; }
       .hkb-workspace.hkb-expanded { z-index:100; border:1px solid var(--dsw-alias-border-l2,#ddd); border-radius:10px; }
-      .hkb-launcher { position:fixed; top:12px; right:12px; z-index:90; pointer-events:auto; }
-      .hkb-launcher button { display:flex; align-items:center; gap:6px; }
       .hkb-toolbar { display:flex; align-items:center; flex-wrap:wrap; gap:8px 12px; padding:8px 12px; min-height:44px; border-bottom:1px solid var(--dsw-alias-border-l2,#ddd); flex-shrink:0; }
       .hkb-toolbar strong { font-size:14px; font-weight:600; }
       .hkb-status { color:var(--dsw-alias-label-secondary,#62666d); font-size:12px; flex:1; min-width:80px; }
@@ -175,14 +173,11 @@ window.__ModuleLoader__.load({
         const [viewport, setViewport] = React.useState({ width:window.innerWidth, height:window.innerHeight });
         const frame = React.useRef(null);
         const workspace = React.useRef(null);
-        const launcher = React.useRef(null);
         const closeButton = React.useRef(null);
-        const returnFocus = React.useRef(false);
         const issue = state.url ? embeddingIssue(state.url, { origin:window.location.origin, secure:window.isSecureContext }) : '';
         const anchored = selected && state.bounds?.width > 0 && state.bounds?.height > 0 && !state.expanded;
         const visible = Boolean(state.expanded || anchored);
         const close = () => {
-          returnFocus.current = true;
           store.setExpanded(false);
           if (selected) ctx.layout.selectPanel(null);
         };
@@ -196,10 +191,6 @@ window.__ModuleLoader__.load({
           if (visible) closeButton.current?.focus({ preventScroll:true });
           else {
             if (workspace.current?.contains(document.activeElement)) document.activeElement?.blur();
-            if (returnFocus.current) {
-              launcher.current?.focus({ preventScroll:true });
-              returnFocus.current = false;
-            }
           }
         }, [visible]);
         React.useEffect(() => {
@@ -212,8 +203,6 @@ window.__ModuleLoader__.load({
         const bounds = anchored ? state.bounds : { top:12, left:12, width:viewport.width - 24, height:viewport.height - 24 };
         const status = !state.url ? '尚未连接' : issue ? '需要安全入口' : state.loadState === 'loaded' ? '使用现有看板' : state.loadState === 'failed' ? '页面加载失败' : '正在打开…';
         return createPortal(h(React.Fragment, null, h('style', null, css),
-          h('div', { className:'hkb hkb-launcher', hidden:visible },
-            h('button', { ref:launcher, type:'button', onClick:() => store.setExpanded(true), 'aria-label':'打开 Kanban' }, h(Icon), 'Kanban')),
           h('section', { ref:workspace, className:`hkb hkb-workspace${anchored ? '' : ' hkb-expanded'}`, hidden:!visible, inert:visible ? undefined : '', style:bounds, 'aria-label':'Kanban 工作台' },
             h('header', { className:'hkb-toolbar' }, h('button', { ref:closeButton, type:'button', onClick:close }, '返回 Harness'), h('strong', null, 'Kanban'), h('span', { className:'hkb-status', role:'status' }, status),
               state.url ? h('a', { className:'hkb-link', href:`${state.url}/`, target:'_blank', rel:'noopener noreferrer' }, '独立打开') : null,

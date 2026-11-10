@@ -13,8 +13,10 @@ import {
 } from "lucide-react";
 import {
   createQuickLink,
+  readQuickLinks,
+  writeQuickLinks,
+  LEGACY_QUICK_LINKS_KEY,
   parseQuickLinks,
-  QUICK_LINKS_KEY,
   type QuickLink,
 } from "../lib/quick-links";
 
@@ -28,13 +30,7 @@ interface Props {
 }
 export function TerminalContentMenus(props: Props) {
   const [open, setOpen] = useState<"sidebar" | "links" | null>(null);
-  const [links, setLinks] = useState<QuickLink[]>(() => {
-    try {
-      return parseQuickLinks(localStorage.getItem(QUICK_LINKS_KEY));
-    } catch {
-      return [];
-    }
-  });
+  const [links, setLinks] = useState<QuickLink[]>([]);
   const [adding, setAdding] = useState(false);
   const [editingUrl, setEditingUrl] = useState<string | null>(null);
   const [title, setTitle] = useState("");
@@ -44,6 +40,21 @@ export function TerminalContentMenus(props: Props) {
   const sidebarButton = useRef<HTMLButtonElement>(null);
   const linksButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
+    let active = true;
+    void readQuickLinks().then(async (next) => {
+      if (next.length === 0) {
+        try {
+          const legacy = parseQuickLinks(localStorage.getItem(LEGACY_QUICK_LINKS_KEY));
+          if (legacy.length) {
+            next = await writeQuickLinks(legacy);
+            localStorage.removeItem(LEGACY_QUICK_LINKS_KEY);
+          }
+        } catch {
+          // Keep the old browser copy if migration cannot reach the gateway.
+        }
+      }
+      if (active) setLinks(next);
+    }).catch(() => {});
     const outside = (event: PointerEvent) => {
       if (
         !root.current?.contains(event.target as Node) &&
@@ -60,17 +71,12 @@ export function TerminalContentMenus(props: Props) {
         (open === "sidebar" ? sidebarButton : linksButton).current?.focus();
       }
     };
-    const storage = (event: StorageEvent) => {
-      if (event.key === QUICK_LINKS_KEY)
-        setLinks(parseQuickLinks(event.newValue));
-    };
     document.addEventListener("pointerdown", outside);
     document.addEventListener("keydown", keyboard);
-    window.addEventListener("storage", storage);
     return () => {
+      active = false;
       document.removeEventListener("pointerdown", outside);
       document.removeEventListener("keydown", keyboard);
-      window.removeEventListener("storage", storage);
     };
   }, [open]);
   const popoverStyle = (trigger: HTMLButtonElement | null) => {
@@ -97,10 +103,9 @@ export function TerminalContentMenus(props: Props) {
       width,
     };
   };
-  const save = (next: QuickLink[]) => {
+  const save = async (next: QuickLink[]) => {
     try {
-      localStorage.setItem(QUICK_LINKS_KEY, JSON.stringify(next));
-      setLinks(next);
+      setLinks(await writeQuickLinks(next));
       setError("");
       return true;
     } catch {
@@ -227,7 +232,7 @@ export function TerminalContentMenus(props: Props) {
                       type="button"
                       className="terminal-link-remove"
                       aria-label={`删除链接 ${link.title}`}
-                      onClick={() => save(links.filter((_, i) => i !== index))}
+                      onClick={() => void save(links.filter((_, i) => i !== index))}
                     >
                       <Trash2 size={14} />
                     </button>
@@ -239,12 +244,12 @@ export function TerminalContentMenus(props: Props) {
                 </p>
               )}
               <p className="terminal-links-empty">
-                保存在当前浏览器，刷新页面或重启 Kanban 后保留。
+                保存在本机 Kanban 数据目录，换浏览器后仍可使用。
               </p>
               {adding ? (
                 <form
                   className="terminal-link-form"
-                  onSubmit={(event) => {
+                  onSubmit={async (event) => {
                     event.preventDefault();
                     try {
                       const link = createQuickLink(title, url);
@@ -267,7 +272,7 @@ export function TerminalContentMenus(props: Props) {
                             item.url === editingUrl ? link : item,
                           )
                         : [...links, link];
-                      if (save(next)) {
+                      if (await save(next)) {
                         setEditingUrl(null);
                         setAdding(false);
                         setTitle("");

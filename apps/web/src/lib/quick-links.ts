@@ -2,7 +2,20 @@ export interface QuickLink {
   title: string;
   url: string;
 }
-export const QUICK_LINKS_KEY = "kanban:terminal:quick-links:v1";
+/** One-time migration source for links saved by the previous browser-only release. */
+export const LEGACY_QUICK_LINKS_KEY = "kanban:terminal:quick-links:v1";
+export async function readQuickLinks(): Promise<QuickLink[]> {
+  const response = await fetch("/api/session/terminal-quick-links", { cache: "no-store" });
+  if (!response.ok) throw new Error("无法读取快捷链接");
+  return parseQuickLinks(JSON.stringify(await response.json()));
+}
+export async function writeQuickLinks(links: QuickLink[]): Promise<QuickLink[]> {
+  const response = await fetch("/api/session/terminal-quick-links", {
+    method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(links),
+  });
+  if (!response.ok) throw new Error("无法保存快捷链接");
+  return parseQuickLinks(JSON.stringify(await response.json()));
+}
 export function createQuickLink(title: string, address: string): QuickLink {
   const url = new URL(address.trim());
   if (

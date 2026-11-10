@@ -1,4 +1,5 @@
 2026-11-09 终端工具栏整理：合并文件与 VS Code 到“侧边内容”，增加可保存的快捷链接；URL 仅接受无内嵌凭据的 HTTP/HTTPS，防止危险协议，存储失败显示错误而不假报保存成功。
+2026-11-10 快捷链接从浏览器 localStorage 迁移到会话本机数据目录 `SESSION_DATA_HOME/terminal-quick-links.json`，通过服务端 durable JSON API 读写；跨浏览器共享、Kanban 重启保留且不进入 Git，保留 HTTP/HTTPS、无凭据、最多40条校验。
 
 2026-11-09 Harness 飞书插件兼容校验：CLI 回复正文实际为预渲染纯文字，兼容旧 JSON；分叉会话不按子 Agent 排除。新增红灯复现后转绿，并验证聊天/根消息冲突拒绝，见 `packages/harness-feishu/test/bridge.test.mjs`。
 

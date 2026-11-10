@@ -6,6 +6,7 @@ import { registerSessionSubagentRoutes } from "./session-subagents.js";
 import { registerSessionProjectsRoutes } from "./session-projects.js";
 import { registerWorkspaceFileRoutes } from "./workspace-files.js";
 import { registerSessionTabsRoutes } from "./session-tabs.js";
+import { registerSessionTerminalQuickLinksRoutes } from "./session-terminal-quick-links.js";
 import { registerSessionSavedPatchRoutes } from "./session-saved-patch.js";
 import { registerSessionGitHunkRoutes } from "./session-git-hunks.js";
 import { registerSessionGitReviewRoutes } from "./session-git-review.js";
@@ -210,6 +211,7 @@ export function registerSessionModeRoutes(
       ? resolve(options.attachmentRoot, "..", "followed-sessions.json")
       : undefined,
   });
+  registerSessionTerminalQuickLinksRoutes(app, { attachmentRoot: options.attachmentRoot });
   registerSessionGroupsRoutes(app, {
     file: options.attachmentRoot
       ? resolve(options.attachmentRoot, "..", "session-groups.json")

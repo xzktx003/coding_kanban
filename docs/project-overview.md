@@ -8,7 +8,7 @@
 
 # Coding Kanban Project Overview
 
-终端主页通过“侧边内容”选择文件或 VS Code；快捷链接支持添加、编辑，并在本浏览器持久保存常用网站；Kanban 重启不清空链接，不依赖服务器配置，也不启动额外服务。
+终端主页通过“侧边内容”选择文件或 VS Code；快捷链接支持添加、编辑，并在本机 `SESSION_DATA_HOME/terminal-quick-links.json` 持久保存常用网站；Kanban 重启及更换浏览器都能继续使用，数据目录不随 Git 提交。
 
 Harness 可选独立飞书插件复用已有机器人，完成卡片和引用回复通过原生会话接口连接，不依赖 Kanban 页面。分发包默认关闭；本机已启用原有机器人，部署及未验边界见[设计说明](designs/deepseek-harness-feishu-plugin.md)。
 

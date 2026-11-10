@@ -43,7 +43,7 @@
 
 - 会话持续输出保护：待渲染增量按128项/1MiB准入、小批让出主线程；普通消息不持久化空审查投影，导航只随语义状态/提问变化更新。代码块超过16Ki字符（已知语言）或4Ki字符（自动检测）保留完整纯文本与复制，避免大块语法高亮阻塞；见[渲染工作预算](session-render-work-budget.md)。
 
-终端主页工具栏：文件与 VS Code 收入“侧边内容”下拉；“快捷链接”可添加/编辑名称及 HTTP/HTTPS 网址、在新标签页打开、删除，并保存在本浏览器，最多40条。
+终端主页工具栏：文件与 VS Code 收入“侧边内容”下拉；“快捷链接”可添加/编辑名称及 HTTP/HTTPS 网址、在新标签页打开、删除，并保存在 `SESSION_DATA_HOME/terminal-quick-links.json`，最多40条；不随 Git 提交，所有浏览器共享。
 
 新增独立 Harness 飞书插件 `packages/harness-feishu`：普通会话成功完成卡片、引用回复进入精确原会话；已复用 Harness 现有机器人并启用，真实完成卡片发送已通过；真实引用回复待用户验收。见[插件设计](designs/deepseek-harness-feishu-plugin.md)。
 
