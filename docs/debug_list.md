@@ -4035,3 +4035,4 @@ resize 才回来。
 2026-11-11：会话模式保留 Magpie reasoning_levels 为 reasoningEfforts，按模型目录显示推理强度；在模型菜单的选择模型列表下可直接选轻度、中、高等，以及模型提供的 Max/Ultra。空档位列表显示不支持调整，缺字段兼容旧网关并提示。复用已有强度保存与发送。前端52项、目录5项、浏览器4项通过，web/runtime类型检查与runtime构建通过。现场10.30.0.28:8484已回读档位；仅热更新gateway，未重启Agent或runtime，未发送生成请求。
 
 2026-11-11：修复新建Magpie会话在左侧消失。ThreadList首屏/分页和codexService.loadThreads将modelProviders:null改为[]；原生null仅默认provider，显式[]才全部。现场只读对比null返回100条openai，[]含Magpie/Houmo/NewAPI。纠正旧测试把null模拟全部的错误契约。47项相关单测、web类型检查及session-provider-history浏览器回归通过；旧session-list-usability浏览器夹具因项目同步不匹配失败，未修改该夹具。未重启runtime/Agent，无生成请求。其他管理/归档/状态同步入口的同类筛选问题尚未纳入本次修复。
+- 2026-11-11（终端完整记录展示工具调用）：Codex rollout 中的 `apply_patch` 输入和输出此前作为非 `exec` 工具记录进入完整记录；Claude 记录也包含折叠工具块。现在两个读取器只投影用户/助手消息，前端再过滤 `kind=tool`，工具正文不进入完整记录 API/UI，Agent执行与独立完成通知不变。桌面/手机共用展示组件13项、Codex/Claude针对性回归各1项通过。

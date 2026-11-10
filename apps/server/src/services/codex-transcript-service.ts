@@ -98,10 +98,6 @@ interface TranscriptPage {
   nextCursor: string | null;
 }
 
-interface PendingToolOutput {
-  entry: AgentTranscriptEntry;
-}
-
 interface UserQuestionSource {
   turnId: string;
   rootTurnId?: string;
@@ -605,7 +601,6 @@ function scanJsonlLinesBackward(
 function parseTranscriptGroup(
   record: JsonRecord | null,
   lineStartOffset: number,
-  pendingOutputs: Map<string, PendingToolOutput>,
 ): AgentTranscriptEntry[] | null {
   if (record?.type !== "response_item" || !record.payload) {
     return null;
@@ -614,51 +609,8 @@ function parseTranscriptGroup(
   const payload = record.payload;
   const payloadType = stringValue(payload.type);
   const timestamp = stringValue(record.timestamp);
-
-  if (payloadType === "custom_tool_call_output") {
-    const callId = stringValue(payload.call_id);
-    if (callId) {
-      pendingOutputs.set(callId, {
-        entry: {
-          id: `${callId}-output`,
-          timestamp,
-          kind: "tool",
-          title: "工具输出",
-          text: collectText(payload.output),
-          collapsedByDefault: true,
-        },
-      });
-    }
-    return null;
-  }
-
   let group: AgentTranscriptEntry[] | null = null;
-  if (payloadType === "custom_tool_call") {
-    const callId = stringValue(payload.call_id) || `call-${lineStartOffset}`;
-    const name = stringValue(payload.name) || "工具";
-    const pendingOutput = pendingOutputs.get(callId);
-    pendingOutputs.delete(callId);
-    if (name !== "exec") {
-      group = [
-        {
-          id: `${callId}-request`,
-          timestamp,
-          kind: "tool",
-          title: `${name} 调用`,
-          text: collectText(payload.input),
-          collapsedByDefault: true,
-        },
-        ...(pendingOutput
-          ? [
-              {
-                ...pendingOutput.entry,
-                title: `${name} 输出`,
-              },
-            ]
-          : []),
-      ];
-    }
-  } else if (payloadType === "message") {
+  if (payloadType === "message") {
     const role = stringValue(payload.role);
     const text = collectText(payload.content);
     if ((role === "user" || role === "assistant") && text) {
@@ -695,22 +647,17 @@ function readTranscriptGroupsBackward(
   limit: number,
 ): { entries: AgentTranscriptEntry[]; nextOffset: number } {
   const groups: AgentTranscriptEntry[][] = [];
-  const pendingOutputs = new Map<string, PendingToolOutput>();
   let entryCount = 0;
   let nextOffset = 0;
 
   scanJsonlLinesBackward(path, endOffset, (line, lineStartOffset) => {
     nextOffset = lineStartOffset;
-    const group = parseTranscriptGroup(
-      parseRecord(line),
-      lineStartOffset,
-      pendingOutputs,
-    );
+    const group = parseTranscriptGroup(parseRecord(line), lineStartOffset);
     if (group) {
       groups.push(group);
       entryCount += group.length;
     }
-    return entryCount >= limit && pendingOutputs.size === 0;
+    return entryCount >= limit;
   });
 
   return {
@@ -802,7 +749,6 @@ async function readRemoteTranscriptGroupsBackward(
   limit: number,
 ): Promise<{ entries: AgentTranscriptEntry[]; nextOffset: number }> {
   const groups: AgentTranscriptEntry[][] = [];
-  const pendingOutputs = new Map<string, PendingToolOutput>();
   let entryCount = 0;
   let nextOffset = 0;
 
@@ -811,16 +757,12 @@ async function readRemoteTranscriptGroupsBackward(
     endOffset,
     (line, lineStartOffset) => {
       nextOffset = lineStartOffset;
-      const group = parseTranscriptGroup(
-        parseRecord(line),
-        lineStartOffset,
-        pendingOutputs,
-      );
+      const group = parseTranscriptGroup(parseRecord(line), lineStartOffset);
       if (group) {
         groups.push(group);
         entryCount += group.length;
       }
-      return entryCount >= limit && pendingOutputs.size === 0;
+      return entryCount >= limit;
     },
   );
 

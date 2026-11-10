@@ -2277,3 +2277,4 @@ HistoryProjectsDialog 按需加载前，必须切断 browser-dialog/WorkspaceSwi
 `observeSubagentStatus`过去用JSON字符串比较原生状态与有界缓存；字段换序、扩展字段或flags裁剪使同值状态始终不等，`useSubagentFamilySync`反复写nodes，触发 `Maximum update depth exceeded`，外层LayoutContent崩溃。修复先投影再按type/activeFlags比较；hook和真实Playwright工作台复现先红后绿，100次重复状态不通知而idle转换正常。详见docs/session-background-wake-investigation.md。
 
 2026-11-11：修复新建Magpie会话在左侧消失。ThreadList首屏/分页和codexService.loadThreads将modelProviders:null改为[]；原生null仅默认provider，显式[]才全部。现场只读对比null返回100条openai，[]含Magpie/Houmo/NewAPI。纠正旧测试把null模拟全部的错误契约。47项相关单测、web类型检查及session-provider-history浏览器回归通过；旧session-list-usability浏览器夹具因项目同步不匹配失败，未修改该夹具。未重启runtime/Agent，无生成请求。其他管理/归档/状态同步入口的同类筛选问题尚未纳入本次修复。
+- 2026-11-11（终端完整记录展示工具调用）：Codex rollout 中的 `apply_patch` 输入和输出此前作为非 `exec` 工具记录进入完整记录；Claude 记录也包含折叠工具块。现在两个读取器只投影用户/助手消息，前端再过滤 `kind=tool`，工具正文不进入完整记录 API/UI，Agent执行与独立完成通知不变。桌面/手机共用展示组件13项、Codex/Claude针对性回归各1项通过。

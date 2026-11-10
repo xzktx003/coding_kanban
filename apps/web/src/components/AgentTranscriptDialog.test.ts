@@ -89,7 +89,7 @@ test("transcript refresh replaces the view when the active tmux Codex session ch
   );
 });
 
-test("transcript entries hide exec calls and keep the newest visible record at the bottom", () => {
+test("transcript entries hide all tool calls and outputs and keep the newest message at the bottom", () => {
   const middle = Array.from(
     { length: 50 },
     (_, index) => `middle-${index + 1}`,
@@ -136,11 +136,19 @@ test("transcript entries hide exec calls and keep the newest visible record at t
         collapsedByDefault: true,
       },
       {
-        id: "visible-tool-output",
+        id: "patch-call",
         timestamp: "2026-08-13T01:00:01.500Z",
         kind: "tool",
+        title: "apply_patch 调用",
+        text: "private patch body",
+        collapsedByDefault: true,
+      },
+      {
+        id: "patch-output",
+        timestamp: "2026-08-13T01:00:01.750Z",
+        kind: "tool",
         title: "apply_patch 输出",
-        text: "visible tool output",
+        text: "Success. Updated the file.",
         collapsedByDefault: true,
       },
       {
@@ -156,7 +164,10 @@ test("transcript entries hide exec calls and keep the newest visible record at t
 
   const markup = renderToStaticMarkup(
     createElement(AgentTranscriptEntries, {
-      expandedEntries: new Map([["visible-tool-output", true]]),
+      expandedEntries: new Map([
+        ["patch-call", true],
+        ["patch-output", true],
+      ]),
       onToggleEntry: () => {},
       terminalFontSize: 18,
       transcript,
@@ -176,16 +187,19 @@ test("transcript entries hide exec calls and keep the newest visible record at t
   );
   assert.ok(
     markup.indexOf('data-transcript-entry-id="before"') <
-      markup.indexOf('data-transcript-entry-id="visible-tool-output"'),
+      markup.indexOf('data-transcript-entry-id="after"'),
   );
   assert.ok(
-    markup.indexOf('data-transcript-entry-id="visible-tool-output"') <
-      markup.indexOf('data-transcript-entry-id="after"'),
+    markup.indexOf('data-transcript-entry-id="after"') >
+      markup.indexOf('data-transcript-entry-id="before"'),
   );
   assert.doesNotMatch(markup, /exec 调用/);
   assert.doesNotMatch(markup, /exec 输出/);
   assert.doesNotMatch(markup, /hidden command/);
   assert.doesNotMatch(markup, /middle-1/);
+  assert.doesNotMatch(markup, /apply_patch/);
+  assert.doesNotMatch(markup, /private patch body/);
+  assert.doesNotMatch(markup, /Updated the file/);
   assert.match(markup, /按工作目录匹配/);
   assert.match(markup, /agent-transcript-fold-toggle/);
   assert.equal(
@@ -194,11 +208,7 @@ test("transcript entries hide exec calls and keep the newest visible record at t
   );
   assert.equal(
     (markup.match(/data-transcript-rendering="text"/g) ?? []).length,
-    1,
-  );
-  assert.match(
-    markup,
-    /data-transcript-rendering="text"[^>]*>visible tool output<\/pre>/,
+    0,
   );
   assert.match(markup, /style="--agent-transcript-font-size:18px"/);
 });
