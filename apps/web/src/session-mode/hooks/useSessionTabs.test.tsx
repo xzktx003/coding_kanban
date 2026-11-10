@@ -120,6 +120,43 @@ it("restores the split layout selection when the input target is missing after r
   expect(selectCodex).toHaveBeenCalledExactlyOnceWith("b");
   expect(useAgentCenterStore.getState().currentAgentCardId).toBe("b");
 });
+it("keeps listening when a persisted split selection is stale", async () => {
+  useAgentCenterStore.setState({
+    cards: [a, b],
+    currentAgentCardId: null,
+    currentAgentCardKind: null,
+    newChatIntent: false,
+    sharedTabsInitialized: true,
+  });
+  useSessionSplitStore.setState({
+    tree: {
+      type: "group",
+      id: "stale-group",
+      keys: ["codex:removed"],
+      selected: "codex:removed",
+    },
+    activeGroupId: "stale-group",
+  });
+
+  renderHook(useRestoreSessionTabs);
+  expect(selectCodex).not.toHaveBeenCalled();
+
+  await act(async () => {
+    useSessionSplitStore.setState({
+      tree: {
+        type: "group",
+        id: "stale-group",
+        keys: ["codex:b"],
+        selected: "codex:b",
+      },
+      activeGroupId: "stale-group",
+    });
+  });
+
+  expect(selectCodex).toHaveBeenCalledExactlyOnceWith("b");
+  expect(useAgentCenterStore.getState().currentAgentCardId).toBe("b");
+});
+
 it("keeps ACP active instead of restoring a saved Codex tab over it", () => {
   useAcpStore.setState({ active: true });
   renderHook(useRestoreSessionTabs);

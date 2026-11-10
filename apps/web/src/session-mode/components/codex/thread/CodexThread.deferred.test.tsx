@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { expect, it, vi } from "vitest";
+import { act } from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
 import { useCodexStore } from "../stores/useCodexStore";
 import { CodexThread } from "./CodexThread";
 
@@ -14,6 +15,10 @@ vi.mock("../hooks/useTranscriptVisibility", () => ({
 vi.mock("@session/lib/eventStream", () => ({
   openEventStream: () => () => {},
 }));
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 it("keeps the actual conversation readable and the sibling composer usable while rich rendering loads", () => {
   useCodexStore.setState({
@@ -67,4 +72,42 @@ it("keeps the actual conversation readable and the sibling composer usable while
   const composer = screen.getByRole("textbox", { name: "composer" });
   fireEvent.change(composer, { target: { value: "a saved draft" } });
   expect((composer as HTMLTextAreaElement).value).toBe("a saved draft");
+});
+
+it("turns an indefinitely pending rich renderer into a recoverable fallback", async () => {
+  vi.useFakeTimers();
+  useCodexStore.setState({
+    events: {
+      owner: [
+        {
+          method: "item/completed",
+          params: {
+            threadId: "owner",
+            turnId: "turn",
+            item: {
+              type: "agentMessage",
+              id: "answer",
+              text: "Cached answer while the renderer is unavailable",
+              phase: "final_answer",
+              memoryCitation: null,
+            },
+          },
+        },
+      ],
+    },
+  } as never);
+  render(<CodexThread threadId="owner" />);
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(12_000);
+  });
+
+  expect(
+    screen.getByText(/完整消息渲染模块在 12 秒内没有完成/),
+  ).toBeTruthy();
+  expect(
+    screen.getByText("Cached answer while the renderer is unavailable"),
+  ).toBeTruthy();
+  expect(screen.getByRole("button", { name: "重试完整消息" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "刷新页面" })).toBeTruthy();
 });

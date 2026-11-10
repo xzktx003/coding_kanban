@@ -182,9 +182,9 @@ export function useRestoreSessionTabs() {
         }
         // The persisted store can briefly report `sharedTabsInitialized` before
         // the first server snapshot has populated cards. Keep listening in that
-        // transient empty state; otherwise the later snapshot cannot restore
-        // the layout selection and the centre remains on the welcome screen.
-        if (tabs.cards.length > 0) restored.current = true;
+        // transient empty state. The same applies to a stale layout key: the
+        // split store may reconcile it to a newly received selection on the next
+        // notification, and stopping here would strand the centre on welcome.
       }
     };
     const unsubscribe = useAgentCenterStore.subscribe(restore);

@@ -3,6 +3,7 @@ import {
   lazy,
   memo,
   Suspense,
+  useEffect,
   useMemo,
   useState,
   type ErrorInfo,
@@ -14,6 +15,45 @@ import { TranscriptDetailVisibility } from "../hooks/transcriptDetailVisibility"
 import { TranscriptInspectionContext } from "./inspection";
 import { CodexContentOwner } from "../presentation/ownerContext";
 import { CodexTranscriptPreparing } from "./CodexTranscriptPreparing";
+
+// The rich transcript has a deliberately large module graph. A slow or
+// partially failed browser module request must still leave the cached
+// conversation readable instead of keeping the user on an infinite Suspense
+// spinner.
+const TRANSCRIPT_RENDER_TIMEOUT_MS = 12_000;
+
+function TranscriptLoadingFallback({
+  threadId,
+  onRetry,
+  onRefresh,
+}: {
+  threadId: string;
+  onRetry: () => void;
+  onRefresh: () => void;
+}) {
+  const [timedOut, setTimedOut] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(
+      () => setTimedOut(true),
+      TRANSCRIPT_RENDER_TIMEOUT_MS,
+    );
+    return () => clearTimeout(timer);
+  }, []);
+  return (
+    <CodexTranscriptPreparing
+      threadId={threadId}
+      failed={timedOut}
+      failure={
+        timedOut
+          ? "完整消息渲染模块在 12 秒内没有完成加载。已保留当前会话内容，可以重试或刷新页面。"
+          : undefined
+      }
+      retryLabel="重试完整消息"
+      onRetry={timedOut ? onRetry : undefined}
+      onRefresh={timedOut ? onRefresh : undefined}
+    />
+  );
+}
 
 // Rich tools, Markdown and on-demand details belong to this local boundary.
 // Their module graph must not suspend navigation or the sibling composer.
@@ -141,7 +181,11 @@ export const CodexThread = memo(function CodexThread({
               >
                 <Suspense
                   fallback={
-                    <CodexTranscriptPreparing threadId={activeThreadId ?? ""} />
+                    <TranscriptLoadingFallback
+                      threadId={activeThreadId ?? ""}
+                      onRetry={() => retryTranscript(false)}
+                      onRefresh={refreshPage}
+                    />
                   }
                 >
                   <TranscriptRenderer

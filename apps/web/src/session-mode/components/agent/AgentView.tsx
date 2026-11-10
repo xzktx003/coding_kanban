@@ -12,6 +12,7 @@ import {
   useRestoreSessionTabs,
   useSessionTabActions,
 } from "@session/hooks/useSessionTabs";
+import { SessionGroups } from "./SessionGroups";
 
 const CodexThread = lazy(() =>
   import("@session/components/codex/thread/CodexThread").then((m) => ({
@@ -28,11 +29,6 @@ const AgentCard = lazy(() =>
 const AgentViewHeader = lazy(() =>
   import("./AgentViewHeader").then((module) => ({
     default: module.AgentViewHeader,
-  })),
-);
-const SessionGroups = lazy(() =>
-  import("./SessionGroups").then((module) => ({
-    default: module.SessionGroups,
   })),
 );
 const SessionWelcome = lazy(() =>
@@ -109,9 +105,7 @@ export default function AgentView() {
       {!acpActive && cardsViewMode === "solo" ? (
         <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
           <div className="flex flex-1 min-h-0 overflow-hidden">
-            <Suspense fallback={null}>
-              <SessionGroups />
-            </Suspense>
+            <SessionGroups />
             {subagentDock}
           </div>
           <div className="shrink-0 flex justify-center border-t">

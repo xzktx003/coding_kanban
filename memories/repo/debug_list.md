@@ -2260,5 +2260,7 @@ HistoryProjectsDialog 按需加载前，必须切断 browser-dialog/WorkspaceSwi
 - 2026-11-10：Codex 历史页缺少轮次生命周期事件时，reasoning 和命令会逐条平铺，底层连续命令还可能跨 turn 合并。转录投影现在用精确 `threadId + turnId` 建立无时长工作组，命令聚合同时切断 turn 边界，保留明确最终答复、审批/警告和交互问题；相关回归 63 项通过。
 
 - 2026-11-10：会话正文输入达到流量压力阈值时，浏览器主线程忙碌超过五秒可能让定时回收错过压力窗口。现异步保留已触发的压力信号，通知内存预算与后台正文保温管理器各执行一次原有回收；既有阈值、可见正文保护和恢复预算不变。隔离 EventSource 回归确认 120 秒保温后压力回收、草稿和审批保留及只读恢复；长期自然 GC RSS 红灯仍需单独验收。
-
+-
 - 2026-11-10：终端快捷链接改为服务端 `SESSION_DATA_HOME/terminal-quick-links.json` 持久化，避免浏览器 localStorage 导致换浏览器丢失；API 复用 durable JSON，限制无凭据 HTTP/HTTPS、40条及重复 URL，运行数据被 `.gitignore` 忽略。
+
+- 2026-11-10：会话历史请求成功但完整转录动态模块可能永久 Suspense pending，导致用户只看到“正在准备完整消息视图”。CodexThread 现在对富转录加载设置 12 秒超时，超时切换到有界正文回退并提供重试/刷新；不取消历史读取或停止 Agent。对应 CodexThread deferred 回归覆盖永不完成的模块加载。
