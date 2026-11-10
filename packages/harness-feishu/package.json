@@ -1,0 +1,34 @@
+{
+  "name": "harness-feishu",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "bridge.mjs",
+    "transport.mjs",
+    "state.mjs",
+    "cordis.patch.yml",
+    "README.md",
+    "native-transport.mjs"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "engines": {
+    "node": ">=24",
+    "dsh": "0.2.1-rc.4"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "check": "node --check index.js && node --check bridge.mjs && node --check transport.mjs && node --check state.mjs && node --check native-transport.mjs"
+  },
+  "description": "Completion cards and exact-session Feishu replies for DeepSeek Harness"
+}

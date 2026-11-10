@@ -132,8 +132,10 @@ describe("TopBar", () => {
     assert.match(markup, /data-testid="terminal-font-size-slider"/);
     assert.match(markup, /aria-label="终端字号"/);
     assert.match(markup, /value="16"/);
-    assert.match(markup, /data-testid="file-browser-toggle"/);
-    assert.match(markup, /data-testid="vscode-toggle"/);
+    assert.match(markup, /侧边内容/);
+    assert.match(markup, /快捷链接/);
+    assert.doesNotMatch(markup, /data-testid="file-browser-toggle"/);
+    assert.doesNotMatch(markup, /data-testid="vscode-toggle"/);
     assert.doesNotMatch(markup, /VS Code 省内存/);
     assert.doesNotMatch(markup, /释放 VS Code 缓存/);
     assert.doesNotMatch(markup, />资源诊断</);

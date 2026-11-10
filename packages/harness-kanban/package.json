@@ -19,7 +19,7 @@
     },
     "bundle": { "patch": "./cordis.patch.yml" }
   },
-  "engines": { "dsh": "0.2.1-rc.4", "node": ">=24" },
+  "engines": { "dsh": "0.2.1-rc.4 || 0.2.1-rc.5 || 0.2.2-rc.1", "node": ">=24" },
   "scripts": {
     "check": "node --check index.js && node --check client.js && node --check tls-proxy.mjs",
     "test": "node --test test/*.test.mjs"

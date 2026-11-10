@@ -497,7 +497,7 @@ test("followup parameters allow only native approval reviewer values and forward
   }
 });
 
-test("the HTTP runtime adapter reconciles a released queue through thread/read and never thread/resume", async () => {
+test("the HTTP runtime adapter includes released custom-provider threads and reconciles without resume", async () => {
   const app = Fastify();
   let state = "active",
     accepted = 0;
@@ -520,7 +520,11 @@ test("the HTTP runtime adapter reconciles a released queue through thread/read a
     if (path === "/api/internal/codex/queue-holds") return Response.json({});
     if (path === "/api/codex/thread/list")
       return Response.json({
-        data: [{ id: "thread", status: { type: state } }],
+        // Native null selects the configured default provider. Once released,
+        // this thread is visible only when explicitly listing all providers.
+        data: state === "notLoaded" && !Array.isArray(data.modelProviders)
+          ? []
+          : [{ id: "thread", status: { type: state } }],
         nextCursor: null,
       });
     if (path === "/api/codex/thread/read")
@@ -562,6 +566,8 @@ test("the HTTP runtime adapter reconciles a released queue through thread/read a
     await queue.tick();
     await queue.tick();
     assert.equal(accepted, 2);
+    assert.ok(calls.filter((c) => c.path.endsWith("thread/list"))
+      .every((c) => Array.isArray(c.body.modelProviders) && c.body.modelProviders.length === 0));
     assert.equal(calls.filter((c) => c.path.endsWith("thread/read")).length, 1);
     assert.equal(
       calls.filter((c) => c.path.endsWith("thread/resume")).length,

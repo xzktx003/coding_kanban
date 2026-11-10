@@ -4,6 +4,10 @@
 
 - 会话持续输出保护：待渲染增量按128项/1MiB准入、小批让出主线程；普通消息不持久化空审查投影，导航只随语义状态/提问变化更新。代码块超过16Ki字符（已知语言）或4Ki字符（自动检测）保留完整纯文本与复制，避免大块语法高亮阻塞；见[渲染工作预算](session-render-work-budget.md)。
 
+终端主页工具栏：文件与 VS Code 收入“侧边内容”下拉；“快捷链接”可添加/编辑名称及 HTTP/HTTPS 网址、在新标签页打开、删除，并保存在本浏览器，最多40条。
+
+新增独立 Harness 飞书插件 `packages/harness-feishu`：普通会话成功完成卡片、引用回复进入精确原会话；已复用 Harness 现有机器人并启用，真实完成卡片发送已通过；真实引用回复待用户验收。见[插件设计](designs/deepseek-harness-feishu-plugin.md)。
+
 - 会话 Codex 新聊天支持“跟随 Codex 配置”，只读核实项目有效模型、配置模型固定选择与显式刷新；保留手动选择及已有线程，旧服务缺接口提示不支持。完整Magpie模型目录尚未接入，见[说明](session-external-model-config.md)。
 
 - 新增独立 `harness-kanban` 页面插件：复用现有 Kanban 服务，在 DeepSeek Harness RC.4 内加载完整工作台；经典侧栏与独立入口兼容 DS Bot，切换时保留同一个 iframe／草稿。提供当前浏览器连接设置和可选 HTTPS 转发入口，不新增 Kanban 实例，不修改既有业务源码；首版不包含 Agent 工具、公网和手机接入。验证及边界见 [实施记录](designs/deepseek-harness-kanban-plugin-implementation.md)。
