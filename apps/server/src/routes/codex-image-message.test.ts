@@ -208,3 +208,87 @@ test("POST image-message resumes the resolved Claude session instead of Codex", 
   assert.equal(registry.get(session.id).agentSessionId, claudeSessionId);
   await app.close();
 });
+
+test("a live new Codex without a thread receives the image in its exact pane, never the stale card thread", async () => {
+  const { readFile, rm } = await import("node:fs/promises");
+  const { dirname } = await import("node:path");
+  for (const scenario of [
+    "live",
+    "shell",
+    "changed",
+    "restarted",
+    "remote",
+    "observe",
+  ] as const) {
+    const app = Fastify(),
+      registry = new AgentSessionRegistry();
+    const session = registry.register({
+      workspaceId: "w",
+      hostId: scenario === "remote" ? "remote-host" : "local",
+      sourceType: "local",
+      agentKind: "codex",
+      displayName: "new",
+      connectionState: "online",
+      interactionState: "running",
+      controlMode: scenario === "observe" ? "observe" : "control",
+      agentSessionId: scenario === "remote" ? undefined : "old-codex-thread",
+      transportRef: { tmuxSession: "work", tmuxPane: "%7" },
+    });
+    let probes = 0,
+      sent = 0,
+      path = "";
+    await registerCodexImageMessageRoutes(app, {
+      registry,
+      codexSessionLocator: {
+        resolve: async () => undefined,
+        resolveInputPane: async () => {
+          probes++;
+          return scenario === "shell"
+            ? undefined
+            : {
+                paneId: scenario === "changed" && probes > 1 ? "%9" : "%8",
+                processId: 123,
+                codexProcessId: 456,
+                codexStartTime: scenario === "restarted" && probes > 1 ? 2 : 1,
+              };
+        },
+      },
+      codexImageMessageService: {
+        send: async () => {
+          throw Error("must not queue stale thread");
+        },
+      },
+      submitTerminalPrompt: async (target, prompt) => {
+        assert.equal(target.transportRef?.tmuxPane, "%8");
+        path = prompt.split("\n").at(-1)!;
+        assert.equal((await readFile(path)).length, 8);
+        sent++;
+      },
+      claudeSessionLocator: { resolve: async () => undefined },
+      claudeImageMessageService: { send: async () => {} },
+    });
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: `/api/agent-sessions/${session.id}/image-message`,
+        headers: { "content-type": "multipart/form-data; boundary=image-test" },
+        payload: buildMultipartBody({
+          boundary: "image-test",
+          message: "describe",
+          filename: "image.png",
+          contentType: "image/png",
+          file: Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+        }),
+      });
+      assert.equal(response.statusCode, scenario === "live" ? 202 : 409);
+      assert.equal(sent, scenario === "live" ? 1 : 0);
+      assert.equal(
+        registry.get(session.id).agentSessionId,
+        scenario === "remote" ? undefined : "old-codex-thread",
+      );
+    } finally {
+      await app.close();
+      if (path) await rm(dirname(path), { recursive: true, force: true });
+    }
+  }
+});

@@ -954,3 +954,5 @@
 - 2026-11-09：ChatGPT 第四模式的原版 SSH 项目选择器现转发受限 `fs/getMetadata`、`fs/readDirectory`，并仅允许显式 `fs/createDirectory` 创建非根目录；文件读取、其他写入及监听仍拒绝。8484 上已实测 hm21 目录浏览、随机 `/tmp` 目录创建和信任确认；`projects.createRemote` 尚未确认落盘，因此远程项目、线程及消息链路仍未验收。见[SSH 远程项目目录选择](designs/chatgpt-desktop-mode-20261103/ssh-remote-project-picker-20261109.md)。
 
 - 2026-11-09：按用户要求暂停第四 ChatGPT 模式开发，并从 `WorkbenchModeSwitch` 隐藏 ChatGPT 入口。实现代码、服务、数据和 `mode=chatgpt` 深链保留；8484 未重启。远程项目持久化、真实 SSH 模型收发和安全文件工具仍未验收，见[暂停进度](designs/chatgpt-desktop-mode-20261103/paused-progress-20261109.md)。
+
+- **终端 Codex 首轮图片提问**：本机 Codex 已启动但尚无会话 ID 时，可向已核实的可控制窗格提交说明和私有图片文件路径，由 Codex 图片工具读取；保留现有会话的图片队列方式。窗格或 Codex 进程身份变化时拒绝发送，不复用旧卡片会话。该首轮路径不适用于 SSH/只读终端。

@@ -2262,3 +2262,5 @@ HistoryProjectsDialog 按需加载前，必须切断 browser-dialog/WorkspaceSwi
 - 2026-11-10：会话正文输入达到流量压力阈值时，浏览器主线程忙碌超过五秒可能让定时回收错过压力窗口。现异步保留已触发的压力信号，通知内存预算与后台正文保温管理器各执行一次原有回收；既有阈值、可见正文保护和恢复预算不变。隔离 EventSource 回归确认 120 秒保温后压力回收、草稿和审批保留及只读恢复；长期自然 GC RSS 红灯仍需单独验收。
 
 - 2026-11-10：终端快捷链接改为服务端 `SESSION_DATA_HOME/terminal-quick-links.json` 持久化，避免浏览器 localStorage 导致换浏览器丢失；API 复用 durable JSON，限制无凭据 HTTP/HTTPS、40条及重复 URL，运行数据被 `.gitignore` 忽略。
+
+- 2026-11-10：终端 Codex 欢迎页尚无 thread ID，不能据此判定未启动；图片接口增加本机精确 live pane 输入路径，拒绝旧会话回退。核对 Codex PID/启动身份，前端允许无 threadId 回执；已建会话仍走 queue。见 `docs/debug_list.md` 与 `apps/server/src/services/codex-terminal-image.ts`。

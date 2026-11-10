@@ -860,7 +860,7 @@ export function uploadFiles(options: {
 
 export interface CodexImageMessageResponse {
   ok: true;
-  threadId: string;
+  threadId?: string;
 }
 
 export async function sendCodexImageMessage(options: {
@@ -891,10 +891,10 @@ export async function sendCodexImageMessage(options: {
   }
 
   const body = (await response.json()) as Partial<CodexImageMessageResponse>;
-  if (body.ok !== true || typeof body.threadId !== "string") {
+  if (body.ok !== true || (body.threadId !== undefined && typeof body.threadId !== "string")) {
     throw new Error("Codex 图片发送返回了无效结果");
   }
-  return { ok: true, threadId: body.threadId };
+  return { ok: true, ...(body.threadId !== undefined ? { threadId: body.threadId } : {}) };
 }
 
 export function parseFileUploadResponse(
