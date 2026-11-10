@@ -562,7 +562,7 @@ it("uses the exact original Loading model message and busy state while model/lis
   } finally { await act(async () => pending.resolve({ data: [], nextCursor: null })); }
 });
 
-it.each(["model-error", "ancillary-error", "custom-error"] as const)("keeps only the custom extension's inline retry/error bar: %s", async (failure) => {
+it.each(["model-error", "ancillary-error", "custom-error"] as const)("shows the catalog error and retry without changing the thread: %s", async (failure) => {
   const response: ModelListResponse = { data: [], nextCursor: null };
   api.listModels.mockResolvedValue(response);
   if (failure === "model-error") api.listModels.mockRejectedValue(new Error("fixture native model error bar"));
@@ -575,13 +575,10 @@ it.each(["model-error", "ancillary-error", "custom-error"] as const)("keeps only
     fireEvent.pointerDown(caption, { pointerType: "mouse", button: 0 });
     fireEvent.click(caption);
   }
-  if (failure === "custom-error") {
-    expect(menu.querySelector('[role="alert"]')).not.toBeNull();
-    expect(screen.getByRole("button", { name: "重试" })).toBeTruthy();
-  } else {
-    expect.soft(menu.querySelector('[role="alert"]')).toBeNull();
-    expect.soft(screen.queryByRole("button", { name: "重试" })).toBeNull();
-  }
+  expect(menu.querySelector('[role="alert"]')?.textContent).toBe(
+    failure === "model-error" ? "fixture native model error bar" : "fixture ancillary error bar",
+  );
+  expect(screen.getByRole("menuitem", { name: "重试" })).toBeTruthy();
   assertUnrelated(surface, failure === "model-error" ? undefined : response);
   expect(useThreadModelStore.getState().threads[A]).toBe(surface.before.a);
   for (const read of Object.values(api)) expect(read).toHaveBeenCalledTimes(1);
