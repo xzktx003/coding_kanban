@@ -233,8 +233,17 @@ export function createDependencyPreparation({
         required.filter(({ name, resolver }) => {
           try {
             return !existsSync(resolver.resolve(name));
-          } catch {
-            return true;
+          } catch (error) {
+            // A workspace package can export only subpaths. Node reports
+            // ERR_PACKAGE_PATH_NOT_EXPORTED and names that package directory.
+            // A removed package or a package that no longer resolves is missing.
+            const message = error instanceof Error ? error.message : "";
+            const named = message.match(/in (\/[^:\n]+)\/package\.json/);
+            return !(
+              error?.code === "ERR_PACKAGE_PATH_NOT_EXPORTED" &&
+              named?.[1] &&
+              existsSync(named[1])
+            );
           }
         });
       const missing = missingDependencies().length > 0;

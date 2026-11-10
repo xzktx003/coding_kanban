@@ -28,6 +28,7 @@ it("does not label an unobserved reviewer as user approval, and recognizes a lat
   for (const row of await screen.findAllByRole("menuitemradio")) expect(row.getAttribute("aria-checked")).toBe("false");
   await act(async () => { hydrateThreadModel("permission-reviewer", { model: "native", approvalsReviewer: "auto_review" }); await flushThreadModelSettings("permission-reviewer"); });
   expect(trigger.getAttribute("aria-label")).toBe("执行权限：帮我批准");
+  fireEvent.click(screen.getByRole("button", { name: "更多权限" }));
   expect(screen.getByRole("menuitemradio", { name: /帮我批准/ }).getAttribute("aria-checked")).toBe("true");
 });
 it("keeps a fully observed native user approval mode selected", async () => {
@@ -35,6 +36,9 @@ it("keeps a fully observed native user approval mode selected", async () => {
   hydrateThreadModel("permission-reviewer", { model: "native", approvalPolicy: "on-request", approvalsReviewer: "user", sandboxPolicy: { type: "workspaceWrite", writableRoots: ["/only"], networkAccess: false, excludeTmpdirEnvVar: true, excludeSlashTmp: true } });
   await flushThreadModelSettings("permission-reviewer");
   render(<div className="session-mode"><AccessModePopover threadId="permission-reviewer" /></div>);
-  fireEvent.keyDown(screen.getByRole("button", { name: "执行权限：请求批准" }), { key: "ArrowDown" });
+  const trigger = screen.getByRole("button", { name: "执行权限：请求批准" });
+  expect(trigger.textContent).toContain("请求批准");
+  expect(trigger.hasAttribute("title")).toBe(false);
+  fireEvent.keyDown(trigger, { key: "ArrowDown" });
   expect((await screen.findByRole("menuitemradio", { name: /请求批准/ })).getAttribute("aria-checked")).toBe("true");
 });

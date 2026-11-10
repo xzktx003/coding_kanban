@@ -68,7 +68,7 @@ it("opens native inline editor, edits independently, cancels without touching de
   expect(screen.queryByRole("textbox")).toBeNull();
   expect(mocks.edit).not.toHaveBeenCalled();
 });
-it("IME composition Enter does not submit; send requires visible rollback confirmation and captures changed text plus original attachments", async () => {
+it("IME composition Enter does not submit; send submits the edited message without a second confirmation", async () => {
   mocks.edit.mockResolvedValue("replacement");
   show();
   fireEvent.click(screen.getByRole("button", { name: "userMessage.edit" }));
@@ -78,10 +78,7 @@ it("IME composition Enter does not submit; send requires visible rollback confir
   fireEvent.keyDown(editor, { key: "Enter", code: "Enter", isComposing: true });
   expect(screen.queryByRole("button", { name: "common.continue" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "发送" }));
-  expect(mocks.edit).not.toHaveBeenCalled();
-  fireEvent.click(
-    await screen.findByRole("button", { name: "common.continue" }),
-  );
+  expect(screen.queryByRole("button", { name: "common.continue" })).toBeNull();
   await waitFor(() =>
     expect(mocks.edit).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -104,12 +101,10 @@ it("keeps failed edit buffer after collapsing editor and reopening", async () =>
   screen.getByRole("textbox").textContent = "Saved changed text";
   fireEvent.input(screen.getByRole("textbox"));
   fireEvent.click(screen.getByRole("button", { name: "发送" }));
-  fireEvent.click(
-    await screen.findByRole("button", { name: "common.continue" }),
-  );
   await screen.findByRole("alert");
-  fireEvent.click(screen.getByRole("button", { name: "common.cancel" }));
   expect(screen.getByRole("textbox").textContent).toBe("Saved changed text");
+  fireEvent.click(screen.getByRole("button", { name: "取消" }));
+  expect(screen.queryByRole("textbox")).toBeNull();
 });
 it("does not clear a newer buffer preserved by the service when its text equals the pending submit", async () => {
   let finish!: (value: string) => void;
@@ -121,9 +116,6 @@ it("does not clear a newer buffer preserved by the service when its text equals 
   screen.getByRole("textbox").textContent = "Submitted text";
   fireEvent.input(screen.getByRole("textbox"));
   fireEvent.click(screen.getByRole("button", { name: "发送" }));
-  fireEvent.click(
-    await screen.findByRole("button", { name: "common.continue" }),
-  );
   await waitFor(() => expect(mocks.edit).toHaveBeenCalledTimes(1));
   const source = mocks.edit.mock.calls[0][0],
     store = useThreadWorkflowStore.getState();
@@ -133,11 +125,7 @@ it("does not clear a newer buffer preserved by the service when its text equals 
     useThreadWorkflowStore.getState().inlineEdits,
   )[0];
   finish("replacement");
-  await waitFor(() =>
-    expect(
-      screen.queryByRole("button", { name: "common.continue" }),
-    ).toBeNull(),
-  );
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
   expect(Object.values(useThreadWorkflowStore.getState().inlineEdits)).toEqual([
     expected,
   ]);

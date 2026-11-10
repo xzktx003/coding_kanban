@@ -87,8 +87,8 @@
 }
 @media (pointer: coarse) {
   .session-mode .session-composer-rail .session-composer-rail-toggle {
-    min-width: 40px;
-    min-height: 40px;
+    min-width: 44px;
+    min-height: 44px;
   }
 }
 .session-mode .session-composer-rail-summary {

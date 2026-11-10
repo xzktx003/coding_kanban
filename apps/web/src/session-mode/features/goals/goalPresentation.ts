@@ -118,7 +118,7 @@ const zh: typeof en = {
   save: "保存",
   close: "关闭对话框",
   draft: "目标",
-  cancelDraft: "明确目标",
+  cancelDraft: "清除目标",
   replaceTitle: "替换当前目标吗？",
   replaceSubtitle: "这会保留聊天，但会用你当前在输入框中的文本替换已保存的目标",
   replace: "替换目标",

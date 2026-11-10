@@ -482,6 +482,55 @@ test("runtime manifest and missing dependencies are checked only for the default
   );
 });
 
+test("a workspace package that exports only subpaths is installed", async (t) => {
+  const { mkdtemp, mkdir, writeFile, rm, symlink } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { createDependencyPreparation } = await import("./watch-server.mjs");
+  const root = await mkdtemp(join(tmpdir(), "subpath-export-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(join(root, "apps/server"), { recursive: true });
+  await mkdir(join(root, "packages/host"), { recursive: true });
+  for (const path of [
+    "apps/web",
+    "packages/shared",
+    "packages/session-runtime",
+    "apps/server/node_modules/@agent-orchestrator",
+  ])
+    await mkdir(join(root, path), { recursive: true });
+  for (const path of [
+    "package.json",
+    "apps/web/package.json",
+    "packages/shared/package.json",
+    "packages/session-runtime/package.json",
+  ])
+    await writeFile(join(root, path), '{"dependencies":{}}');
+  await writeFile(
+    join(root, "apps/server/package.json"),
+    '{"dependencies":{"@agent-orchestrator/subpath-host":"workspace:*"}}',
+  );
+  await writeFile(
+    join(root, "packages/host/package.json"),
+    '{"name":"@agent-orchestrator/subpath-host","type":"module","exports":{"./wire":"./wire.mjs"}}',
+  );
+  await writeFile(join(root, "packages/host/wire.mjs"), "export {};\n");
+  await symlink(
+    "../../../../packages/host",
+    join(root, "apps/server/node_modules/@agent-orchestrator/subpath-host"),
+  );
+  for (const path of ["pnpm-lock.yaml", "pnpm-workspace.yaml"])
+    await writeFile(join(root, path), "fixture");
+  let installs = 0;
+  await createDependencyPreparation({
+    root,
+    env: { SESSION_MODE_ENABLED: "0" },
+    run: async () => {
+      installs += 1;
+    },
+  })();
+  assert.equal(installs, 1);
+});
+
 test("an explicit gateway reload requests replacement without signaling the session runtime", async () => {
   const { EventEmitter } = await import("node:events");
   const { createGatewayReloadControl } = await import("./watch-server.mjs");

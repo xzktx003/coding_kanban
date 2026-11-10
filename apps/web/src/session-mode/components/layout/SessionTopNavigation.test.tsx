@@ -27,11 +27,12 @@ it("combines brand, primary page navigation and followed status in one row", asy
   fireEvent.click(screen.getByRole("button", { name: "聊天" }));
   expect(useLayoutStore.getState().view).toBe("agent");
 });
-it("announces reconnection instead of claiming no pending requests", async () => {
+it("labels followed-session status as unavailable instead of claiming no pending requests", async () => {
   render(<SessionTopNavigation status="offline" />);
   expect(
-    await screen.findByRole("button", { name: "正在重连" }, { timeout: 5000 }),
+    await screen.findByRole("button", { name: "状态待恢复" }, { timeout: 5000 }),
   ).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "正在重连" })).toBeNull();
   expect(screen.queryByRole("button", { name: "关注 0" })).toBeNull();
 });
 it("reports unsynchronized followed state separately from an empty set", async () => {

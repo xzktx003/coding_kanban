@@ -130,17 +130,35 @@ export function failDeliveryEcho(
 ) {
   useCodexDeliveryStore.setState((s) => {
     const entry = s.entries[key(threadId, id)];
-    if (!entry || entry.status === "sent" || entry.turnId) return s;
+    if (entry && (entry.status === "sent" || entry.turnId)) return s;
     if (rejected) {
+      if (!entry) return s;
       const entries = { ...s.entries };
       delete entries[key(threadId, id)];
       return { entries };
     }
-    if (entry.status !== "submitting") return s;
+    if (entry) {
+      if (entry.status !== "submitting") return s;
+      return {
+        entries: {
+          ...s.entries,
+          [key(threadId, id)]: { ...entry, status: "uncertain" },
+        },
+      };
+    }
+    // No prior echo: the submission never got a confirmed receipt. Track the
+    // uncertainty so resubmission stays blocked; the input draft carries the
+    // content and the transcript must not manufacture a duplicate message.
     return {
       entries: {
         ...s.entries,
-        [key(threadId, id)]: { ...entry, status: "uncertain" },
+        [key(threadId, id)]: {
+          id,
+          threadId,
+          text: "",
+          images: [],
+          status: "uncertain",
+        },
       },
     };
   });

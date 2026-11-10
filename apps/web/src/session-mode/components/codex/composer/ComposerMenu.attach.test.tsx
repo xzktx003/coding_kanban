@@ -18,6 +18,9 @@ vi.mock("@session/browser-dialog", () => ({
   uploadBrowserFile: vi.fn(),
   open: vi.fn(),
 }));
+const skills = vi.hoisted(() => ({ list: vi.fn(async () => []) }));
+vi.mock("@session/services/codexService", () => ({ codexService: { listSkills: skills.list } }));
+vi.mock("@session/stores/useWorkspaceStore", () => ({ useWorkspaceStore: (selector: (state: { cwd: string | null }) => unknown) => selector({ cwd: "/project" }) }));
 vi.mock("@session/components/codex/stores", () => ({
   useCodexStore: (selector: (state: { currentThreadId: string; threads: Array<{ id: string; cwd: string }> }) => unknown) =>
     selector({ currentThreadId: "owner", threads: [{ id: "owner", cwd: "/project" }] }),
@@ -46,6 +49,37 @@ beforeEach(() => {
   vi.mocked(uploadBrowserFile).mockReset();
 });
 afterEach(() => vi.restoreAllMocks());
+
+it("reads skills when the goal action opens and discards the result", async () => {
+  render(<ComposerMenu owner="owner" />);
+  fireEvent.click(screen.getByRole("button", { name: "附加文件" }));
+  fireEvent.click(screen.getByRole("button", { name: "目标" }));
+  await waitFor(() => expect(skills.list).toHaveBeenCalledWith("/project"));
+  expect(screen.queryByText("技能")).toBeNull();
+});
+
+it("puts files, goal and sketch first without changing another draft", async () => {
+  useSessionDraftStore.setState({ drafts: { "other-session": { text: "不要改这条草稿", revision: 4 } } });
+  const goal = vi.fn();
+  const sketch = vi.fn();
+  render(<ComposerMenu owner="owner" onGoal={goal} onSketch={sketch} />);
+  fireEvent.click(screen.getByRole("button", { name: "附加文件" }));
+  const names = screen.getAllByRole("button").slice(1, 4).map((button) => button.getAttribute("aria-label") || button.textContent);
+  expect(names.map((name) => name?.replace(/设定一个持续推进的目标|画一张草图/g, "").trim())).toEqual(["文件和文件夹", "目标", "草图"]);
+  fireEvent.click(screen.getByRole("button", { name: "草图" }));
+  expect(sketch).toHaveBeenCalledOnce();
+  await waitFor(() => expect(skills.list).toHaveBeenCalledWith("/project"));
+  expect(goal).not.toHaveBeenCalled();
+  expect(useSessionDraftStore.getState().drafts["other-session"].text).toBe("不要改这条草稿");
+});
+
+it("does not repeat files or goal after the official first three actions", () => {
+  render(<ComposerMenu owner="owner" />);
+  fireEvent.click(screen.getByRole("button", { name: "附加文件" }));
+  expect(screen.getAllByRole("button", { name: "文件和文件夹" })).toHaveLength(1);
+  expect(screen.getAllByRole("button", { name: "目标" })).toHaveLength(1);
+  expect(screen.queryByRole("button", { name: "上传设备文件" })).toBeNull();
+});
 
 it("opens the shipped attach menu and leaves another session draft unchanged", () => {
   useSessionDraftStore.setState({

@@ -148,7 +148,6 @@ export function NewAgentButton({
         aria-label={t("newChat")}
         disabled={creating}
         aria-busy={creating}
-        title={`${t("newChat")} (⌘N)`}
       >
         <Icon size={16} />
         {showLabel && (

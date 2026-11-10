@@ -843,6 +843,11 @@ export class NativeCodexFollowups {
         )
       )
         conflict("读取期间官方队列已变化，请查看最新状态后重试");
+      // A local interruption marker can outlive the last queued item. Do not
+      // send queue/start when the exact native queue is already known empty:
+      // an upstream 5xx would otherwise be an uncertain mutation receipt.
+      if (action.type === "resume" && rows.length === 0)
+        conflict("当前没有待发送的原生消息，请检查队列或先迁移旧消息");
       const record: NativeActionRecord = {
         id: opId,
         threadId: id,

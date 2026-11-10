@@ -16,6 +16,13 @@ beforeEach(() => {
   actions.create.mockClear();
   useLayoutStore.setState({ view: "agent" });
 });
+test("new chat button keeps its name without a tooltip", () => {
+  const view = render(<div className="session-mode"><NewAgentButton /></div>);
+  const button = view.getByRole("button", { name: "newChat" });
+  expect(button.textContent).toBe("");
+  expect(button.hasAttribute("title")).toBe(false);
+});
+
 test("multiple visible new buttons execute one keyboard action", () => {
   render(
     <div className="session-mode">

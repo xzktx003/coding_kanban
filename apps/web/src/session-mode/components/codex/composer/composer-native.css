@@ -59,6 +59,261 @@
   outline: 2px solid var(--codex-link, var(--foreground));
   outline-offset: -2px;
 }
+.session-mode .session-composer-header-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.session-mode .session-composer-header-menu {
+  position: relative;
+}
+.session-mode .session-composer-header-menu > button,
+.session-mode .session-composer-header-menu [role="menuitem"] {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.session-mode .session-composer-header-menu > div {
+  position: absolute;
+  z-index: 5;
+  top: 32px;
+  left: 0;
+  display: grid;
+  min-width: 180px;
+  padding: 6px;
+  border-radius: 14px;
+  background: var(--codex-secondary, var(--background));
+  box-shadow: 0 8px 24px rgb(0 0 0 / 8%);
+}
+.session-mode .session-recent-chats {
+  position: relative;
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+.session-mode .session-recent-chats > button {
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: color-mix(
+    in srgb,
+    var(--codex-text, var(--foreground)) 72%,
+    transparent
+  );
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  line-height: 28px;
+  padding: 0 8px;
+}
+.session-mode .session-recent-chats-menu {
+  position: absolute;
+  z-index: 5;
+  top: 32px;
+  right: 0;
+  display: grid;
+  width: min(320px, 100%);
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid
+    color-mix(in srgb, var(--codex-text, var(--foreground)) 14%, transparent);
+  border-radius: 16px;
+  background: var(--codex-secondary, var(--background));
+  box-shadow: 0 8px 24px rgb(0 0 0 / 8%);
+}
+.session-mode .session-recent-chats-menu input,
+.session-mode .session-recent-chats-menu button {
+  width: 100%;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.session-mode .session-recent-chats-menu input {
+  padding: 6px 8px;
+  background: color-mix(
+    in srgb,
+    var(--codex-text, var(--foreground)) 5%,
+    transparent
+  );
+}
+.session-mode .session-recent-chats-menu button {
+  cursor: pointer;
+  padding: 7px 8px;
+}
+.session-mode .session-recent-chats-menu p {
+  margin: 4px 8px 8px;
+  color: color-mix(
+    in srgb,
+    var(--codex-text, var(--foreground)) 62%,
+    transparent
+  );
+  font-size: 13px;
+}
+@media (pointer: coarse) {
+  .session-mode .session-composer-header-menu > button,
+  .session-mode .session-recent-chats > button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+    line-height: 1.25;
+  }
+  .session-mode .session-composer-header-menu > div {
+    top: 44px;
+  }
+  .session-mode .session-composer-header-menu [role="menuitem"],
+  .session-mode .session-recent-chats-menu input,
+  .session-mode .session-recent-chats-menu button {
+    box-sizing: border-box;
+    min-height: 44px;
+  }
+  .session-mode .session-composer-header-menu [role="menuitem"] {
+    padding-inline: 10px;
+    border-radius: 10px;
+    text-align: left;
+  }
+  .session-mode .session-recent-chats-menu {
+    top: 44px;
+  }
+  .session-mode .session-recent-chats-menu input {
+    padding-block: 8px;
+  }
+  .session-mode .session-codex-composer button[aria-label="配置本地工作环境"] {
+    box-sizing: border-box;
+    height: 44px;
+    min-height: 44px;
+  }
+}
+.session-mode .session-multi-agent-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 10px;
+  padding: 14px 12px 14px 16px;
+  border: 1px solid
+    color-mix(in srgb, var(--codex-text, var(--foreground)) 14%, transparent);
+  border-radius: 22px;
+  background: var(--codex-secondary, var(--background));
+  box-shadow: 0 4px 8px rgb(0 0 0 / 3%);
+}
+.session-mode .session-multi-agent-banner-icon {
+  display: grid;
+  flex: 0 0 42px;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  color: color-mix(
+    in srgb,
+    var(--codex-text, var(--foreground)) 62%,
+    transparent
+  );
+}
+.session-mode .session-multi-agent-banner-copy {
+  min-width: 0;
+  flex: 1;
+}
+.session-mode .session-multi-agent-banner h2,
+.session-mode .session-multi-agent-banner p {
+  margin: 0;
+}
+.session-mode .session-multi-agent-banner h2 {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 22px;
+}
+.session-mode .session-multi-agent-banner p {
+  color: color-mix(
+    in srgb,
+    var(--codex-text, var(--foreground)) 68%,
+    transparent
+  );
+  font-size: 13px;
+  line-height: 18px;
+}
+.session-mode .session-multi-agent-banner-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+}
+.session-mode .session-multi-agent-banner button {
+  border: 1px solid
+    color-mix(in srgb, var(--codex-text, var(--foreground)) 18%, transparent);
+  border-radius: 999px;
+  background: var(--codex-text, var(--foreground));
+  color: var(--codex-secondary, var(--background));
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  line-height: 28px;
+  padding: 0 12px;
+}
+.session-mode .session-multi-agent-banner button[aria-label] {
+  width: 28px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: color-mix(
+    in srgb,
+    var(--codex-text, var(--foreground)) 58%,
+    transparent
+  );
+  font-size: 18px;
+}
+@media (pointer: coarse) {
+  .session-mode .session-composer-header-menu > button {
+    box-sizing: border-box;
+    width: 44px;
+    min-width: 44px;
+    min-height: 44px;
+    padding-inline: 0;
+  }
+  .session-mode .session-multi-agent-banner button {
+    box-sizing: border-box;
+    min-height: 44px;
+    line-height: 1.25;
+    padding-block: 8px;
+  }
+  .session-mode
+    .session-multi-agent-banner
+    .session-multi-agent-banner-actions
+    button[aria-label] {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    min-height: 44px;
+    padding: 0;
+  }
+}
+@media (max-width: 374px) {
+  .session-mode .session-multi-agent-banner {
+    display: grid;
+    grid-template-columns: 42px minmax(0, 1fr);
+    grid-template-areas:
+      "icon copy"
+      "actions actions";
+    align-items: start;
+    column-gap: 8px;
+    row-gap: 6px;
+    padding: 10px 12px;
+  }
+  .session-mode .session-multi-agent-banner-icon {
+    grid-area: icon;
+  }
+  .session-mode .session-multi-agent-banner-copy {
+    grid-area: copy;
+  }
+  .session-mode .session-multi-agent-banner-actions {
+    grid-area: actions;
+    justify-content: flex-end;
+  }
+}
 .session-mode .session-native-composer .session-composer-drop-hint {
   position: absolute;
   inset: 8px 8px auto auto;
@@ -440,6 +695,8 @@
   --codex-muted: var(--vscode-descriptionForeground, #717171);
   --codex-border: color-mix(in srgb, var(--codex-text) 8%, transparent);
   --codex-chat-font: var(--vscode-font-family, system-ui, sans-serif);
+  --native-model-chart-blue: var(--vscode-charts-blue, #339cff);
+  --native-model-chart-purple: var(--vscode-charts-purple, #924ff7);
 }
 :is(.session-mode.dark, .dark .session-mode, .session-mode .dark)
   :is(
@@ -451,6 +708,7 @@
   --codex-secondary: var(--vscode-sideBar-background, #282a23);
   --codex-text: var(--vscode-foreground, #ccc);
   --codex-muted: var(--vscode-descriptionForeground, #858585);
+  --native-model-chart-purple: var(--vscode-charts-purple, #ad7bf9);
 }
 .session-mode .session-native-model-menu {
   /* Current enhanced lCa/uca picker; the legacy trigger branch uses w-56. */
@@ -646,6 +904,35 @@
   padding: 4px;
   overflow-y: auto;
 }
+.session-mode .session-native-model-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 12px;
+  color: var(--codex-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.session-mode .session-native-model-error > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.session-mode .session-native-model-error > [role="menuitem"] {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--codex-text);
+  background: transparent;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.session-mode .session-native-model-error > [role="menuitem"]:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
 .session-mode .session-native-model-heading {
   margin: 0;
   padding: 4px 8px;
@@ -803,7 +1090,7 @@
   border-radius: 7px;
 }
 .session-mode .session-native-service-tier[aria-checked="true"] {
-  color: var(--vscode-charts-blue, var(--codex-text));
+  color: var(--native-model-chart-blue, var(--vscode-charts-blue, #339cff));
 }
 .session-mode .session-native-service-tier[data-highlighted] > span {
   background: color-mix(in srgb, var(--codex-text) 7%, transparent);
@@ -886,12 +1173,12 @@
 .session-mode
   .session-native-model-menu
   .session-native-power-effort[data-accent="true"] {
-  color: var(--vscode-charts-blue, var(--codex-text));
+  color: var(--native-model-chart-blue);
 }
 .session-mode
   .session-native-model-menu
   .session-native-power-effort[data-maximum="true"] {
-  color: var(--vscode-charts-purple, var(--codex-text));
+  color: var(--native-model-chart-purple);
 }
 .session-mode .session-native-power-model {
   grid-area: 2 / 2;
@@ -926,6 +1213,14 @@
   background: color-mix(in srgb, var(--codex-text) 10%, transparent);
   box-shadow: inset 0 0 0 0.5px
     color-mix(in oklab, var(--codex-text) 8%, transparent);
+  overflow: hidden;
+}
+.session-mode .session-native-power-range {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 12px 0 0 12px;
+  background: var(--native-model-chart-blue);
+  pointer-events: none;
 }
 .session-mode .session-native-power-dot {
   position: absolute;
@@ -934,6 +1229,10 @@
   top: 10px;
   transform: translateX(-50%);
   border-radius: 50%;
+  background: color-mix(in srgb, var(--codex-muted) 50%, transparent);
+  pointer-events: none;
+}
+.session-mode .session-native-power-dot[data-selected="true"] {
   background: #ffffff4d;
 }
 .session-mode .session-native-power-thumb {
@@ -963,8 +1262,12 @@
   .session-mode .session-native-model-menu .session-native-model-search-toggle,
   .session-mode .session-native-model-list > button,
   .session-mode .session-native-model-list > [role="group"] > button,
+  .session-mode .session-native-model-error > [role="menuitem"],
   .session-mode .session-native-model-configuration [role="menuitem"] {
     min-height: 44px;
+  }
+  .session-mode .session-native-model-error > [role="menuitem"] {
+    min-width: 44px;
   }
   .session-mode .session-native-model-menu .session-native-model-search-toggle {
     width: 44px;
@@ -1050,6 +1353,25 @@
     min-height: 0;
     flex: 1 1 0;
   }
+  /* Eight full-size controls cannot fit in a narrow composer. Keep the
+     context indicator visible above the row, and reserve its editor space. */
+  .session-mode
+    .session-codex-composer.session-native-composer
+    .session-compact-frame:has(.session-native-context-usage)
+    .session-compact-body {
+    padding-inline-end: 48px;
+  }
+  .session-mode
+    .session-codex-composer.session-native-composer
+    .session-composer-actions
+    > button.session-native-context-usage {
+    position: absolute;
+    right: 8px;
+    bottom: 52px;
+    width: 44px;
+    min-width: 44px;
+    z-index: 1;
+  }
   .session-mode
     .session-codex-composer.session-native-composer
     .session-composer-editor {
@@ -1098,15 +1420,27 @@
     .session-codex-composer.session-native-composer
     .session-native-model-trigger {
     flex: 0 1 auto;
-    min-width: 56px;
+    min-width: 44px;
     max-width: 110px;
+  }
+  .session-mode
+    .session-codex-composer.session-native-composer
+    .session-composer-policy {
+    gap: 0;
   }
   .session-mode
     .session-codex-composer.session-native-composer
     .session-composer-actions {
     flex: 1 1 0;
     min-width: 0;
-    gap: 4px;
+    gap: 0;
+  }
+  .session-mode
+    .session-codex-composer.session-native-composer
+    .session-composer-desktop-voice
+    button.session-composer-voice-button {
+    width: 44px;
+    min-width: 44px;
   }
   .session-mode
     .session-codex-composer.session-native-composer
@@ -1178,16 +1512,6 @@
     height: 15px;
     pointer-events: none;
   }
-  .session-mode
-    .session-codex-composer.session-native-composer
-    .session-composer-actions
-    > button.session-native-context-usage {
-    position: absolute;
-    right: 233px;
-    bottom: calc(100% + 6px);
-    width: 44px;
-    min-width: 44px;
-  }
 }
 
 /* Separate Default control; all existing native model menu rules stay shared. */
@@ -1226,6 +1550,66 @@
   width: max-content;
   white-space: nowrap;
 }
+.session-mode .session-native-permission-heading button {
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--codex-link, var(--primary));
+  text-decoration: underline;
+}
+
+.session-mode .session-native-permission-more {
+  width: 100%;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--codex-text, var(--foreground));
+  text-align: left;
+}
+.session-mode .session-native-permission-more:hover {
+  background: var(--codex-hover, var(--accent));
+}
+
+.session-mode .session-empty-send-backdrop {
+  position: fixed;
+  z-index: 79;
+  inset: 0;
+  background: rgb(0 0 0 / 28%);
+}
+.session-mode .session-empty-send-dialog {
+  position: fixed;
+  z-index: 80;
+  left: 50%;
+  top: 50%;
+  width: min(360px, calc(100vw - 32px));
+  transform: translate(-50%, -50%);
+  display: grid;
+  gap: 12px;
+  padding: 20px;
+  border: 1px solid var(--codex-border, var(--border));
+  border-radius: 12px;
+  background: var(--codex-surface, var(--background));
+  color: var(--codex-text, var(--foreground));
+  box-shadow: 0 16px 40px rgb(0 0 0 / 24%);
+}
+.session-mode .session-empty-send-dialog h2,
+.session-mode .session-empty-send-dialog p {
+  margin: 0;
+}
+.session-mode .session-empty-send-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.session-mode .session-empty-send-dialog button {
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: 8px;
+}
+
 .session-mode .session-native-model-trigger-placeholder {
   min-width: 0;
   overflow: hidden;

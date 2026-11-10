@@ -8,6 +8,7 @@ import {
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { CodexSteerReceipts } from "./CodexSteerReceipts";
 import { TranscriptDetailVisibility } from "../hooks/transcriptDetailVisibility";
+import { enqueueSessionRead } from "@session/services/sessionReadQueue";
 const mocks = vi.hoisted(() => ({
   revision: 0,
   watch: vi.fn(),
@@ -78,6 +79,202 @@ beforeEach(() => {
   );
 });
 afterEach(() => vi.unstubAllGlobals());
+it("keeps a second view's read alive when the first view of the same thread unmounts", async () => {
+  vi.mocked(fetch)
+    .mockImplementationOnce((_input, init) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(init?.signal?.reason), { once: true });
+    }))
+    .mockResolvedValue(response([receipt()]));
+  const props = { threadId: "thread", events: [], pendingClientIds: [], revision: 1 };
+  const first = render(<CodexSteerReceipts {...props} />);
+  const second = render(<CodexSteerReceipts {...props} />);
+  try {
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+    first.unmount();
+    await waitFor(() => expect(second.getByText("same accepted supplement")).toBeTruthy());
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(second.queryByRole("alert")).toBeNull();
+  } finally {
+    first.unmount();
+    second.unmount();
+  }
+});
+
+it("cancels only the queued view when it unmounts before admission", async () => {
+  let finish!: (value: Response) => void;
+  vi.mocked(fetch).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+  const props = { threadId: "thread", events: [], pendingClientIds: [], revision: 1 };
+  const first = render(<CodexSteerReceipts {...props} />);
+  const second = render(<CodexSteerReceipts {...props} />);
+  try {
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+    second.unmount();
+    await act(async () => finish(response([receipt()])));
+    await waitFor(() => expect(first.getByText("same accepted supplement")).toBeTruthy());
+    expect(fetch).toHaveBeenCalledTimes(1);
+  } finally {
+    first.unmount();
+    second.unmount();
+  }
+});
+
+it("waits for the shared status worker without treating queue time as a read timeout", async () => {
+  vi.useFakeTimers();
+  let release!: () => void;
+  const blocker = enqueueSessionRead(
+    "status",
+    "steer-test-occupied-worker",
+    () =>
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+  );
+  const view = render(
+    <CodexSteerReceipts
+      threadId="thread"
+      events={[]}
+      pendingClientIds={[]}
+      revision={1}
+    />,
+  );
+  try {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_001);
+    });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alert")).toBeNull();
+    await act(async () => {
+      release();
+      await blocker;
+    });
+    expect(screen.getByText("same accepted supplement")).toBeTruthy();
+    expect(fetch).toHaveBeenCalledTimes(1);
+  } finally {
+    release();
+    view.unmount();
+    await blocker;
+    vi.useRealTimers();
+  }
+});
+
+it("reports a bounded admission timeout and permits an explicit retry", async () => {
+  vi.useFakeTimers();
+  let release!: () => void;
+  const blocker = enqueueSessionRead(
+    "status",
+    "steer-test-admission-blocker",
+    () =>
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+  );
+  const view = render(
+    <CodexSteerReceipts
+      threadId="thread"
+      events={[]}
+      pendingClientIds={[]}
+      revision={1}
+    />,
+  );
+  try {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_001);
+    });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toContain("排队超时");
+    await act(async () => {
+      release();
+      await blocker;
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "重新读取补充说明" }));
+    });
+    expect(screen.getByText("same accepted supplement")).toBeTruthy();
+    expect(fetch).toHaveBeenCalledTimes(1);
+  } finally {
+    release();
+    view.unmount();
+    await blocker;
+    vi.useRealTimers();
+  }
+});
+
+it("times out an active read even if its transport ignores abort and frees the shared worker", async () => {
+  vi.useFakeTimers();
+  let release!: (value: Response) => void;
+  vi.mocked(fetch).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+  );
+  const view = render(
+    <CodexSteerReceipts
+      threadId="thread"
+      events={[]}
+      pendingClientIds={[]}
+      revision={1}
+    />,
+  );
+  try {
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_001);
+    });
+    expect(screen.getByRole("alert").textContent).toContain("超时");
+    let ran = false;
+    const following = enqueueSessionRead(
+      "status",
+      "steer-test-next-worker",
+      async () => {
+        ran = true;
+      },
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(ran).toBe(true);
+    await following;
+    const cancelLateBody = vi.fn();
+    await act(async () => {
+      release(new Response(new ReadableStream({ cancel: cancelLateBody })));
+      await Promise.resolve();
+    });
+    expect(cancelLateBody).toHaveBeenCalledOnce();
+    expect(screen.queryByText("same accepted supplement")).toBeNull();
+  } finally {
+    release?.(response([]));
+    view.unmount();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+  }
+});
+
+it("cancels a response body stalled after headers when the read deadline expires", async () => {
+  vi.useFakeTimers();
+  const cancelBody = vi.fn();
+  vi.mocked(fetch).mockResolvedValue(new Response(new ReadableStream({
+    start(controller) { controller.enqueue(new TextEncoder().encode('{"data":[')); },
+    cancel: cancelBody,
+  })));
+  const view = render(<CodexSteerReceipts threadId="thread" events={[]} pendingClientIds={[]} revision={1} />);
+  try {
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_001); });
+    expect(screen.getByRole("alert").textContent).toContain("超时");
+    expect(cancelBody).toHaveBeenCalledOnce();
+  } finally {
+    view.unmount();
+    vi.useRealTimers();
+  }
+});
 it("restores explicitly marked accepted input after refresh with captured current scope, never treating old receipt scope as a new write", async () => {
   render(
     <CodexSteerReceipts

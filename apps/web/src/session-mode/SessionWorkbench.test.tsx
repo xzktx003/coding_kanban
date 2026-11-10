@@ -69,12 +69,13 @@ it("health probe failure keeps reconciliation alive alongside the mounted draft"
     await vi.advanceTimersByTimeAsync(31_000);
   });
   expect(screen.getByRole("alert").textContent).toContain("连接中断");
-  expect(screen.getByRole("alert").textContent).toContain("浏览器无法访问服务");
-  fireEvent.click(screen.getByRole("button", { name: "收起会话服务连接中断" }));
-  expect(screen.getByRole("alert").textContent).toContain("会话服务连接中断");
-  expect(screen.queryByRole("button", { name: "立即重试" })).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "展开会话服务连接中断" }));
-  expect(screen.getByRole("button", { name: "立即重试" })).toBeTruthy();
+  expect(screen.getByRole("alert").textContent).toContain("正在自动重连，草稿已保留");
+  expect(screen.getByRole("button", { name: "立即重试会话服务" })).toBeTruthy();
+  expect(screen.queryByText("无法连接到会话服务，请检查网络或安全证书。")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "查看会话服务连接中断详情" }));
+  expect(screen.getByText("无法连接到会话服务，请检查网络或安全证书。")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "隐藏会话服务连接中断详情" }));
+  expect(screen.queryByText("无法连接到会话服务，请检查网络或安全证书。")).toBeNull();
   expect(screen.getByLabelText("会话草稿")).toBe(draft);
   expect(statusSync.stop).not.toHaveBeenCalled();
   expect(historySync.stop).not.toHaveBeenCalled();
@@ -89,6 +90,48 @@ it("health probe failure keeps reconciliation alive alongside the mounted draft"
   expect(statusSync.stop).toHaveBeenCalledOnce();
   expect(historySync.start).toHaveBeenCalledOnce();
   expect(historySync.stop).toHaveBeenCalledOnce();
+});
+
+it("shows a compact, plain-language explanation after repeated health timeouts", async () => {
+  vi.useFakeTimers();
+  let calls = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((url: string, init?: RequestInit) => {
+      if (url !== "/api/session/health")
+        return Promise.resolve({ ok: true, json: async () => ({}) });
+      calls += 1;
+      if (calls === 1)
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ status: "ok" }),
+        });
+      const signal = init?.signal as AbortSignal;
+      return new Promise((_resolve, reject) => {
+        const fail = () => reject(signal.reason);
+        if (signal.aborted) fail();
+        else signal.addEventListener("abort", fail, { once: true });
+      });
+    }),
+  );
+  const { unmount } = render(<SessionWorkbench />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(42_000);
+  });
+
+  expect(screen.getByRole("alert").textContent).toContain(
+    "正在自动重连，草稿已保留",
+  );
+  expect(
+    screen.getByRole("button", { name: "立即重试会话服务" }),
+  ).toBeTruthy();
+  fireEvent.click(
+    screen.getByRole("button", { name: "查看会话服务连接中断详情" }),
+  );
+  expect(
+    screen.getByText("会话服务暂时没有响应（5 秒超时）。"),
+  ).toBeTruthy();
+  unmount();
 });
 
 it("rechecks immediately when the network reconnects and retains the draft", async () => {

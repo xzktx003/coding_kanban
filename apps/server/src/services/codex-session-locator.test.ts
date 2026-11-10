@@ -1452,7 +1452,7 @@ test("read-only completion ignores codex-relay sharing a pane with a later Codex
     writeFileSync(join(relay, "task", "700", "children"), "");
     writeFileSync(
       join(relay, "cmdline"),
-      "/usr/local/bin/codex-relay\0--upstream\0http://10.30.0.30:8000/v1\0--port\04446\0",
+      "/usr/local/bin/codex-relay\x00--upstream\x00http://10.30.0.30:8000/v1\x00--port\x004446\x00",
     );
     exposeProcessWorkingDirectory(f.procRoot, 700, "/workspace/shared");
     utimesSync(relay, relayStarted / 1000, relayStarted / 1000);

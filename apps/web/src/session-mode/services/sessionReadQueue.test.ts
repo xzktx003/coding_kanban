@@ -99,6 +99,32 @@ it("reserves one receipt slot while preserving the six-read total budget", async
     await Promise.all(jobs);
   }
 });
+it("moves a steer receipt ahead of a queued status read", async () => {
+  let release!: () => void;
+  const active = enqueueSessionRead(
+    "status",
+    "active",
+    () => new Promise<void>((resolve) => {
+      release = resolve;
+    }),
+  );
+  const order: string[] = [];
+  const queued = enqueueSessionRead("status", "queued", async () => {
+    order.push("queued");
+  });
+  const receipt = enqueueSessionRead(
+    "status",
+    "steer-receipts:thread",
+    async () => {
+      order.push("receipt");
+      return "ready";
+    },
+  );
+  await Promise.resolve();
+  release();
+  await Promise.all([active, queued, receipt]);
+  expect(order).toEqual(["receipt", "queued"]);
+});
 it("slow complete histories cannot occupy recent-message workers", async () => {
   const release: Array<() => void> = [];
   const slow = ["a", "b"].map((key) =>

@@ -6,7 +6,7 @@ vi.mock("../services/followupService", () => ({
   useFollowupStore: (select: (state: unknown) => unknown) =>
     select({ threads: {}, errors: {} }),
 }));
-import { useFollowups } from "./useFollowups";
+import { retryFollowupsNow, useFollowups } from "./useFollowups";
 import { useLayoutStore } from "../stores/useLayoutStore";
 let root: HTMLDivElement;
 let hidden = false;
@@ -68,6 +68,51 @@ it("pauses an existing timer while hidden and coalesces wake events", async () =
   expect(io.load).toHaveBeenCalledTimes(2);
   await advance(1500);
   expect(io.load).toHaveBeenCalledTimes(3);
+});
+
+it("backs off unavailable queue reads and resets the delay after an explicit retry", async () => {
+  let attempts = 0;
+  io.load.mockImplementation(async () => {
+    attempts += 1;
+    if (attempts <= 3) throw new Error("FOLLOWUP_READ_UNAVAILABLE");
+    return { revision: 1, items: [], paused: null };
+  });
+  const { unmount } = renderHook(() => useFollowups("unavailable"));
+
+  await flush();
+  expect(io.load).toHaveBeenCalledTimes(1);
+  await advance(1500);
+  expect(io.load).toHaveBeenCalledTimes(2);
+  await advance(2999);
+  expect(io.load).toHaveBeenCalledTimes(2);
+  await advance(1);
+  expect(io.load).toHaveBeenCalledTimes(3);
+
+  await act(async () => retryFollowupsNow("unavailable"));
+  expect(io.load).toHaveBeenCalledTimes(4);
+  await advance(1500);
+  expect(io.load).toHaveBeenCalledTimes(5);
+  unmount();
+});
+
+it("caps repeated unavailable queue reads at a 15 second interval", async () => {
+  io.load.mockRejectedValue(new Error("FOLLOWUP_READ_UNAVAILABLE"));
+  renderHook(() => useFollowups("unavailable"));
+
+  await flush();
+  expect(io.load).toHaveBeenCalledTimes(1);
+  await advance(1500);
+  expect(io.load).toHaveBeenCalledTimes(2);
+  await advance(3000);
+  expect(io.load).toHaveBeenCalledTimes(3);
+  await advance(6000);
+  expect(io.load).toHaveBeenCalledTimes(4);
+  await advance(12000);
+  expect(io.load).toHaveBeenCalledTimes(5);
+  await advance(14999);
+  expect(io.load).toHaveBeenCalledTimes(5);
+  await advance(1);
+  expect(io.load).toHaveBeenCalledTimes(6);
 });
 
 it("pauses preserved composers in another workbench mode or secondary page", async () => {

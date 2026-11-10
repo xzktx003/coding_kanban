@@ -38,3 +38,41 @@ test('Magpie models absent from native catalog can be selected with their provid
   const s=useConfigStore.getState();return {model:s.model,provider:s.modelProvider,mode:s.modelSelectionMode};
  })).toEqual({model:'kimi/k3',provider:'magpie',mode:'manual'});
 });
+
+test("new chat shows the native default when the configured model is null", async ({
+  page,
+}) => {
+  await installSessionUxFixture(page, 0);
+  let reads = 0;
+  let releaseConfigRead: (() => void) | undefined;
+  const pendingConfigRead = new Promise<void>((resolve) => {
+    releaseConfigRead = resolve;
+  });
+  await page.route("**/api/codex/model/config/read", async (route) => {
+    reads++;
+    await pendingConfigRead;
+    return route.fulfill({
+      json: {
+        status: "ready",
+        model: null,
+        modelProvider: null,
+        reasoningEffort: null,
+      },
+    });
+  });
+  await page.goto("/?mode=session", { waitUntil: "domcontentloaded" });
+  await page.locator(".session-mode [contenteditable=true]").first().waitFor();
+  await seedSessionUx(page, 0);
+  await expect.poll(() => reads).toBeGreaterThan(0);
+  const loadingTrigger = page.getByRole("button", {
+    name: "跟随配置 · 读取中…",
+  });
+  await expect(loadingTrigger).toBeVisible();
+  await expect(loadingTrigger).toHaveAttribute("aria-busy", "true");
+  releaseConfigRead?.();
+  const trigger = page.getByRole("button", {
+    name: "跟随配置 · 原生默认",
+  });
+  await expect(trigger).toBeVisible();
+  await expect(trigger).not.toHaveAttribute("aria-busy");
+});

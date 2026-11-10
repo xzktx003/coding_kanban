@@ -51,7 +51,12 @@ export function enqueueSessionRead<T>(
       reject,
       priority,
     };
-    lanes[lane].jobs.push(job);
+    const jobs = lanes[lane].jobs;
+    const steerIndex = identity.startsWith(`${lane}:steer-receipts:`)
+      ? jobs.findIndex((item) => !item.key.startsWith(`${lane}:steer-receipts:`))
+      : -1;
+    if (steerIndex >= 0) jobs.splice(steerIndex, 0, job);
+    else jobs.push(job);
   });
   pending.set(identity, { promise, job });
   if (signal) {
@@ -84,6 +89,9 @@ export function promoteSessionRead(lane: Lane, key: string) {
 function pump(lane: Lane) {
   const state = lanes[lane];
   while (state.active < state.limit && state.jobs.length) {
+    const steer = state.jobs.findIndex((job) =>
+      job.key.startsWith(`${lane}:steer-receipts:`),
+    );
     const foreground = state.jobs.findIndex(
       (job) => job.priority === "interactive",
     );
@@ -95,9 +103,11 @@ function pump(lane: Lane) {
         ? -1
         : state.jobs.findIndex((job) => job.priority === "background");
     const index =
-      background >= 0 && (foreground < 0 || state.burst >= 3)
-        ? background
-        : foreground;
+      steer >= 0
+        ? steer
+        : background >= 0 && (foreground < 0 || state.burst >= 3)
+          ? background
+          : foreground;
     if (index < 0) break;
     const [job] = state.jobs.splice(index, 1);
     const wasBackground = job.priority === "background";

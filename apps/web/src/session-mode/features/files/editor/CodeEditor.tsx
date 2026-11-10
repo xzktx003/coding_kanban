@@ -58,6 +58,8 @@ interface CodeEditorProps {
   content: string;
   filePath: string;
   isReadOnly?: boolean;
+  savePending?: boolean;
+  saveErrorHandledByParent?: boolean;
   onContentChange?: (content: string) => void;
   onSave?: (content: string) => Promise<void>;
   onSelectionChange?: (selectedText: string) => void;
@@ -74,6 +76,8 @@ export function CodeEditor({
   content,
   filePath,
   isReadOnly = false,
+  savePending = false,
+  saveErrorHandledByParent = false,
   onContentChange,
   onSave,
   onSelectionChange,
@@ -274,6 +278,7 @@ export function CodeEditor({
     if (
       !onSave ||
       isReadOnly ||
+      savePending ||
       !isEditableFile ||
       savingDraft.current?.path === filePath
     )
@@ -299,7 +304,14 @@ export function CodeEditor({
         if (currentFilePath.current === request.path) setIsSaving(false);
       }
     }
-  }, [onSave, isReadOnly, isEditableFile, editedContent, filePath]);
+  }, [
+    onSave,
+    isReadOnly,
+    savePending,
+    isEditableFile,
+    editedContent,
+    filePath,
+  ]);
 
   // Handle cursor position tracking
   // biome-ignore lint/correctness/useExhaustiveDependencies: handleAceSelection is declared below and rebuilt every render; depending on it would re-attach the Ace listeners continuously
@@ -622,7 +634,7 @@ export function CodeEditor({
             variant="ghost"
             size="sm"
             onClick={handleSave}
-            disabled={isSaving}
+            disabled={isSaving || savePending}
             className="size-8 p-1"
             title="保存文件（Ctrl+S）"
             aria-label="保存文件（Ctrl+S）"
@@ -680,7 +692,7 @@ export function CodeEditor({
         />
       </div>
 
-      {saveError && (
+      {saveError && !saveErrorHandledByParent && (
         <div
           role="alert"
           className="border-b border-destructive/30 px-3 py-2 text-sm text-destructive"

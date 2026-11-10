@@ -192,7 +192,6 @@ export function EnvKeysDialog({
           open={addProviderOpen}
           onOpenChange={setAddProviderOpen}
           onAdded={(p) => {
-            void refreshProviders();
             onProviderChange(p as Provider);
             setLoadTrigger((prev) => prev + 1);
           }}

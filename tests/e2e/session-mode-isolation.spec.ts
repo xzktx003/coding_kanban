@@ -5,9 +5,11 @@ for (const viewport of [
   { width: 1024, height: 768 },
   { width: 375, height: 667 },
 ]) {
-  test(`mode header releases hidden Session dialog and restores draft at ${viewport.width}px`, async ({
-    page,
-  }) => {
+  test(
+    viewport.width <= 480
+      ? "mobile terminal return restores the unsent Session draft"
+      : `mode header releases hidden Session dialog and restores draft at ${viewport.width}px`,
+    async ({ page }) => {
     await page.addInitScript(() => performance.setResourceTimingBufferSize(10_000));
     await page.setViewportSize(viewport);
     const errors: string[] = [];
@@ -47,6 +49,22 @@ for (const viewport of [
     });
     await page.goto("/?mode=session", { waitUntil: "domcontentloaded" });
     await page.locator(".session-workbench").waitFor();
+    if (viewport.width <= 480) {
+      const composer = page.locator(
+        ".session-composer-form [contenteditable='true']",
+      );
+      await expect(composer).toBeVisible();
+      await composer.fill("移动端保留的未发送草稿");
+      await page.getByRole("button", { name: "终端", exact: true }).click();
+      await expect(page.locator(".mobile-workbench-page")).toBeVisible();
+      await page.getByRole("link", { name: "会话", exact: true }).click();
+      const restoredComposer = page.locator(
+        ".session-composer-form [contenteditable='true']",
+      );
+      await expect(restoredComposer).toHaveText("移动端保留的未发送草稿");
+      expect(errors).toEqual([]);
+      return;
+    }
     await page.evaluate(async () => {
       const loadedDependency = (name: string) => performance.getEntriesByType("resource").findLast(entry => new URL(entry.name).pathname.endsWith(`/deps/${name}.js`))?.name ?? `/node_modules/.vite/deps/${name}.js`;
       const reactModule = await import(loadedDependency("react"));
@@ -90,15 +108,19 @@ for (const viewport of [
     await expect
       .poll(() => page.evaluate(() => document.body.style.pointerEvents))
       .not.toBe("none");
-    const header = page.getByRole("button", { name: "会话", exact: true });
-    await header.focus();
+    const returnToSession = page.getByRole("button", {
+      name: "会话",
+      exact: true,
+    });
+    await returnToSession.focus();
     await page.keyboard.press("Escape");
-    await expect(header).toBeFocused();
-    await header.click();
+    await expect(returnToSession).toBeFocused();
+    await returnToSession.click();
     await expect(page.getByRole("textbox", { name: "隔离草稿" })).toHaveValue(
       "保留中文草稿",
     );
     await expect(page.getByRole("textbox", { name: "隔离草稿" })).toBeFocused();
     expect(errors).toEqual([]);
-  });
+    },
+  );
 }

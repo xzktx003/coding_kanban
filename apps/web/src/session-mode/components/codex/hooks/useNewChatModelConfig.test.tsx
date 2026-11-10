@@ -34,6 +34,35 @@ it("does not read configs for existing threads", () => {
   renderHook(() => useNewChatModelConfig(false, false));
   expect(read).not.toHaveBeenCalled();
 });
+it("reads a new-chat config once when the model menu mounts already open", async () => {
+  read.mockResolvedValue({
+    status: "ready",
+    model: "gpt-5",
+    modelProvider: "openai",
+    reasoningEffort: null,
+  });
+  const hook = renderHook(() => useNewChatModelConfig(true, true));
+  await waitFor(() => expect(hook.result.current.value?.model).toBe("gpt-5"));
+  expect(read).toHaveBeenCalledTimes(1);
+});
+it("does not repeat the mount read for the menu's first requested open", async () => {
+  read.mockResolvedValue({
+    status: "ready",
+    model: "gpt-5",
+    modelProvider: "openai",
+    reasoningEffort: null,
+  });
+  const hook = renderHook(
+    ({ open }) => useNewChatModelConfig(true, open, true),
+    { initialProps: { open: false } },
+  );
+  await waitFor(() => expect(read).toHaveBeenCalledTimes(1));
+  hook.rerender({ open: true });
+  expect(read).toHaveBeenCalledTimes(1);
+  hook.rerender({ open: false });
+  hook.rerender({ open: true });
+  await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
+});
 it("invalidates and rereads on runtime replacement",async()=>{
  read.mockResolvedValue({status:"ready",model:"first",modelProvider:null,reasoningEffort:null});
  const hook=renderHook(()=>useNewChatModelConfig(true,false));

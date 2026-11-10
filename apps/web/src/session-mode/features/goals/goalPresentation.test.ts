@@ -19,6 +19,11 @@ const goal: ThreadGoal = {
   updatedAt: 100,
 };
 
+it("names the Chinese goal-draft control by the clear action", () => {
+  expect(goalStrings("zh-CN").cancelDraft).toBe("清除目标");
+  expect(goalStrings("en").cancelDraft).toBe("Clear goal");
+});
+
 it("recognizes the native inline Goal command without treating a similar word as a command", () => {
   expect(goalTextFromPrompt(" /goal \n measurable outcome ")).toBe(
     "measurable outcome",

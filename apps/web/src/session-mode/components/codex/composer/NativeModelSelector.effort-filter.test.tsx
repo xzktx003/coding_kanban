@@ -1,6 +1,6 @@
 import { useConfigStore } from "../stores/useConfigStore";
 import { useNativeModelPickerPreferencesStore } from "@session/stores/settings/useNativeModelPickerPreferencesStore";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { Model, ModelListResponse } from "@session/bindings/v2";
 import { useLayoutStore } from "@session/stores/useLayoutStore";
@@ -46,6 +46,9 @@ vi.mock("@session/hooks/useThreadModelSettings", () => ({
     },
     setServiceTier: settings.setTier,
   }),
+}));
+vi.mock("../hooks/useMagpieCatalog", () => ({
+  useMagpieCatalog: () => ({ models: [], loading: false, refresh: vi.fn() }),
 }));
 
 function catalogModel(efforts: readonly string[]): Model {
@@ -136,6 +139,7 @@ afterEach(() => {
   try {
     expect(globalThis.fetch).not.toHaveBeenCalled();
   } finally {
+    cleanup();
     vi.unstubAllGlobals();
   }
 });

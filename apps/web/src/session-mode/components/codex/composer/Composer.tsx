@@ -9,6 +9,7 @@ import { pluginInputDrafts } from "@session/features/plugins/pluginInputs";
 import type { NativeInputMention } from "@agent-orchestrator/shared";
 import { useCodexThreadInput } from "@session/hooks/useCodexThreadInput";
 import { composeContextText } from "@agent-orchestrator/shared/composer-context";
+import { acquireComposerSubmission } from "./v2/composerSubmissionLock";
 import {
   composerDrafts,
   useComposerDraft,
@@ -69,6 +70,10 @@ import {
 import "./composer-native.css";
 import { NativeSubmitButton } from "./NativeSubmitButton";
 import { nativeComposerPlaceholder } from "./nativeComposerPlaceholder";
+import { emptySendGuard } from "./emptySendGuard";
+import { MultiAgentComposerBanner } from "./MultiAgentComposerBanner";
+import { ComposerHeaderMenu } from "./ComposerHeaderMenu";
+import { RecentChatsMenu } from "./RecentChatsMenu";
 import type { FollowupMode } from "@agent-orchestrator/shared";
 import { useStopAction } from "../../common/useStopAction";
 import { useTurnControl } from "../hooks/useTurnControl";
@@ -90,11 +95,10 @@ import type { ThreadGoal } from "@session/bindings/v2";
 import { useThreadGoal } from "@session/components/codex/hooks/useThreadGoal";
 import { useCodexStore } from "@session/components/codex/stores/useCodexStore";
 import { ContextWindowWidget } from "@session/components/codex/widget/ContextWindowWidget";
-import { deriveContextWindowUsage } from "@session/components/codex/widget/ContextWindowWidget";
 import { FileMentionPopover } from "@session/components/common/FileMentionPopover";
 import { Button } from "@session/components/ui/button";
 import { codexService } from "@session/services/codexService";
-import { useAgentCenterStore } from "@session/stores";
+import { useAgentCenterStore, useLayoutStore } from "@session/stores";
 import { activeDraftOwner } from "@session/stores/useInputStore";
 import {
   appendDraft,
@@ -122,6 +126,7 @@ import type { SlashDialog } from "./slashCommands";
 import { matchesSessionShortcut } from "@session/services/sessionKeyboardShortcuts";
 import { isSessionInteractionVisible } from "@session/session-dom";
 import { composerPrimaryAction, hasPendingComposerInput } from "./composerPrimaryAction";
+import { composerDeliveryNoticeText, type ComposerDeliveryNotice } from "./composerDeliveryNotice";
 import { type BrowserDictationControl, type BrowserDictationPhase } from "@session/BrowserDictationButton";
 import { resumeInterruptedTurn, savedResumeReceipt, reconcileResumeReceipt, type ResumeReceipt } from "@session/services/resumeInterruptedTurn";
 import {
@@ -170,13 +175,12 @@ export function Composer({
   const [resuming, setResuming] = useState<Record<string, boolean>>({});
   const [resumeReceipts, setResumeReceipts] = useState<Record<string, ResumeReceipt>>({});
   const [detailsOwner, setDetailsOwner] = useState<string | null>(null);
+  const [emptySendNotice, setEmptySendNotice] = useState<{ title: string; message: string } | null>(null);
+  const emptySendFocus = useRef<HTMLButtonElement | null>(null);
+  const closeEmptySendNotice = () => { setEmptySendNotice(null); queueMicrotask(() => editorRef.current?.focus()); };
 
   const submitMode = useRef<FollowupMode | null>(null);
-  const [deliveryNotice, setDeliveryNotice] = useState<{
-    owner: string;
-    text: string;
-    resume?: boolean;
-  } | null>(null);
+  const [deliveryNotice, setDeliveryNotice] = useState<ComposerDeliveryNotice | null>(null);
   const [slashRequest, setSlashRequest] = useState<{ dialog: SlashDialog; owner: string; scope: ReturnType<typeof captureCodexOperationScope> } | null>(null);
   const { currentThreadId, inputFocusTrigger } = useCodexStore(
     useShallow((s) => ({
@@ -270,6 +274,11 @@ export function Composer({
     images.length ||
     richDraft.contexts.length
   );
+  const emptyWorkspaceNotice = emptySendGuard({
+    hasContent,
+    threadId: currentThreadId,
+    workspace: cwd,
+  });
   const handlePaste = (event: React.ClipboardEvent) => {
     attachments.onPaste(event);
     if (event.defaultPrevented) {
@@ -316,6 +325,11 @@ export function Composer({
     const timing = state.turnTimingMap[currentThreadId];
     return timing?.status === "interrupted" ? timing.turnId : null;
   });
+  const visibleDeliveryNotice = composerDeliveryNoticeText(deliveryNotice, owner, {
+    paused: queueSnapshot.state.paused,
+    error: queueSnapshot.error,
+    interrupted: !!interruptedTurn,
+  });
   const resumeAvailable = !!interruptedTurn && !threadGoal && !goalEnabled && !hasPendingComposerInput(queueSnapshot.state.items);
   const resumeReceipt = resumeReceipts[owner];
   const resumeUnknown = resumeReceipt?.sourceTurnId === interruptedTurn && resumeReceipt.status === "unknown";
@@ -342,12 +356,6 @@ export function Composer({
     } catch { /* Explicit Resume shows storage/scope errors; never auto-writes. */ }
     return () => { live = false; };
   }, [currentThreadId, interruptedTurn, owner]);
-  const hasContextUsage = useCodexStore(
-    (s) =>
-      !!currentThreadId &&
-      deriveContextWindowUsage(s.tokenUsageMap[currentThreadId]) !== null,
-  );
-
   const editorRef = useRef<ComposerEditorHandle>(null);
   const expandedSelection = useRef({
     start: inputValue.length,
@@ -452,6 +460,7 @@ export function Composer({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (emptyWorkspaceNotice) { setEmptySendNotice(emptyWorkspaceNotice); queueMicrotask(() => emptySendFocus.current?.focus()); return; }
     if (dictationPhase === "recording") { void dictationControl.current?.finishAndSend(); return; }
     if (dictationPhase === "starting" || dictationPhase === "transcribing") return;
     if (voicePhase === "active") { void handleVoiceAction(); return; }
@@ -554,6 +563,11 @@ export function Composer({
     };
     const submitCaptured = async () => {
       if (sendingRef.current.has(owner)) return;
+      const releaseSubmission = acquireComposerSubmission(owner);
+      if (!releaseSubmission) {
+        toast.error("当前会话正在发送，请稍后再试");
+        return;
+      }
       markSending(owner, true);
       let materialized: Awaited<
         ReturnType<typeof materializeGoalDraft>
@@ -720,14 +734,15 @@ export function Composer({
         onAfterSend?.(targetThreadId, text);
         setDeliveryNotice({
           owner: submittedOwner,
+          queue: !running || requestedMode === "queue",
           text:
             running && requestedMode === "steer"
               ? "引导已提交"
               : running && requestedMode === "replace"
                 ? "正在停止，结束后发送新请求"
                 : accepted.paused
-                  ? "消息已入队，队列暂停中"
-                  : "消息已接收，将按顺序发送",
+                  ? "消息已接收，队列已暂停；请查看待发送消息"
+                  : "消息已接收，请查看当前会话进度",
         });
         clearSubmitted();
         attachments.clear(submittedIds);
@@ -756,6 +771,7 @@ export function Composer({
       } finally {
         markSending(owner, false);
         if (submittedOwner !== owner) markSending(submittedOwner, false);
+        releaseSubmission();
       }
     };
     if (
@@ -850,13 +866,15 @@ export function Composer({
       data-owner-thread={currentThreadId ?? undefined}
       data-draft-owner={owner}
     >
+      <div className="session-composer-header-tools">
+        <RecentChatsMenu />
+        <ComposerHeaderMenu onSettings={() => useLayoutStore.getState().setView("settings")} onShortcuts={() => window.dispatchEvent(new Event("codex-open-keyboard-shortcuts"))} />
+      </div>
       {currentThreadId && <ModelChangeNotice threadId={currentThreadId} />}
       <ComposerRail
         key={owner}
         owner={owner}
-        collapsedSummary={
-          deliveryNotice?.owner === owner ? deliveryNotice.text : undefined
-        }
+        collapsedSummary={visibleDeliveryNotice}
         status={
           statusText && (
             <span
@@ -943,13 +961,13 @@ export function Composer({
             <NativeQueueSettingsNotice key={currentThreadId} threadId={currentThreadId} />
           )}
         </ComposerRailItem>
-        <ComposerRailItem visible={deliveryNotice?.owner === owner}>
-          {deliveryNotice?.owner === owner && (
+        <ComposerRailItem visible={!!visibleDeliveryNotice}>
+          {visibleDeliveryNotice && (
             <p
               role="status"
               className="session-composer-delivery-notice px-4 py-1 text-xs text-muted-foreground"
             >
-              {deliveryNotice.text}
+              {visibleDeliveryNotice}
             </p>
           )}
         </ComposerRailItem>
@@ -988,6 +1006,7 @@ export function Composer({
         />
         </DeferredComposerPanel>
       )}
+      <MultiAgentComposerBanner owner={owner} threadId={currentThreadId} />
       <form
         ref={formRef}
         onSubmit={handleSubmit}
@@ -1061,6 +1080,7 @@ export function Composer({
                   onImagesSelected={attachments.addPaths}
                   onFilesSelected={appendFileLinks}
                   onInsertMention={handleInsertMention}
+                  onSketch={() => setDrawing({ owner, id: "sketch" })}
                   onGoal={() => {
                     setCollaborationMode("default");
                     setGoalEnabled(true);
@@ -1163,12 +1183,6 @@ export function Composer({
                         root={currentThreadId}
                         owner={owner}
                       />
-                      {hasContextUsage && (
-                        <div className="session-composer-context">
-                          <ContextWindowWidget />
-                          <span>上下文使用量</span>
-                        </div>
-                      )}
                       {running && (
                         <>
                           <span className="session-composer-menu-label">
@@ -1273,6 +1287,7 @@ export function Composer({
                 <SubagentSummary root={currentThreadId} />
               </div>
               <div className="session-composer-actions flex items-center gap-2">
+                <ContextWindowWidget />
                 <NativeModelSelector
                   threadId={currentThreadId}
                   draftOwner={owner}
@@ -1299,7 +1314,11 @@ export function Composer({
                     }}
                   />
                 </span>
-                {currentThreadId && <RealtimeVoiceButton key={owner} threadId={currentThreadId} owner={owner} controlRef={voiceControl} onPhaseChange={handleVoicePhase} onStarting={() => dictationControl.current?.cancel()} disabled={sending || !!resuming[owner]} />}
+                {currentThreadId && (
+                  <span className="session-composer-desktop-voice">
+                    <RealtimeVoiceButton key={owner} threadId={currentThreadId} owner={owner} controlRef={voiceControl} onPhaseChange={handleVoicePhase} onStarting={() => dictationControl.current?.cancel()} disabled={sending || !!resuming[owner]} />
+                  </span>
+                )}
                 {voiceAction && <NativeSubmitButton type="button" aria-label={voiceLabel} title={voiceLabel} disabled={sending || primary === "voice-wait" || (primary === "voice-send" && !voiceCanSend)} loading={sending || primary === "voice-wait"} onClick={() => void handleVoiceAction()} size="icon" className="session-composer-send"><NativeComposerIcon name={primary === "voice-end" ? "stop" : "send"} /></NativeSubmitButton>}
                 {(primary === "dictation-finish" || primary === "dictation-wait") && (
                   <NativeSubmitButton type="button" aria-label={primary === "dictation-finish" ? "结束听写并发送" : "正在准备听写内容"} title="结束听写并发送" disabled={blocked || primary === "dictation-wait"} loading={primary === "dictation-wait"} onClick={() => void dictationControl.current?.finishAndSend()} size="icon" className="session-composer-send">
@@ -1329,12 +1348,17 @@ export function Composer({
                 {(primary === "send" || primary === "queue" || primary === "steer") && (
                   <NativeSubmitButton
                     aria-label={submitLabel}
-                    title={submitLabel}
+                    title={running ? submitLabel : undefined}
                     type="submit"
                     loading={sending}
-                    disabled={sending || blocked || !hasContent}
+                    disabled={sending || blocked || (!hasContent && !emptyWorkspaceNotice)}
+                    className={emptyWorkspaceNotice ? "session-composer-send opacity-50" : "session-composer-send"}
+                    onClick={(event) => {
+                      if (!emptyWorkspaceNotice) return;
+                      event.preventDefault();
+                      setEmptySendNotice(emptyWorkspaceNotice);
+                    }}
                     size="icon"
-                    className="session-composer-send"
                   >
                     <NativeComposerIcon name="send" />
                   </NativeSubmitButton>
@@ -1344,6 +1368,24 @@ export function Composer({
           </div>
         </div>
       </form>
+      {emptySendNotice && (
+        <div className="session-empty-send-backdrop" onMouseDown={closeEmptySendNotice}>
+        <div role="dialog" aria-labelledby="empty-send-title" className="session-empty-send-dialog" onMouseDown={(event) => event.stopPropagation()} onKeyDown={(event) => {
+          if (event.key === "Escape") { event.preventDefault(); closeEmptySendNotice(); return; }
+          if (event.key !== "Tab") return;
+          const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>("button")];
+          const next = buttons[(buttons.indexOf(document.activeElement as HTMLButtonElement) + (event.shiftKey ? -1 : 1) + buttons.length) % buttons.length];
+          if (next) { event.preventDefault(); next.focus(); }
+        }}>
+          <h2 id="empty-send-title">{emptySendNotice.title}</h2>
+          <p>{emptySendNotice.message}</p>
+          <div className="session-empty-send-actions">
+            <button type="button" ref={emptySendFocus} onClick={closeEmptySendNotice}>确定</button>
+            <button type="button" aria-label="关闭对话框" onClick={closeEmptySendNotice}>关闭</button>
+          </div>
+        </div>
+        </div>
+      )}
       <div className="flex min-w-0 items-center px-1 pt-1">
         <ExecutionLocationPicker owner={owner} disabled={sending || !!resuming[owner]} />
         {currentThreadId && <span className="truncate text-[11px] text-muted-foreground">用于新会话</span>}
@@ -1451,6 +1493,7 @@ export function Composer({
           full
           title="展开编辑"
           description="返回会保留正文、上下文与代码；发送方式沿用当前设置。"
+          closeLabel="返回并保留草稿"
           onClose={() => composerDrafts.setExpanded(owner, false)}
           returnFocus={() => editorRef.current?.focus()}
           footer={

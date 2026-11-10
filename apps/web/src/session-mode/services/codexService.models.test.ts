@@ -239,6 +239,22 @@ it('unsupported following fails before thread creation and preserves manual defa
  fetcher.mockRestore();
 });
 
+it("asks for a project before reading followed model config", async () => {
+  const fetcher = vi
+    .spyOn(globalThis, "fetch")
+    .mockResolvedValue(new Response("{}", { status: 400 }));
+  useWorkspaceStore.setState({ cwd: null });
+  useConfigStore.setState({ modelSelectionMode: "follow-config" });
+  const captured = codexService.captureThreadStart();
+
+  await expect(codexService.threadStart({ captured })).rejects.toThrow(
+    "请先选择项目目录",
+  );
+  expect(fetcher).not.toHaveBeenCalled();
+  expect(api.threadStart).not.toHaveBeenCalled();
+  fetcher.mockRestore();
+});
+
 it('a manual Magpie catalog choice sends its provider and exact model ID',async()=>{
  useConfigStore.getState().setModelProvider('magpie');
  useConfigStore.getState().setModel('kimi/k3');

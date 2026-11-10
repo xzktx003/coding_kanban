@@ -1,6 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 import type { ServerNotification } from "@session/bindings/ServerNotification";
+import type { Thread } from "@session/bindings/v2";
 import { useCodexStore } from "@session/components/codex/stores";
 import { useSubagentStore } from "@session/features/subagents/store";
 import { notifyDesktop } from "@session/lib/notify";
@@ -49,7 +50,7 @@ beforeEach(() => {
   vi.mocked(toast.success).mockClear();
   useSubagentStore.setState({ nodes: {}, revision: 0 });
   useCodexStore.setState({
-    threads: [{ id: "thread-a", name: "A" }],
+    threads: [{ id: "thread-a", name: "A" } as Thread],
     currentThreadId: null,
   });
   document.body.innerHTML = "";

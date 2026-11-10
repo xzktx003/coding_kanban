@@ -247,11 +247,15 @@ for (const width of [375, 1440])
     for (let i = 0; i < 2; i++) {
       pending = null;
       await editor(page).fill(text);
-      await page.getByRole("button", { name: "发送消息", exact: true }).click();
+      const send = page.getByRole("button", { name: "发送消息", exact: true });
+      await send.click();
       await expect.poll(() => !!pending).toBe(true);
       const request = pending.request().postDataJSON();
-      await expect(page.locator("[data-delivery-echo]")).toHaveCount(1);
-      await expect(page.getByText("正在提交", { exact: true })).toBeVisible();
+      // The unacknowledged draft stays in the composer while the request is
+      // pending. An echo is added only after the server confirms acceptance.
+      await expect(editor(page)).toHaveText(text);
+      await expect(send).toBeDisabled();
+      await expect(page.locator("[data-delivery-echo]")).toHaveCount(0);
       const turnId = `delivery-${i}`;
       await pending.fulfill({
         json: {
@@ -269,6 +273,7 @@ for (const width of [375, 1440])
         },
       });
       await expect(editor(page)).toHaveText("");
+      await expect(page.locator("[data-delivery-echo]")).toHaveCount(1);
       await expect(
         page.getByText("已接收，等待消息同步", { exact: true }),
       ).toBeVisible();

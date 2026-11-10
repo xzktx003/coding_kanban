@@ -32,7 +32,7 @@ export function FollowedSessionsMenu({
     status === "checking"
       ? "正在检查连接"
       : status !== "ready"
-        ? "正在重连"
+        ? "状态待恢复"
         : counts.pending
           ? `待确认 ${counts.pending}`
           : questionCount
@@ -63,15 +63,17 @@ export function FollowedSessionsMenu({
             <>
               <span className="session-attention-full">{label}</span>
               <span className="session-attention-compact" aria-hidden="true">
-                {status !== "ready"
-                  ? "重连"
-                  : counts.pending
-                    ? `待${counts.pending}`
-                    : questionCount
-                      ? `答${questionCount}`
-                      : !complete
-                        ? "同步"
-                        : `关注${rows.length}`}
+                {status === "checking"
+                  ? "检查中"
+                  : status === "offline"
+                    ? "待恢复"
+                    : counts.pending
+                      ? `待${counts.pending}`
+                      : questionCount
+                        ? `答${questionCount}`
+                        : !complete
+                          ? "同步"
+                          : `关注${rows.length}`}
               </span>
             </>
           ) : (

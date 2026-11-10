@@ -75,6 +75,7 @@ export function CodexDeliveryEchoes({
       e.status !== "queued" &&
       e.status !== "cancelled" &&
       e.status !== "failed" &&
+      e.status !== "uncertain" &&
       !acknowledged.has(e.id),
   );
   return (

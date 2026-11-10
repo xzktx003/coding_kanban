@@ -147,7 +147,14 @@ for (const width of [1440, 390]) {
       await page.evaluate(() =>
         window.dispatchEvent(new Event("session-connection-retry")),
       );
-      const syncTrigger = page.getByRole("button", { name: /同步待重试/ });
+      const mobile = width <= 640;
+      if (mobile)
+        await page
+          .getByRole("button", { name: "更多功能", exact: true })
+          .click();
+      const syncTrigger = page.getByRole(mobile ? "menuitem" : "button", {
+        name: /同步待重试/,
+      });
       await expect(syncTrigger).toBeVisible();
       await expect(syncTrigger).toHaveAttribute("aria-expanded", "false");
       expect(await geometry()).toEqual(before);
@@ -164,9 +171,12 @@ for (const width of [1440, 390]) {
       await page.screenshot({ path: info.outputPath("sync-notice.png") });
       tabsUnavailable = false;
       await page.getByRole("button", { name: "立即同步", exact: true }).click();
-      await expect(page.getByRole("button", { name: /同步待重试/ })).toHaveCount(
-        0,
-      );
+      await expect(
+        page.getByRole(mobile ? "menuitem" : "button", {
+          name: /同步待重试/,
+        }),
+      ).toHaveCount(0);
+      if (mobile) await page.keyboard.press("Escape");
       expect(await geometry()).toEqual(before);
       for (const control of [
         page.locator(".session-subagent-summary"),
@@ -190,14 +200,16 @@ for (const width of [1440, 390]) {
       ).toBeVisible({ timeout: 15000 });
       expect(await geometry()).toEqual(before);
       await page
-        .getByRole("button", { name: "收起会话服务连接中断", exact: true })
+        .getByRole("button", {
+          name: "查看会话服务连接中断详情",
+          exact: true,
+        })
         .click();
       expect(await geometry()).toEqual(before);
-      await page
-        .getByRole("button", { name: "展开会话服务连接中断", exact: true })
-        .click();
       offline = false;
-      await page.getByRole("button", { name: "立即重试", exact: true }).click();
+      await page
+        .getByRole("button", { name: "立即重试会话服务", exact: true })
+        .click();
       await expect(
         page.getByText("会话服务连接中断", { exact: true }),
       ).toHaveCount(0);

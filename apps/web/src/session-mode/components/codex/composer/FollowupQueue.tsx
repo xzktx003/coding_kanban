@@ -31,7 +31,10 @@ import type {
   FollowupAction,
   FollowupMessage,
 } from "@agent-orchestrator/shared";
-import { useFollowups } from "@session/hooks/useFollowups";
+import {
+  retryFollowupsNow,
+  useFollowups,
+} from "@session/hooks/useFollowups";
 import { useFollowupSettingsStore } from "@session/stores/useFollowupSettingsStore";
 import { followupService } from "@session/services/followupService";
 import { Button } from "../../ui/button";
@@ -158,6 +161,17 @@ export function FollowupQueueContent({
     nativeAuthority &&
     items.some((item) => item.authority === "legacy") &&
     !items.some((item) => !!item.nativeQueuedSubmissionId);
+  const retryRead = async () => {
+    if (!threadId || busy || changing.current) return;
+    changing.current = true;
+    setBusy(true);
+    try {
+      await retryFollowupsNow(threadId);
+    } finally {
+      changing.current = false;
+      setBusy(false);
+    }
+  };
 
   const change = async (action: FollowupAction) => {
     if (!threadId || changing.current || !railPresent) return;
@@ -415,17 +429,11 @@ export function FollowupQueueContent({
                     title="提交，但不中断模型运行"
                     disabled={busy || !!accessBlock}
                     onClick={() =>
-                      nativeAuthority
-                        ? setConfirm({
-                            type: "steer",
-                            id: m.id,
-                            expectedTurnId: turnId,
-                          })
-                        : void change({
-                            type: "steer",
-                            id: m.id,
-                            expectedTurnId: turnId,
-                          })
+                      void change({
+                        type: "steer",
+                        id: m.id,
+                        expectedTurnId: turnId,
+                      })
                     }
                   >
                     {compactShelf ? (
@@ -721,6 +729,26 @@ export function FollowupQueueContent({
       className={`session-followup-queue ${inlineDetails ? "session-queue-detail" : "session-queue-shelf"}`}
       aria-label="消息队列"
     >
+      {snapshot.error && (
+        <div
+          className="session-queue-status"
+          role="alert"
+          data-queue-read-unavailable=""
+        >
+          <span>
+            官方队列状态暂时无法核对。已保留已知内容，不会按空队列处理。
+          </span>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            disabled={busy}
+            onClick={() => void retryRead()}
+          >
+            {busy ? "正在核对" : "重试读取队列"}
+          </Button>
+        </div>
+      )}
       {(inlineDetails || !expanded) &&
         (items.length > 0 || state.paused) &&
         queueList}
@@ -782,29 +810,25 @@ export function FollowupQueueContent({
           <DialogTitle>
             {confirm?.type === "undo"
               ? "恢复保存的排队消息？"
-              : confirm?.type === "steer"
-                ? "将排队消息用于当前轮次？"
-                : confirm?.type === "retry" && nativeAuthority
-                  ? "恢复保存的消息？"
-                  : confirm?.type === "migrate"
-                    ? "迁入官方共享队列？"
-                    : confirm?.type === "clear"
-                      ? "清空待发送队列？"
-                      : confirm?.type === "retry"
-                        ? "确认消息未送达？"
-                        : "移除队列消息记录？"}
+              : confirm?.type === "retry" && nativeAuthority
+                ? "恢复保存的消息？"
+                : confirm?.type === "migrate"
+                  ? "迁入官方共享队列？"
+                  : confirm?.type === "clear"
+                    ? "清空待发送队列？"
+                    : confirm?.type === "retry"
+                      ? "确认消息未送达？"
+                      : "移除队列消息记录？"}
           </DialogTitle>
           <DialogDescription>
             {confirm?.type === "undo" ||
             (confirm?.type === "retry" && nativeAuthority)
               ? "使用当前线程设置，将保存内容加入官方队列末尾；空闲时会立即执行。必要时会恢复原生会话，已有待发内容也可能开始执行。请先检查对话与队列，确认原操作不会造成重复执行。结果未知时不会自动补偿或重发。"
-              : confirm?.type === "steer"
-                ? "先将这条消息移出官方队列，再引导上述当前轮次。其他客户端仍可能改变队列；任一步失败或结果未知都会停止并保留原内容，不会自动补偿或重发。"
-                : confirm?.type === "migrate"
-                  ? "这会将旧消息的模型与权限应用到当前线程，影响尚未开始的官方排队消息；内容随即可能开始执行。原消息与配置记录仍保留，未知回执不会重发。"
-                  : confirm?.type === "clear"
-                    ? "移除所有尚未发送的消息，当前任务继续运行。"
-                    : "请先查看对话，确认消息是否已经被接收。重复发送可能再次执行同一任务。"}
+              : confirm?.type === "migrate"
+                ? "这会将旧消息的模型与权限应用到当前线程，影响尚未开始的官方排队消息；内容随即可能开始执行。原消息与配置记录仍保留，未知回执不会重发。"
+                : confirm?.type === "clear"
+                  ? "移除所有尚未发送的消息，当前任务继续运行。"
+                  : "请先查看对话，确认消息是否已经被接收。重复发送可能再次执行同一任务。"}
             {confirm?.type === "retry" && accessBlock && (
               <span className="session-queue-confirm-reason">
                 {accessBlock}
@@ -828,13 +852,11 @@ export function FollowupQueueContent({
               {confirm?.type === "undo" ||
               (confirm?.type === "retry" && nativeAuthority)
                 ? "确认加入队列并执行"
-                : confirm?.type === "steer"
-                  ? "确认引导当前轮次"
-                  : confirm?.type === "migrate"
-                    ? "确认设置并迁入"
-                    : confirm?.type === "retry"
-                      ? "确认未送达并重试"
-                      : "确认移除"}
+                : confirm?.type === "migrate"
+                  ? "确认设置并迁入"
+                  : confirm?.type === "retry"
+                    ? "确认未送达并重试"
+                    : "确认移除"}
             </Button>
           </DialogFooter>
         </DialogContent>

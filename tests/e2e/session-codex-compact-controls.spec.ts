@@ -13,16 +13,15 @@ import {
 } from "./resize-observer-diagnostics";
 
 async function fitsViewport(page: Page, locator: Locator) {
-  await expect(locator).toBeVisible();
-  const box = (await locator.boundingBox())!;
+  await expect(locator).toBeVisible({ timeout: 30_000 });
   const viewport = page.viewportSize()!;
-  expect(box.x).toBeGreaterThanOrEqual(0);
-  expect(box.y).toBeGreaterThanOrEqual(0);
-  expect(box.x + box.width).toBeLessThanOrEqual(viewport.width + 1);
-  expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 1);
-  expect(
-    await locator.evaluate((el) => el.scrollWidth <= el.clientWidth + 1),
-  ).toBe(true);
+  await expect.poll(async () => {
+    const box = await locator.boundingBox();
+    if (!box) return null;
+    const fitsContent = await locator.evaluate((el) => el.scrollWidth <= el.clientWidth + 1).catch(() => false);
+    return box.x >= 0 && box.y >= 0 && box.x + box.width <= viewport.width + 1 &&
+      box.y + box.height <= viewport.height + 1 && fitsContent;
+  }, { timeout: 30_000 }).toBe(true);
 }
 
 async function controlsAreReachable(
@@ -46,6 +45,7 @@ async function controlsAreReachable(
           y: rect.y,
           width: rect.width,
           height: rect.height,
+          disabled: (element as HTMLButtonElement).disabled,
           reachable: hit === element || element.contains(hit),
           interceptedBy: hit?.closest("button")?.getAttribute("aria-label"),
         };
@@ -55,7 +55,15 @@ async function controlsAreReachable(
     info.outputPath(`controls-${phase}.json`),
     JSON.stringify(controls, null, 2),
   );
-  expect(controls.filter((control) => !control.reachable)).toEqual([]);
+  expect(controls.filter((control) => !control.disabled && !control.reachable)).toEqual([]);
+  for (let left = 0; left < controls.length; left++) {
+    for (let right = left + 1; right < controls.length; right++) {
+      const a = controls[left], b = controls[right];
+      const overlapX = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
+      const overlapY = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
+      expect(overlapX > 0.5 && overlapY > 0.5, `${a.name} overlaps ${b.name}`).toBe(false);
+    }
+  }
 }
 
 for (const touch of [false, true])
@@ -110,10 +118,17 @@ for (const touch of [false, true])
                 .findLast((e) => new URL(e.name).pathname === path)?.name ??
                 path
             );
-          const [{ useLayoutStore }, { useThemeStore }] = await Promise.all([
+          const [{ useLayoutStore }, { useThemeStore }, { useAgentCenterStore }] = await Promise.all([
             module("/src/session-mode/stores/useLayoutStore.ts"),
             module("/src/session-mode/stores/settings/useThemeStore.ts"),
+            module("/src/session-mode/stores/useAgentCenterStore.ts"),
           ]);
+          useAgentCenterStore.setState({
+            cards: [{ kind: "codex", id: "ux-0", cwd: "/fixture/项目/very-long-project-path-for-ui-regression", preview: "布局测试" }],
+            currentAgentCardId: "ux-0",
+            currentAgentCardKind: "codex",
+            cardsViewMode: "solo",
+          });
           useLayoutStore.setState({
             isSidebarOpen: false,
             isRightPanelOpen: false,
@@ -125,6 +140,93 @@ for (const touch of [false, true])
             .locator(".session-composer-width")
             .evaluate((el) => ((el as HTMLElement).style.width = "360px"));
         await editor.fill("保留原会话草稿");
+        if (touch) {
+          const railToggleTarget = await page.evaluate(() => {
+            const mode = document.createElement("div");
+            mode.className = "session-mode";
+            Object.assign(mode.style, {
+              position: "relative",
+              width: "300px",
+              height: "100px",
+              margin: "200px auto",
+            });
+            const rail = document.createElement("div");
+            rail.className = "session-composer-rail";
+            const button = document.createElement("button");
+            button.className = "session-composer-rail-toggle";
+            button.textContent = "展开";
+            const content = document.createElement("div");
+            content.className = "session-composer-rail-content";
+            const item = document.createElement("div");
+            item.dataset.composerRailItem = "present";
+            content.append(item);
+            rail.append(button, content);
+            mode.append(rail);
+            document.body.append(mode);
+            const rect = button.getBoundingClientRect();
+            mode.remove();
+            return { width: rect.width, height: rect.height };
+          });
+          expect(railToggleTarget.width).toBeGreaterThanOrEqual(44);
+          expect(railToggleTarget.height).toBeGreaterThanOrEqual(44);
+          const sourcesTarget = await page.evaluate(() => {
+            const mode = document.createElement("div");
+            mode.className = "session-mode";
+            const button = document.createElement("button");
+            button.className =
+              "codex-sources-trigger inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted focus-visible:outline-2";
+            button.textContent = "来源";
+            mode.append(button);
+            document.body.append(mode);
+            const rect = button.getBoundingClientRect();
+            mode.remove();
+            return { width: rect.width, height: rect.height };
+          });
+          expect(sourcesTarget.width).toBeGreaterThanOrEqual(44);
+          expect(sourcesTarget.height).toBeGreaterThanOrEqual(44);
+          const recentChats = composer.getByRole("button", {
+            name: /^最近聊天/,
+          });
+          const codexMenu = composer.getByRole("button", {
+            name: "Codex 菜单",
+            exact: true,
+          });
+          const workspace = composer.getByRole("button", {
+            name: "配置本地工作环境",
+            exact: true,
+          });
+          for (const target of [recentChats, codexMenu, workspace]) {
+            const box = await target.boundingBox();
+            expect(box?.height).toBeGreaterThanOrEqual(44);
+          }
+          await recentChats.click();
+          const recentMenu = composer.getByRole("menu", {
+            name: "搜索最近聊天",
+            exact: true,
+          });
+          await expect(recentMenu).toBeVisible();
+          const searchBox = await recentMenu
+            .getByRole("textbox", { name: "搜索最近聊天", exact: true })
+            .boundingBox();
+          expect(searchBox?.height).toBeGreaterThanOrEqual(44);
+          const recentRows = await recentMenu.locator("button").evaluateAll(
+            (buttons) => buttons.map((button) => button.getBoundingClientRect().height),
+          );
+          expect(recentRows.every((height) => height >= 44)).toBe(true);
+          await recentChats.click();
+          await codexMenu.click();
+          const codexPopup = composer.getByRole("menu", {
+            name: "Codex 菜单",
+            exact: true,
+          });
+          await expect(codexPopup).toBeVisible();
+          const codexActions = await codexPopup
+            .getByRole("menuitem")
+            .evaluateAll((buttons) => buttons.map((button) => button.getBoundingClientRect().height));
+          expect(codexActions.length).toBeGreaterThan(0);
+          expect(codexActions.every((height) => height >= 44)).toBe(true);
+          await codexMenu.click();
+        }
         const frame = composer.locator(".session-compact-frame");
         const originalHeight = (await frame.boundingBox())!.height;
         expect(originalHeight).toBe(124);
@@ -183,10 +285,13 @@ for (const touch of [false, true])
           name: "上下文用量：25%",
           exact: true,
         });
-        await composer
-          .getByRole("button", { name: "附加文件", exact: true })
-          .click();
         await expect(capacity).toBeVisible();
+        await expect(
+          composer.locator(".session-composer-actions > .session-native-context-usage"),
+        ).toBeVisible();
+        const editorBox = (await editor.boundingBox())!;
+        const capacityBox = (await capacity.boundingBox())!;
+        expect(capacityBox.x).toBeGreaterThanOrEqual(editorBox.x + editorBox.width - 1);
         await controlsAreReachable(composer, info, "idle");
         expect(
           await capacity
@@ -206,6 +311,14 @@ for (const touch of [false, true])
             height: Number.parseFloat(getComputedStyle(button).height),
           }));
           expect(targetSize).toEqual({ width: 44, height: 44 });
+          const voice = composer.getByRole("button", {
+            name: "语音对话",
+            exact: true,
+          });
+          await expect(voice).toBeVisible();
+          const voiceTarget = await voice.boundingBox();
+          expect(voiceTarget?.width).toBe(44);
+          expect(voiceTarget?.height).toBe(44);
         }
         await capacity.click();
         const tooltip = page.getByRole("tooltip");

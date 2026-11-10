@@ -1,4 +1,13 @@
-import { Component, lazy, memo, Suspense, type ReactNode } from "react";
+import {
+  Component,
+  lazy,
+  memo,
+  Suspense,
+  useMemo,
+  useState,
+  type ErrorInfo,
+  type ReactNode,
+} from "react";
 import { useCodexStore } from "../stores/useCodexStore";
 import { useTranscriptVisibility } from "../hooks/useTranscriptVisibility";
 import { TranscriptDetailVisibility } from "../hooks/transcriptDetailVisibility";
@@ -8,22 +17,78 @@ import { CodexTranscriptPreparing } from "./CodexTranscriptPreparing";
 
 // Rich tools, Markdown and on-demand details belong to this local boundary.
 // Their module graph must not suspend navigation or the sibling composer.
-const CodexTranscript = lazy(() => import("./CodexTranscript"));
+const transcriptModuleLoadFailures = new WeakSet<object>();
+
+function createCodexTranscriptRenderer() {
+  return lazy(() =>
+    import("./CodexTranscript").catch((error: unknown) => {
+      if (
+        error !== null &&
+        (typeof error === "object" || typeof error === "function")
+      )
+        transcriptModuleLoadFailures.add(error as object);
+      throw error;
+    }),
+  );
+}
+
+function refreshPage() {
+  window.location.reload();
+}
 
 class TranscriptRendererBoundary extends Component<
   {
     threadId: string;
+    onRetry: (reloadPage: boolean) => void;
+    onRefresh: () => void;
     children: ReactNode;
   },
-  { failed: boolean }
+  { failed: boolean; failure: string | null; moduleLoadFailed: boolean }
 > {
-  state = { failed: false };
-  static getDerivedStateFromError() {
-    return { failed: true };
+  state = {
+    failed: false,
+    failure: null as string | null,
+    moduleLoadFailed: false,
+  };
+  static getDerivedStateFromError(error: unknown) {
+    const failure =
+      error instanceof Error
+        ? `${error.name}: ${error.message}`
+        : typeof error === "string"
+          ? error
+          : "未知渲染错误";
+    return {
+      failed: true,
+      failure: failure.slice(0, 500),
+      moduleLoadFailed:
+        error !== null &&
+        (typeof error === "object" || typeof error === "function") &&
+        transcriptModuleLoadFailures.has(error as object),
+    };
+  }
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error("[CodexThread] Transcript renderer failed.", {
+      threadId: this.props.threadId,
+      error,
+      componentStack: info.componentStack,
+    });
   }
   render() {
     return this.state.failed ? (
-      <CodexTranscriptPreparing threadId={this.props.threadId} failed />
+      <CodexTranscriptPreparing
+        threadId={this.props.threadId}
+        failed
+        failure={this.state.failure}
+        retryLabel={
+          this.state.moduleLoadFailed
+            ? "刷新并重试完整消息"
+            : "重试完整消息"
+        }
+        onRetry={() => this.props.onRetry(this.state.moduleLoadFailed)}
+        onRefresh={
+          this.state.moduleLoadFailed ? undefined : this.props.onRefresh
+        }
+      />
     ) : (
       this.props.children
     );
@@ -43,6 +108,18 @@ export const CodexThread = memo(function CodexThread({
   inspection = false,
 }: CodexThreadProps = {}) {
   const activeThreadId = useCodexStore((s) => threadId ?? s.currentThreadId);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const TranscriptRenderer = useMemo(createCodexTranscriptRenderer, [
+    activeThreadId,
+    loadAttempt,
+  ]);
+  const retryTranscript = (reloadPage = false) => {
+    if (reloadPage) {
+      refreshPage();
+      return;
+    }
+    setLoadAttempt((attempt) => attempt + 1);
+  };
   const { ref, renderTranscript, visible } = useTranscriptVisibility(
     activeThreadId ?? "",
   );
@@ -57,15 +134,17 @@ export const CodexThread = memo(function CodexThread({
           <CodexContentOwner.Provider value={activeThreadId ?? null}>
             {renderTranscript ? (
               <TranscriptRendererBoundary
-                key={activeThreadId ?? ""}
+                key={`${activeThreadId ?? ""}:${loadAttempt}`}
                 threadId={activeThreadId ?? ""}
+                onRetry={retryTranscript}
+                onRefresh={refreshPage}
               >
                 <Suspense
                   fallback={
                     <CodexTranscriptPreparing threadId={activeThreadId ?? ""} />
                   }
                 >
-                  <CodexTranscript
+                  <TranscriptRenderer
                     activeThreadId={activeThreadId ?? ""}
                     fillHeight={fillHeight}
                     inspection={inspection}

@@ -282,8 +282,10 @@ it("isolates a fourth-mode render failure and offers an explicit terminal fallba
     );
     const terminal = await screen.findByTestId("terminal-app");
     expect(terminal.getAttribute("data-active")).toBe("true");
-    expect(screen.getByTestId("codex-app")).toBe(codex);
-    expect(lifecycle.mounts.codex).toBe(1);
+    // The fallback is terminal-only. Do not require the unvisited Codex mode
+    // to mount as a side effect of recovering from the ChatGPT error.
+    expect(screen.queryByTestId("codex-app")).toBeNull();
+    expect(lifecycle.mounts.codex).toBe(0);
   } finally {
     log.mockRestore();
   }

@@ -17,6 +17,7 @@ import { newSessionEditId } from "@session/services/sessionEditIdentity";
 import { createSideChat } from "@session/services/conversationActions";
 import { sessionDraftKey } from "@session/stores/useSessionDraftStore";
 import { composerDrafts, useComposerDraft } from "./drafts";
+import { sendResponseAnnotation } from "./directResponseAnnotation";
 import {
   captureResponseSelection,
   findResponseSelection,
@@ -55,6 +56,8 @@ export function ResponseSelectionAnnotations({
     null,
   );
   const [markers, setMarkers] = useState<Marker[]>([]);
+  const [sendingIds, setSendingIds] = useState<Set<string>>(() => new Set());
+  const sendingRef = useRef(new Set<string>());
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const annotations = contexts as AnnotatedContext[];
   const editable =
@@ -304,6 +307,33 @@ export function ResponseSelectionAnnotations({
     contentRef.current.ownerDocument.getSelection()?.removeAllRanges();
   }, [contentRef, owner, selection, threadId]);
 
+  const sendAnnotation = useCallback(
+    async (id: string) => {
+      if (
+        sendingRef.current.has(id) ||
+        !isAgentInteractionVisible() ||
+        !contentRef.current?.isConnected
+      )
+        return;
+      sendingRef.current.add(id);
+      setSendingIds(new Set(sendingRef.current));
+      try {
+        const result = await sendResponseAnnotation(owner, threadId, id);
+        if (result.removed)
+          setEditing((current) => (current?.id === id ? null : current));
+        toast.success("批注已提交");
+      } catch (error) {
+        toast.error(
+          error instanceof Error ? error.message : "批注发送失败，内容已保留",
+        );
+      } finally {
+        sendingRef.current.delete(id);
+        setSendingIds(new Set(sendingRef.current));
+      }
+    },
+    [contentRef, owner, threadId],
+  );
+
   const editorPoint =
     editing &&
     (markers.find((marker) => marker.id === editing.id)?.point ??
@@ -390,6 +420,18 @@ export function ResponseSelectionAnnotations({
               event.stopPropagation();
               setEditing(null);
             }
+            if (
+              event.key === "Enter" &&
+              (event.ctrlKey || event.metaKey) &&
+              !event.altKey &&
+              !event.shiftKey &&
+              !event.nativeEvent.isComposing &&
+              !event.repeat
+            ) {
+              event.preventDefault();
+              event.stopPropagation();
+              void sendAnnotation(editing.id);
+            }
           }}
         >
           <textarea
@@ -417,6 +459,14 @@ export function ResponseSelectionAnnotations({
             </button>
             <button type="button" onClick={() => setEditing(null)}>
               完成
+            </button>
+            <button
+              type="button"
+              className="session-response-annotation-send"
+              disabled={sendingIds.has(editing.id)}
+              onClick={() => void sendAnnotation(editing.id)}
+            >
+              {sendingIds.has(editing.id) ? "正在提交…" : "发送"}
             </button>
           </div>
         </div>

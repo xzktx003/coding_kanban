@@ -83,6 +83,31 @@ it("preserves command order around intervening visible tool activity and complet
     ),
   ).toEqual(["before", "tool", "after", "reply"]);
 });
+it("does not merge adjacent commands from different lifecycle-less turns", () => {
+  const command = (turnId: string, id: string) => ({
+    method: "item/completed",
+    params: {
+      threadId: "owner",
+      turnId,
+      item: {
+        type: "commandExecution",
+        id,
+        command: id,
+        commandActions: [],
+        status: "completed",
+      },
+    },
+  });
+  const rows = deriveRenderItems([
+    command("one", "first"),
+    command("two", "second"),
+  ] as unknown as ServerNotification[]);
+  expect(
+    rows
+      .filter((row) => row.kind === "cmdGroup")
+      .map((row) => row.actionSources.map((source) => source.turnId)),
+  ).toEqual([["one"], ["two"]]);
+});
 it("captures an owning command's verified lifecycle start for its running timer", () => {
   const item = {
     type: "commandExecution",

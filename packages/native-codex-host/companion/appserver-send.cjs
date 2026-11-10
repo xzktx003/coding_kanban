@@ -4,7 +4,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const SUPPORTED_OFFICIAL_VERSION = '26.51002.51308';
-const SUPPORTED_OFFICIAL_VERSIONS = Object.freeze([SUPPORTED_OFFICIAL_VERSION, '26.51007.21434']);
+const SUPPORTED_OFFICIAL_VERSIONS = Object.freeze([SUPPORTED_OFFICIAL_VERSION, '26.51007.21434', '26.51021.22027']);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const MAX_TEXT = 200_000;
 const MAX_BODY_BYTES = 1024 * 1024;

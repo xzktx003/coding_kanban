@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { readFile, writeFile } from "node:fs/promises";
 import { installSessionUxFixture, seedSessionUx } from "./session-ux-fixture";
+import { composerAction } from "./session-composer-actions";
 
 const reference = process.env.CODEX_NATIVE_REFERENCE_URL;
 const notes = [
@@ -78,6 +79,12 @@ for (const width of [1440, 390])
         await page.route("**/api/filesystem/read-directory", (route) =>
           route.fulfill({ json: [] }),
         );
+        await page.route("**/workspace-files/resolve", (route) => {
+          const request = route.request().postDataJSON();
+          return route.fulfill({
+            json: { root: request.root, path: request.path },
+          });
+        });
         const fileReads: Array<{ root: string; path: string }> = [];
         await page.route("**/workspace-files/read", (route) => {
           const query = new URL(route.request().url()).searchParams;
@@ -246,7 +253,7 @@ for (const width of [1440, 390])
         expect(copied).toContain("legacy.py （第 8-9 行）");
         expect(copied).toContain("`" + literal + "`");
         expect(copied).toContain("<div>" + literal + "</div>");
-        await page.getByRole("button", { name: "当前会话的更多操作" }).click();
+        await composerAction(page, "当前会话的更多操作");
         const downloadPromise = page.waitForEvent("download");
         await page
           .getByRole("menuitem", { name: "导出 Markdown", exact: true })

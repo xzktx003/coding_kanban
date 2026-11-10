@@ -6,7 +6,14 @@ import { isCodexDraftOwner } from "@session/components/codex/composer/v2/selecti
 import { useCodexStore } from "@session/components/codex/stores";
 import { sessionDraftKey } from "@session/stores/useSessionDraftStore";
 import { useVsCodePanelStore } from "@session/stores/useVsCodePanelStore";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -24,18 +31,40 @@ import { buildEventUrl } from "@session/hooks/runtime";
 import {
   readWorkspaceText,
   saveWorkspaceText,
+  type TextSnapshot,
 } from "@session/services/workspaceFiles";
-import { useFileDocumentStore } from "@session/stores/useFileDocumentStore";
+import { readWithDeadline } from "@session/services/sessionReadQueue";
+import {
+  useFileDocumentStore,
+  type FileDocument,
+} from "@session/stores/useFileDocumentStore";
+import {
+  clearFileSaveFailure,
+  hasPendingFileOperation,
+  useFileSaveStatusStore,
+} from "@session/stores/useFileSaveStatusStore";
 import { useEditorStore } from "@session/stores/useEditorStore";
 import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
 import { useInputStore } from "@session/stores";
 import { useTodoStore } from "@session/stores/useTodoStore";
 import { CodeEditor } from "../editor/CodeEditor";
 import { EditorGitBlame } from "../editor/EditorGitBlame";
-import { OfficeView } from "./OfficeView";
 import { OFFICE_EXTENSIONS } from "./officeFileTypes";
+const OfficeView = lazy(() =>
+  import("./OfficeView").then((module) => ({ default: module.OfficeView })),
+);
 const extension = (path: string) =>
   path.split("/").pop()?.split(".").pop()?.toLowerCase() ?? "";
+const FILE_READ_TIMEOUT_MS = 15_000;
+const fileReadError = (error: unknown) =>
+  error &&
+  typeof error === "object" &&
+  "name" in error &&
+  error.name === "TimeoutError"
+    ? "读取文件超时，请重试"
+    : error instanceof Error
+      ? error.message
+      : String(error);
 const images = [
   "png",
   "jpg",
@@ -72,6 +101,11 @@ export function FileViewer({ filePath }: { filePath: string }) {
     workspaceRoot ??
     filePath.slice(0, filePath.lastIndexOf("/"));
   const doc = useFileDocumentStore((s) => s.documents[filePath]);
+  const savePending = useFileSaveStatusStore((s) => s.pending.has(filePath));
+  const operationPending = useFileSaveStatusStore((s) =>
+    hasPendingFileOperation(s.operations, filePath),
+  );
+  const saveFailure = useFileSaveStatusStore((s) => s.failures.get(filePath));
   const reveal = useEditorStore((s) => s.revealLocation);
   const docs = useFileDocumentStore.getState();
   const [loading, setLoading] = useState(true),
@@ -82,8 +116,15 @@ export function FileViewer({ filePath }: { filePath: string }) {
     [reloadOpen, setReloadOpen] = useState(false),
     [saving, setSaving] = useState(false),
     [storageError, setStorageError] = useState(false),
-    [diskPreview, setDiskPreview] = useState("");
+    [diskPreview, setDiskPreview] = useState<TextSnapshot | null>(null),
+    [compareLoading, setCompareLoading] = useState(false),
+    [compareError, setCompareError] = useState<string | null>(null);
   const generation = useRef(0),
+    ownerGeneration = useRef(0),
+    ownerAbort = useRef<AbortController | null>(null),
+    loadAbort = useRef<AbortController | null>(null),
+    compareGeneration = useRef(0),
+    compareAbort = useRef<AbortController | null>(null),
     savingRef = useRef(new Set<string>());
   const ext = extension(filePath),
     office = OFFICE_EXTENSIONS.includes(ext),
@@ -91,37 +132,68 @@ export function FileViewer({ filePath }: { filePath: string }) {
     markdown = ext === "md" || ext === "markdown";
   const setInput = useInputStore((s) => s.setInputValue),
     addTodo = useTodoStore((s) => s.addTodo);
+  const readDisk = useCallback(
+    async (signal: AbortSignal) => {
+      const data = await readWorkspaceText(root, filePath, { signal });
+      if (
+        !data ||
+        typeof data.content !== "string" ||
+        typeof data.version !== "string"
+      )
+        throw new Error("服务未返回有效的文件内容");
+      return data;
+    },
+    [root, filePath],
+  );
   const load = useCallback(async () => {
     if (office || image) {
       setLoading(false);
       return;
     }
     const own = ++generation.current;
+    loadAbort.current?.abort();
+    const controller = new AbortController();
+    loadAbort.current = controller;
     setLoading(true);
     setError(null);
     try {
-      const data = await readWorkspaceText(root, filePath);
+      const data = await readWithDeadline(
+        readDisk,
+        FILE_READ_TIMEOUT_MS,
+        controller.signal,
+      );
       if (own !== generation.current) return;
-      if (typeof data.content !== "string" || typeof data.version !== "string")
-        throw new Error("服务未返回有效的文件内容");
       useFileDocumentStore
         .getState()
         .load(filePath, root, data.content, data.version);
     } catch (e) {
-      if (own === generation.current)
-        setError(e instanceof Error ? e.message : String(e));
+      if (own === generation.current) setError(fileReadError(e));
     } finally {
+      if (loadAbort.current === controller) loadAbort.current = null;
       if (own === generation.current) setLoading(false);
     }
-  }, [root, filePath, office, image]);
+  }, [root, filePath, office, image, readDisk]);
   useEffect(() => {
+    ownerGeneration.current++;
+    const controller = new AbortController();
+    ownerAbort.current = controller;
     setSaving(false);
     setError(null);
     setFull(false);
     setContextError(null);
+    setReloadOpen(false);
+    setDiskPreview(null);
+    setCompareError(null);
+    setCompareLoading(false);
     void load();
     return () => {
       generation.current++;
+      ownerGeneration.current++;
+      compareGeneration.current++;
+      controller.abort();
+      loadAbort.current?.abort();
+      compareAbort.current?.abort();
+      if (ownerAbort.current === controller) ownerAbort.current = null;
     };
   }, [load]);
   useEffect(() => {
@@ -136,8 +208,10 @@ export function FileViewer({ filePath }: { filePath: string }) {
     },
   );
   const save = async (content: string) => {
-    if (savingRef.current.has(filePath)) return;
-    const own = generation.current;
+    if (savingRef.current.has(filePath))
+      throw new Error("此文件正在保存，请等待当前结果后再试。");
+    const own = ownerGeneration.current;
+    const ownerSignal = ownerAbort.current?.signal;
     const current = useFileDocumentStore.getState().documents[filePath];
     if (!current) throw new Error("文件尚未加载");
     savingRef.current.add(filePath);
@@ -149,27 +223,151 @@ export function FileViewer({ filePath }: { filePath: string }) {
         content,
         current.version,
       );
+      const refreshAfterSave =
+        own === ownerGeneration.current && loadAbort.current !== null;
+      if (refreshAfterSave) {
+        // A watch read started before the save acknowledgement can contain
+        // the old disk version. Replace it with a fresh read after the save.
+        generation.current++;
+        loadAbort.current?.abort();
+        loadAbort.current = null;
+        setLoading(false);
+      }
       useFileDocumentStore.getState().saved(filePath, content, result.version);
-      if (own === generation.current) setError(null);
+      if (own === ownerGeneration.current) {
+        setError(null);
+        if (refreshAfterSave) void load();
+      }
     } catch (e) {
-      if (own === generation.current && String(e).includes("已更新")) {
+      if (own === ownerGeneration.current)
+        setError(e instanceof Error ? e.message : String(e));
+      if (own === ownerGeneration.current && String(e).includes("已更新")) {
         try {
-          const disk = await readWorkspaceText(current.root, filePath);
-          if (own === generation.current) {
+          const disk = await readWithDeadline(
+            (signal) => readWorkspaceText(current.root, filePath, { signal }),
+            FILE_READ_TIMEOUT_MS,
+            ownerSignal,
+          );
+          if (own === ownerGeneration.current) {
             useFileDocumentStore
               .getState()
               .load(filePath, current.root, disk.content, disk.version);
-            setDiskPreview(disk.content);
           }
         } catch {}
       }
       throw e;
     } finally {
       savingRef.current.delete(filePath);
-      if (own === generation.current) setSaving(false);
+      if (own === ownerGeneration.current) setSaving(false);
     }
   };
-  if (office) return <OfficeView filePath={filePath} />;
+  const saveFromViewer = (content: string) => {
+    const own = ownerGeneration.current;
+    void save(content).catch((error) => {
+      if (own === ownerGeneration.current) setError(String(error));
+    });
+  };
+  const closeComparison = () => {
+    compareGeneration.current++;
+    compareAbort.current?.abort();
+    compareAbort.current = null;
+    setCompareLoading(false);
+    setCompareError(null);
+    setDiskPreview(null);
+    setReloadOpen(false);
+  };
+  const openComparison = () => {
+    setReloadOpen(true);
+    setDiskPreview(null);
+    void readComparison();
+  };
+  const readComparison = async (confirmed?: {
+    preview: TextSnapshot;
+    draft: FileDocument;
+  }) => {
+    const own = ++compareGeneration.current;
+    const owner = ownerGeneration.current;
+    compareAbort.current?.abort();
+    const controller = new AbortController();
+    compareAbort.current = controller;
+    setCompareLoading(true);
+    setCompareError(null);
+    try {
+      const disk = await readWithDeadline(
+        readDisk,
+        FILE_READ_TIMEOUT_MS,
+        controller.signal,
+      );
+      if (
+        own !== compareGeneration.current ||
+        owner !== ownerGeneration.current
+      )
+        return;
+      if (!confirmed) {
+        setDiskPreview(disk);
+      } else if (
+        disk.path !== confirmed.preview.path ||
+        disk.version !== confirmed.preview.version ||
+        disk.content !== confirmed.preview.content
+      ) {
+        setDiskPreview(disk);
+        setCompareError("磁盘内容再次变化，请检查后重新确认。");
+      } else {
+        // A watch-triggered read may have started before this confirmation.
+        // Its late result must not replace the freshly confirmed snapshot.
+        const refreshAfterComparison = loadAbort.current !== null;
+        generation.current++;
+        loadAbort.current?.abort();
+        loadAbort.current = null;
+        setLoading(false);
+        if (
+          confirmed.draft.root !== root ||
+          !useFileDocumentStore
+            .getState()
+            .replaceIfUnchanged(
+              filePath,
+              confirmed.draft,
+              disk.content,
+              disk.version,
+            )
+        ) {
+          setCompareError(
+            "草稿在读取期间发生变化，已保留当前内容，请检查后重新确认。",
+          );
+        } else {
+          setError(null);
+          clearFileSaveFailure(filePath);
+          closeComparison();
+        }
+        if (refreshAfterComparison) void load();
+      }
+    } catch (error) {
+      if (
+        own === compareGeneration.current &&
+        owner === ownerGeneration.current
+      )
+        setCompareError(`读取磁盘内容失败：${fileReadError(error)}`);
+    } finally {
+      if (compareAbort.current === controller) compareAbort.current = null;
+      if (
+        own === compareGeneration.current &&
+        owner === ownerGeneration.current
+      )
+        setCompareLoading(false);
+    }
+  };
+  if (office)
+    return (
+      <Suspense
+        fallback={
+          <div role="status" className="p-4 text-sm text-muted-foreground">
+            正在加载文档预览…
+          </div>
+        }
+      >
+        <OfficeView filePath={filePath} />
+      </Suspense>
+    );
   if (image)
     return (
       <div className="h-full overflow-auto p-3">
@@ -260,10 +458,11 @@ export function FileViewer({ filePath }: { filePath: string }) {
           e.key.toLowerCase() === "s" &&
           !e.defaultPrevented &&
           doc &&
+          !reloadOpen &&
           (!large || full)
         ) {
           e.preventDefault();
-          void save(doc.draft).catch((e) => setError(String(e)));
+          if (!savePending && !operationPending) saveFromViewer(doc.draft);
         }
       }}
     >
@@ -282,10 +481,14 @@ export function FileViewer({ filePath }: { filePath: string }) {
           ))}
           <Button
             size="sm"
-            disabled={saving || !doc || (large && !full)}
-            onClick={() =>
-              doc && void save(doc.draft).catch((e) => setError(String(e)))
+            disabled={
+              saving ||
+              savePending ||
+              operationPending ||
+              !doc ||
+              (large && !full)
             }
+            onClick={() => doc && saveFromViewer(doc.draft)}
           >
             保存
           </Button>
@@ -294,6 +497,32 @@ export function FileViewer({ filePath }: { filePath: string }) {
       {storageError && (
         <div role="alert" className="p-2 text-sm text-destructive">
           浏览器草稿存储空间不足，请保存文件或复制草稿；当前文字仍在内存中。
+        </div>
+      )}
+      {savePending && (
+        <div role="status" className="p-2 text-sm text-muted-foreground">
+          文件正在保存，可以继续编辑；当前结果返回前不能再次保存。
+        </div>
+      )}
+      {operationPending && (
+        <div role="status" className="p-2 text-sm text-muted-foreground">
+          文件正在移动、重命名或删除，操作完成前不能保存。
+        </div>
+      )}
+      {saveFailure && !error && (
+        <div role="alert" className="p-2 text-sm text-destructive">
+          上次保存未确认：{saveFailure}。请检查磁盘内容和草稿。
+          <Button variant="outline" size="sm" onClick={openComparison}>
+            比较磁盘内容
+          </Button>
+        </div>
+      )}
+      {doc?.saveUnconfirmed && !savePending && !saveFailure && !error && (
+        <div role="alert" className="p-2 text-sm text-destructive">
+          上次保存的结果尚未确认，之前的写入可能仍在进行。请核对磁盘内容和草稿。
+          <Button variant="outline" size="sm" onClick={openComparison}>
+            比较磁盘内容
+          </Button>
         </div>
       )}
       {error && (
@@ -313,16 +542,7 @@ export function FileViewer({ filePath }: { filePath: string }) {
       {doc?.diskChanged && (
         <div role="status" className="session-file-conflict">
           磁盘文件已更新，当前草稿已保留。
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => {
-              setReloadOpen(true);
-              void readWorkspaceText(root, filePath)
-                .then((d) => setDiskPreview(d.content))
-                .catch((e) => setError(String(e)));
-            }}
-          >
+          <Button size="sm" variant="outline" onClick={openComparison}>
             比较并重新读取
           </Button>
         </div>
@@ -348,6 +568,8 @@ export function FileViewer({ filePath }: { filePath: string }) {
                   content={display}
                   filePath={filePath}
                   isReadOnly={large && !full}
+                  savePending={savePending || operationPending}
+                  saveErrorHandledByParent
                   onContentChange={(value) => docs.edit(filePath, value)}
                   onSave={save}
                   onSendToAI={(text, range, annotation) => {
@@ -395,11 +617,15 @@ export function FileViewer({ filePath }: { filePath: string }) {
                           threadId,
                           draftOwner,
                         });
-                        const attached = addBrowserEditorContext(owner, {
-                          path,
-                          text,
-                          ...(range ? { range: { ...range } } : {}),
-                        }, annotation);
+                        const attached = addBrowserEditorContext(
+                          owner,
+                          {
+                            path,
+                            text,
+                            ...(range ? { range: { ...range } } : {}),
+                          },
+                          annotation,
+                        );
                         setContextError(null);
                         return attached;
                       } else
@@ -407,7 +633,9 @@ export function FileViewer({ filePath }: { filePath: string }) {
                           .getState()
                           .appendInputValue(
                             formatEditorContext(filePath, text, range) +
-                              (annotation?.trim() ? `\n\n用户评论：\n${annotation.trim()}` : ""),
+                              (annotation?.trim()
+                                ? `\n\n用户评论：\n${annotation.trim()}`
+                                : ""),
                           );
                       setContextError(null);
                     } catch (error) {
@@ -422,7 +650,14 @@ export function FileViewer({ filePath }: { filePath: string }) {
               {markdown && mode !== "edit" && preview}
             </div>
             <div className="session-file-status">
-              {doc.draft !== doc.base ? "未保存" : "已保存"} · {filePath}
+              {savePending
+                ? "保存中"
+                : doc.saveUnconfirmed
+                  ? "保存结果未确认"
+                  : doc.draft !== doc.base
+                    ? "未保存"
+                    : "已保存"}{" "}
+              · {filePath}
               {large && !full && (
                 <Button
                   size="sm"
@@ -436,29 +671,57 @@ export function FileViewer({ filePath }: { filePath: string }) {
           </>
         )
       )}
-      <Dialog open={reloadOpen} onOpenChange={setReloadOpen}>
+      <Dialog
+        open={reloadOpen}
+        onOpenChange={(open) => {
+          if (!open) closeComparison();
+        }}
+      >
         <DialogContent>
-          <DialogTitle>文件已在磁盘上更新</DialogTitle>
+          <DialogTitle>
+            {doc?.diskChanged ? "文件已在磁盘上更新" : "核对保存结果"}
+          </DialogTitle>
           <DialogDescription>
             重新读取将放弃当前未保存草稿。你也可以继续保留草稿，复制内容后再处理。
+            {doc?.saveUnconfirmed &&
+              " 之前的保存可能仍在进行，重新读取不代表它已停止。"}
           </DialogDescription>
           <div className="grid grid-cols-2 gap-2 max-h-64 overflow-auto">
             <pre className="whitespace-pre-wrap text-xs">
               当前草稿：{doc?.draft}
             </pre>
             <pre className="whitespace-pre-wrap text-xs">
-              磁盘内容：{diskPreview}
+              磁盘内容：{diskPreview?.content ?? ""}
             </pre>
           </div>
+          {compareLoading && <div role="status">正在读取磁盘内容…</div>}
+          {compareError && (
+            <div role="alert" className="text-sm text-destructive">
+              {compareError}
+            </div>
+          )}
+          {!diskPreview && !compareLoading && (
+            <Button variant="outline" onClick={() => void readComparison()}>
+              重试读取磁盘内容
+            </Button>
+          )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setReloadOpen(false)}>
+            <Button variant="outline" onClick={closeComparison}>
               保留草稿
             </Button>
             <Button
+              disabled={
+                !diskPreview ||
+                compareLoading ||
+                saving ||
+                savePending ||
+                operationPending
+              }
               onClick={() => {
-                docs.discard(filePath);
-                setReloadOpen(false);
-                void load();
+                const draft =
+                  useFileDocumentStore.getState().documents[filePath];
+                if (diskPreview && draft)
+                  void readComparison({ preview: diskPreview, draft });
               }}
             >
               放弃草稿并重新读取

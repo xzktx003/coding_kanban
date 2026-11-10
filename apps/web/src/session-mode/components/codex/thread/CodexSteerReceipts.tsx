@@ -12,7 +12,10 @@ import {
 } from "@session/components/history/historySourceScope";
 import { readNativeOperationContext } from "@session/services/nativeOperationContext";
 import { retainExternalTranscriptBody } from "@session/services/sessionProviderTranscriptState";
-import { enqueueSessionRead } from "@session/services/sessionReadQueue";
+import {
+  enqueueSessionRead,
+  readWithDeadline,
+} from "@session/services/sessionReadQueue";
 import { TranscriptDetailVisibility } from "../hooks/transcriptDetailVisibility";
 import { UserMessageItem } from "../items/UserMessageItem";
 
@@ -23,6 +26,7 @@ async function readPage(
   response: Response,
   threadId: string,
   namespace: string,
+  signal: AbortSignal,
 ): Promise<NativeSteerReceiptPage & { bodyBytes: number }> {
   if (!response.ok)
     throw new Error(`补充说明暂时无法读取（HTTP ${response.status}）。`);
@@ -37,6 +41,9 @@ async function readPage(
   }
   const reader = response.body.getReader(),
     decoder = new TextDecoder();
+  const cancelReader = () => { void reader.cancel(signal.reason).catch(() => {}); };
+  signal.addEventListener("abort", cancelReader, { once: true });
+  if (signal.aborted) cancelReader();
   let bytes = 0,
     text = "";
   try {
@@ -52,6 +59,7 @@ async function readPage(
     }
     text += decoder.decode();
   } finally {
+    signal.removeEventListener("abort", cancelReader);
     reader.releaseLock();
   }
   const value = JSON.parse(text) as NativeSteerReceiptPage;
@@ -257,29 +265,47 @@ function ReceiptPage({
     budget.current?.report(0);
     setError(null);
     setPhase("loading");
-    const timer = setTimeout(() => abort.abort(), 10_000);
+    let admitted = false;
+    // Waiting for the shared worker is distinct from reading the receipt.
+    // Keep both stages bounded without spending the transport budget in queue.
+    const timer = setTimeout(() => abort.abort(), 30_000);
     queueMicrotask(() => {
       if (!current()) return;
       void enqueueSessionRead(
         "status",
-        `steer-receipts:${threadId}:${JSON.stringify(scope)}:${request.cursor ?? ""}`,
-        async () => {
-          const native = await readNativeOperationContext();
-          if (!current()) return null;
-          const query = new URLSearchParams({
-            threadId,
-            expectedScope: native.scopeToken,
-            limit: "30",
-          });
-          if (request.cursor) query.set("cursor", request.cursor);
-          const url = scope.url + (scope.url.includes("?") ? "&" : "?") + query;
-          const response = await fetch(url, {
-            method: "GET",
-            headers: scope.headers,
-            signal: abort.signal,
-            redirect: "error",
-          });
-          return readPage(response, threadId, native.namespace);
+        // Each mounted view owns its cancellation. Sharing a pending job here
+        // would let unmounting one view abort another view of the same thread.
+        `steer-receipts:${owner}:${threadId}:${JSON.stringify(scope)}:${request.cursor ?? ""}`,
+        () => {
+          admitted = true;
+          clearTimeout(timer);
+          return readWithDeadline(
+            async (signal) => {
+              const native = await readNativeOperationContext(signal);
+              if (!current() || signal.aborted) return null;
+              const query = new URLSearchParams({
+                threadId,
+                expectedScope: native.scopeToken,
+                limit: "30",
+              });
+              if (request.cursor) query.set("cursor", request.cursor);
+              const url =
+                scope.url + (scope.url.includes("?") ? "&" : "?") + query;
+              const response = await fetch(url, {
+                method: "GET",
+                headers: scope.headers,
+                signal,
+                redirect: "error",
+              });
+              if (signal.aborted || !current()) {
+                void response.body?.cancel().catch(() => {});
+                return null;
+              }
+              return readPage(response, threadId, native.namespace, signal);
+            },
+            10_000,
+            abort.signal,
+          );
         },
         abort.signal,
       )
@@ -295,11 +321,16 @@ function ReceiptPage({
           page.current = null;
           budget.current?.report(0);
           setError(
-            abort.signal.aborted
-              ? "补充说明读取超时，请重试。"
-              : reason instanceof Error
-                ? reason.message
-                : "补充说明读取失败。",
+            !admitted && abort.signal.aborted
+              ? "补充说明读取排队超时，请重试。"
+              : typeof reason === "object" &&
+                  reason !== null &&
+                  "name" in reason &&
+                  reason.name === "TimeoutError"
+                ? "补充说明读取超时，请重试。"
+                : reason instanceof Error
+                  ? reason.message
+                  : "补充说明读取失败。",
           );
           setPhase("failed");
         })

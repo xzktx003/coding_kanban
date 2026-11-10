@@ -151,7 +151,7 @@ export function NativeCodeFence({
       : null;
   const highlightedPrefix =
     matched && streaming && code !== matched.code ? matched.html : null;
-  const highlightedSuffix = highlightedPrefix
+  const highlightedSuffix = highlightedPrefix && matched
     ? code.slice(matched.code.length)
     : "";
   const result = highlightedPrefix ? null : (matched?.html ?? null);

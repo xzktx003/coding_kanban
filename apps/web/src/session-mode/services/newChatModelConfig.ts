@@ -7,6 +7,19 @@ export interface NewChatModelConfig {
   modelProvider: string | null;
   reasoningEffort: string | null;
 }
+
+export function newChatModelConfigStatusLabel(state: {
+  cwd: string | null;
+  value?: NewChatModelConfig;
+  error?: string;
+  loading: boolean;
+}): string {
+  if (state.value) return state.value.model ?? "原生默认";
+  if (state.error) return "无法核实";
+  if (!state.cwd) return "选择项目";
+  return state.loading ? "读取中…" : "等待读取";
+}
+
 export async function readNewChatModelConfig(
   cwd: string,
 ): Promise<NewChatModelConfig> {

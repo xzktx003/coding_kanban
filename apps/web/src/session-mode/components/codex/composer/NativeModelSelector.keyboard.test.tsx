@@ -351,12 +351,13 @@ it("preserves pointer view-toggle focus on the menu container", async () => {
   );
 });
 
-it("does not select or close the power menu when its thumb is clicked", async () => {
+it("advances one effort when its power thumb is clicked and keeps the menu open", async () => {
+  state.effortValue = "medium";
   const { trigger } = mount();
   await open(trigger);
-  fireEvent.click(screen.getByRole("menuitem", { name: "强度" }));
+  fireEvent.pointerDown(document.querySelector(".session-native-power-thumb") as Element, { pointerId: 1, clientX: 40 });
   expect(screen.getByRole("menu")).toBeDefined();
-  expect(state.effort).not.toHaveBeenCalled();
+  expect(state.effort.mock.calls).toEqual([["high"]]);
   expect(state.submit).not.toHaveBeenCalled();
 });
 

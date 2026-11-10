@@ -116,7 +116,7 @@ function assertProtected(surface: Surface) {
   expect(JSON.parse(screen.getByTestId("e3-generic-items").textContent ?? "null")).toEqual([
     { id: "e3-dto-alias", label: "E3 目录模型", description: surface.response.data[0].description },
   ]);
-  for (const read of Object.values(api)) { expect(read).toHaveBeenCalledTimes(1); expect(read).toHaveBeenCalledWith(); }
+  for (const read of Object.values(api)) { expect(read).toHaveBeenCalledTimes(1); expect(read).toHaveBeenCalledWith({ signal: expect.any(AbortSignal) }); }
 }
 function assertReadOnly(surface: Surface) {
   assertProtected(surface);

@@ -248,6 +248,60 @@ it("keeps streaming assistant text outside the retained transcript and caps it",
   expect(rendered).toContain("中间内容因会话内存限制已省略");
 });
 
+it("keeps one large bounded live delta as one detached stream segment", () => {
+  const delta = "x".repeat(180 * 1024);
+  useCodexStore.getState().setStreamingAgentDeltas("thread", [
+    {
+      method: "item/agentMessage/delta",
+      params: { threadId: "thread", turnId: "turn", itemId: "message", delta },
+    },
+  ] as any);
+
+  const message = useCodexStore.getState().streamingAgentMessages.thread;
+  expect(message.preview).toBeUndefined();
+  expect(message.segments).toHaveLength(1);
+  expect(message.segments[0]).toBe(delta);
+  expect(message.current).toBe("");
+  expect(message.length).toBe(delta.length);
+
+  useCodexStore.getState().setStreamingAgentDeltas("thread", [
+    {
+      method: "item/agentMessage/delta",
+      params: {
+        threadId: "thread",
+        turnId: "turn",
+        itemId: "message",
+        delta: "continued tail",
+      },
+    },
+  ] as any);
+  const continued = useCodexStore.getState().streamingAgentMessages.thread;
+  expect(continued.segments.join("") + continued.current).toBe(
+    delta + "continued tail",
+  );
+});
+
+it("coalesces a bounded same-item live delta batch before segmenting", () => {
+  const deltas = Array.from(
+    { length: 30 },
+    (_, index) => `${index}:${"delta ".repeat(1000)}`,
+  );
+  useCodexStore.getState().setStreamingAgentDeltas(
+    "thread",
+    deltas.map((delta) => ({
+      method: "item/agentMessage/delta",
+      params: { threadId: "thread", turnId: "turn", itemId: "message", delta },
+    })) as any,
+  );
+
+  const message = useCodexStore.getState().streamingAgentMessages.thread;
+  expect(message.preview).toBeUndefined();
+  expect(message.segments).toHaveLength(1);
+  expect(message.segments[0]).toBe(deltas.join(""));
+  expect(message.current).toBe("");
+  expect(message.length).toBe(deltas.join("").length);
+});
+
 it("appends to the bounded stream tail without rebuilding the retained head", () => {
   const append = (delta: string) =>
     useCodexStore.getState().setStreamingAgentDeltas("thread", [
@@ -448,12 +502,10 @@ it("accepts changed token usage and status flags without changing transcript ide
     { type: "active", activeFlags: ["waitingOnApproval"] },
     { type: "idle" },
   ] as const)
-    useCodexStore
-      .getState()
-      .addEvent(id, {
-        method: "thread/status/changed",
-        params: { threadId: id, status },
-      } as any);
+    useCodexStore.getState().addEvent(id, {
+      method: "thread/status/changed",
+      params: { threadId: id, status },
+    } as any);
   expect(useCodexStore.getState().threadStatusMap[id].type).toBe("idle");
   expect(useCodexStore.getState().events).toBe(events);
 });

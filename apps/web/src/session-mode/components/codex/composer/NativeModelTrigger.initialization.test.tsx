@@ -82,6 +82,16 @@ it("initializes the visible new-chat model before sending and preserves a suppor
   ).toBe(storedBefore);
 });
 
+it("shows the logged-out custom medium label when the home catalog is empty", () => {
+  fixture.models = [];
+  render(<NativeModelTrigger />);
+  expect(screen.getByRole("button", { name: "自定义，中" })).toBeTruthy();
+  expect(screen.getByText("自定义")).toBeTruthy();
+  expect(screen.getByText("中")).toBeTruthy();
+  expect(screen.queryByText("选择模型")).toBeNull();
+  expect(useConfigStore.getState().model).toBe("");
+});
+
 it("does not borrow the default model for an existing unknown thread", () => {
   fixture.threadId = "unknown-thread";
   render(<NativeModelTrigger />);

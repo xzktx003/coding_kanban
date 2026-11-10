@@ -16,6 +16,10 @@ const PICKER_REASONING_EFFORTS = new Set<ReasoningEffort>([
 
 // Native bC/Pzt fallback for an absent canonical model. Commands and visible
 // picker choices have separate pending/snapshot guards; the raw catalog stays intact.
+export const NATIVE_LOGGED_OUT_REASONING_OPTIONS = Object.freeze<
+  ReasoningEffort[]
+>(["minimal", "low", "medium", "high", "xhigh", "max"]);
+
 export const NATIVE_UNKNOWN_REASONING_OPTIONS = Object.freeze<
   ReasoningEffort[]
 >(["minimal", "low", "medium", "high", "xhigh", "max"]);

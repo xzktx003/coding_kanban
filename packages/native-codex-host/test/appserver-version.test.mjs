@@ -28,8 +28,18 @@ test("unknown official versions remain unavailable without probing or registerin
   }
   assert.equal(probes, 0);
 });
+test("the pinned 26.51021.22027 baseline passes the version gate before receipt checks", () => {
+  const sender = createNativeAppServerSender({
+    provider: {
+      codexMcpConnection: { registerProvider() {}, sendRequest() {} },
+    },
+    officialVersion: "26.51021.22027",
+  });
+  assert.equal(sender.reason, "private send receipt store is unavailable");
+  sender.dispose();
+});
 test("a known version still requires the exact original connection methods", () => {
-  for (const officialVersion of ["26.51002.51308", "26.51007.21434"]) {
+  for (const officialVersion of ["26.51002.51308", "26.51007.21434", "26.51021.22027"]) {
     for (const codexMcpConnection of [
       undefined,
       {},

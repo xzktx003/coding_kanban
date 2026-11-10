@@ -857,6 +857,28 @@ it.each(["", "中文😄e\u0301", "head\ud800middle\udc00tail", "a\u0000b"])(
   },
 );
 
+it("reuses its UTF-16 scratch storage across repeated streaming-sized copies", () => {
+  const NativeUint16Array = globalThis.Uint16Array;
+  let allocations = 0;
+  globalThis.Uint16Array = new Proxy(NativeUint16Array, {
+    construct(target, args, newTarget) {
+      allocations++;
+      return Reflect.construct(target, args, newTarget);
+    },
+  }) as Uint16ArrayConstructor;
+  try {
+    const values = [
+      `${"a".repeat(4095)}😄${"b".repeat(4097)}\ud800`,
+      `${"c".repeat(4096)}\udc00${"d".repeat(8192)}`,
+    ];
+    const copies = values.map(copyTranscriptText);
+    expect(copies).toEqual(values);
+    expect(allocations).toBe(0);
+  } finally {
+    globalThis.Uint16Array = NativeUint16Array;
+  }
+});
+
 it("bounds a protected user message before it can exceed the default thread budget", () => {
   const source = user("live", "x".repeat(5 * 1024 * 1024));
   const result = compactCodexTranscript([source], {

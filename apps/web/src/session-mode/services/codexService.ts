@@ -360,15 +360,16 @@ function captureThreadStart() {
     webSearchRequest,
     threadCwdMode,
   } = useConfigStore.getState();
+  const cwd = useWorkspaceStore.getState().cwd;
   return {
     executionIntent: executionIntentId(),
     executionScope: executionScope(),
     executionSelection: structuredClone(
-      executionSelection(useWorkspaceStore.getState().cwd),
+      executionSelection(cwd),
     ),
     epoch: runtimeEpoch,
     scope: captureCodexOperationScope(),
-    cwd: useWorkspaceStore.getState().cwd,
+    cwd,
     config: structuredClone({
       model,
       modelProvider,
@@ -383,9 +384,13 @@ function captureThreadStart() {
       webSearchRequest,
       threadCwdMode,
     }),
-    modelConfigRead: modelSelectionMode === "follow-config"
-      ? readNewChatModelConfig(useWorkspaceStore.getState().cwd ?? "").then(value => ({value}), error => ({error}))
-      : null,
+    modelConfigRead:
+      modelSelectionMode === "follow-config" && cwd
+        ? readNewChatModelConfig(cwd).then(
+            (value) => ({ value }),
+            (error) => ({ error }),
+          )
+        : null,
     agentsConfig: structuredClone(buildAgentsConfigFragment()),
   };
 }
@@ -1873,7 +1878,6 @@ export const codexService = {
     }
   },
   async listSkills(cwd: string | null) {
-    if (!cwd) return [];
     try {
       const response = await skillList(cwd);
       return response.data;

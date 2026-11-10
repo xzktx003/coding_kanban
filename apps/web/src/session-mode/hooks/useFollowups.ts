@@ -7,8 +7,14 @@ import {
 } from "../session-dom";
 const EMPTY = emptyFollowupThread();
 
-type Observer = { users: number; stop: () => void };
+type Observer = {
+  users: number;
+  stop: () => void;
+  retryNow: () => Promise<void>;
+};
 const observers = new Map<string, Observer>();
+const POLL_INTERVAL_MS = 1500;
+const MAX_ERROR_POLL_INTERVAL_MS = 15_000;
 
 /** Mounted composers/dialogs share one visible observer of a thread's queue. */
 function observe(threadId: string): () => void {
@@ -17,25 +23,40 @@ function observe(threadId: string): () => void {
   else {
     let stopped = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    let busy = false;
+    let inFlight: Promise<void> | null = null;
+    let consecutiveFailures = 0;
     const visible = () =>
       !document.hidden &&
       navigator.onLine !== false &&
       isAgentInteractionVisible();
-    const load = async () => {
-      if (stopped || busy || !visible()) return;
-      busy = true;
+    const load = (explicit = false): Promise<void> => {
+      if (stopped || (!explicit && !visible())) return Promise.resolve();
+      if (inFlight) return inFlight;
       clearTimeout(timer);
-      try {
-        // The service coalesces this read with background synchronization and
-        // send-receipt verification. Do not abort a shared read when this UI
-        // leaves: those other consumers may still need its result.
-        await followupService.load(threadId);
-      } catch {
-      } finally {
-        busy = false;
-        if (!stopped && visible()) timer = setTimeout(() => void load(), 1500);
-      }
+      const request = (async () => {
+        try {
+          // The service coalesces this read with background synchronization and
+          // send-receipt verification. Do not abort a shared read when this UI
+          // leaves: those other consumers may still need its result.
+          await followupService.load(threadId);
+          consecutiveFailures = 0;
+        } catch {
+          consecutiveFailures += 1;
+        } finally {
+          inFlight = null;
+          if (!stopped && visible()) {
+            const delay = consecutiveFailures
+              ? Math.min(
+                  POLL_INTERVAL_MS * 2 ** (consecutiveFailures - 1),
+                  MAX_ERROR_POLL_INTERVAL_MS,
+                )
+              : POLL_INTERVAL_MS;
+            timer = setTimeout(() => void load(), delay);
+          }
+        }
+      })();
+      inFlight = request;
+      return request;
     };
     const wake = () => {
       clearTimeout(timer);
@@ -43,6 +64,11 @@ function observe(threadId: string): () => void {
     };
     observer = {
       users: 1,
+      retryNow: () => {
+        consecutiveFailures = 0;
+        clearTimeout(timer);
+        return load(true);
+      },
       stop: () => {
         stopped = true;
         clearTimeout(timer);
@@ -67,6 +93,16 @@ function observe(threadId: string): () => void {
       if (observers.get(threadId) === retained) observers.delete(threadId);
     }
   };
+}
+
+/** An explicit user retry shares the visible observer and resets its backoff. */
+export function retryFollowupsNow(threadId: string): Promise<void> {
+  const observer = observers.get(threadId);
+  if (observer) return observer.retryNow();
+  return followupService.load(threadId).then(
+    () => undefined,
+    () => undefined,
+  );
 }
 
 export function useFollowups(threadId: string | null) {

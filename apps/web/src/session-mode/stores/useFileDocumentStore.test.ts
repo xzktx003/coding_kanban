@@ -32,6 +32,38 @@ it("save acknowledgement does not discard typing that happened while saving", ()
     version: "v2",
   });
 });
+it("a confirmed save keeps a revert as a dirty draft and clears the uncertainty", () => {
+  const store = useFileDocumentStore.getState();
+  store.load("/p/a", "/p", "before", "v1");
+  store.edit("/p/a", "submitted");
+  store.markSaveUnconfirmed("/p/a");
+  store.edit("/p/a", "before");
+  store.saved("/p/a", "submitted", "v2");
+  expect(useFileDocumentStore.getState().documents["/p/a"]).toMatchObject({
+    base: "submitted",
+    draft: "before",
+    version: "v2",
+    saveUnconfirmed: false,
+  });
+  expect(
+    JSON.parse(localStorage.getItem("kanban.session.file-drafts")!).state
+      .documents["/p/a"].draft,
+  ).toBe("before");
+});
+it("an explicitly discarded uncertain draft no longer survives rehydration", () => {
+  const store = useFileDocumentStore.getState();
+  store.load("/p/a", "/p", "before", "v1");
+  store.markSaveUnconfirmed("/p/a");
+  expect(
+    JSON.parse(localStorage.getItem("kanban.session.file-drafts")!).state
+      .documents["/p/a"],
+  ).toBeDefined();
+  store.discard("/p/a");
+  expect(
+    JSON.parse(localStorage.getItem("kanban.session.file-drafts")!).state
+      .documents["/p/a"],
+  ).toBeUndefined();
+});
 it("renaming a directory relocates descendant drafts and discard explicitly returns to the saved content", () => {
   const s = useFileDocumentStore.getState();
   s.load("/p/f/a", "/p", "original", "v1");
@@ -45,4 +77,35 @@ it("renaming a directory relocates descendant drafts and discard explicitly retu
   expect(useFileDocumentStore.getState().documents["/p/renamed/a"].draft).toBe(
     "original",
   );
+});
+it("replaces a confirmed disk snapshot only if the captured draft has not changed", () => {
+  const store = useFileDocumentStore.getState();
+  store.load("/p/a", "/p", "old", "v1");
+  store.edit("/p/a", "draft");
+  const captured = useFileDocumentStore.getState().documents["/p/a"];
+  store.edit("/p/a", "newer draft");
+  expect(store.replaceIfUnchanged("/p/a", captured, "disk", "v2")).toBe(false);
+  expect(useFileDocumentStore.getState().documents["/p/a"].draft).toBe(
+    "newer draft",
+  );
+  const current = useFileDocumentStore.getState().documents["/p/a"];
+  expect(store.replaceIfUnchanged("/p/a", current, "disk", "v2")).toBe(true);
+  expect(useFileDocumentStore.getState().documents["/p/a"]).toMatchObject({
+    base: "disk",
+    draft: "disk",
+    version: "v2",
+    diskChanged: false,
+  });
+});
+it("a disk comparison cannot replace a draft after a new save starts", () => {
+  const store = useFileDocumentStore.getState();
+  store.load("/p/a", "/p", "old", "v1");
+  store.edit("/p/a", "draft");
+  const captured = useFileDocumentStore.getState().documents["/p/a"];
+  store.markSaveUnconfirmed("/p/a");
+  expect(store.replaceIfUnchanged("/p/a", captured, "disk", "v2")).toBe(false);
+  expect(useFileDocumentStore.getState().documents["/p/a"]).toMatchObject({
+    draft: "draft",
+    saveUnconfirmed: true,
+  });
 });

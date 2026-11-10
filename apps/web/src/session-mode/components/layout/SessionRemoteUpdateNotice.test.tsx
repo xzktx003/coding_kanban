@@ -49,3 +49,31 @@ test("hidden session mode waits until it becomes active before polling", async (
   await screen.findByRole("button", { name: /远程有新版本/ });
   expect(getAppVersion).toHaveBeenCalledOnce();
 });
+
+test("session mode explains why a remote update is blocked", async () => {
+  getAppVersion.mockResolvedValue({
+    autoUpdate: {
+      enabled: true,
+      intervalMinutes: 10,
+      phase: "conflict",
+      branch: "main",
+      remoteHead: "abcdef123456",
+      lastCheckedAt: null,
+      lastUpdatedAt: null,
+      conflictReason: "diverged",
+      message: "本地与远程分支已经分叉，需要手动处理后再更新。",
+    },
+  });
+  render(<SessionRemoteUpdateNotice active onOpenUpdate={vi.fn()} />);
+
+  const button = await screen.findByRole("button", {
+    name: /远程更新存在冲突/,
+  });
+  expect(button.textContent).toContain("本地与远程已分叉");
+  expect(button.getAttribute("title")).toContain(
+    "本地与远程分支已经分叉，需要手动处理后再更新。",
+  );
+  expect(button.getAttribute("aria-label")).toContain(
+    "本地与远程分支已经分叉，需要手动处理后再更新。",
+  );
+});

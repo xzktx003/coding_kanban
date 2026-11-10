@@ -98,7 +98,6 @@ export function SessionProjectLabel({
         <DropdownMenuTrigger asChild>
           <button
             type="button"
-            id={id}
             className="session-identity-project"
             aria-label={`项目详情：${project.label}`}
             title={project.path || "这条会话尚无项目目录"}
@@ -111,6 +110,20 @@ export function SessionProjectLabel({
             <span>{project.label}</span>
           </button>
         </DropdownMenuTrigger>
+        {id && (
+          <span id={id} className="sr-only">
+            {project.label}
+          </span>
+        )}
+        {id && (
+          <span
+            className="session-identity-project session-identity-project-static"
+            aria-hidden="true"
+          >
+            <Folder size={11} />
+            <span>{project.label}</span>
+          </span>
+        )}
         <DropdownMenuContent
           align="start"
           className="session-project-details-menu"

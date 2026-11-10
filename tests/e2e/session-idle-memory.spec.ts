@@ -474,6 +474,8 @@ test("long-running native events keep warm bodies bounded with natural garbage c
   const samples: Array<{
     seconds: number;
     heapBytes: number;
+    heapTotalBytes: number;
+    embedderHeapBytes: number;
     backingStorageBytes: number;
     documents: number;
     nodes: number;
@@ -555,6 +557,8 @@ test("long-running native events keep warm bodies bounded with natural garbage c
       samples.push({
         seconds: (Date.now() - start) / 1000,
         heapBytes: heap.usedSize,
+        heapTotalBytes: heap.totalSize,
+        embedderHeapBytes: heap.embedderHeapUsedSize,
         backingStorageBytes: heap.backingStorageSize,
         documents: dom.documents,
         nodes: dom.nodes,

@@ -38,6 +38,19 @@ it("renders flat native assistant content with math and inline code", async () =
   await waitFor(() => expect(container.querySelector(".katex")).not.toBeNull());
   expect(screen.getByText("index").tagName).toBe("CODE");
 });
+it("renders native display-math brackets as a KaTeX block", async () => {
+  const formula = String.raw`\[
+S_A=\sum\left|\frac{\partial L}{\partial \hat X}(X-\hat X)\right|
+\]`;
+  const { container } = render(
+    <AgentMessageItem threadId="own" text={formula} />,
+  );
+
+  await waitFor(() =>
+    expect(container.querySelector(".katex-display .katex")).not.toBeNull(),
+  );
+  expect(container.textContent).not.toContain("\\[");
+});
 it("keeps dollar-delimited text literal, as the original plugin renderer does", () => {
   render(
     <AgentMessageItem

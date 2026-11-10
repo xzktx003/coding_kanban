@@ -54,16 +54,35 @@ export function SessionRemoteUpdateNotice({
   const version = [status.branch, status.remoteHead?.slice(0, 8)]
     .filter(Boolean)
     .join(" @ ");
+  const detail =
+    status.message?.trim() ||
+    (status.conflictReason === "local-changes"
+      ? "本地未提交修改会被远程版本覆盖，请先处理本地改动。"
+      : status.conflictReason === "diverged"
+        ? "本地与远程分支已经分叉，需要手动处理后再更新。"
+        : status.conflictReason === "merge-blocked"
+          ? "Git 无法安全快进，请切换到终端模式查看。"
+          : null);
+  const displayLabel =
+    status.phase === "conflict"
+      ? status.conflictReason === "local-changes"
+        ? "本地修改阻止更新"
+        : status.conflictReason === "diverged"
+          ? "本地与远程已分叉"
+          : status.conflictReason === "merge-blocked"
+            ? "无法安全快进"
+            : "远程更新受阻"
+      : label;
   return (
     <button
       type="button"
       className="session-remote-update-notice"
-      aria-label={`${label}，切换到终端模式处理`}
-      title={`${label}${version ? `：${version}` : ""}。切换到终端模式处理`}
+      aria-label={`${label}${detail ? `：${detail}` : ""}，切换到终端模式处理`}
+      title={`${label}${version ? `：${version}` : ""}${detail ? `。${detail}` : ""}。切换到终端模式查看`}
       onClick={onOpenUpdate}
     >
       <Download size={15} aria-hidden="true" />
-      <span>{label}</span>
+      <span>{displayLabel}</span>
     </button>
   );
 }

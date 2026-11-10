@@ -397,8 +397,10 @@ test("native last-user edit preserves original remote attachment and settings ac
   await page
     .getByRole("textbox", { name: "编辑消息" })
     .fill("Edited independent message");
-  await page.locator(".codex-native-inline-editor").getByRole("button", { name: "发送", exact: true }).click();
-  await page.getByRole("button", { name: "继续", exact: true }).click();
+  await page
+    .locator(".codex-native-inline-editor")
+    .getByRole("button", { name: "发送", exact: true })
+    .click();
   await expect
     .poll(() => calls.filter((call) => call.kind === "rollback").length)
     .toBe(1);
@@ -529,8 +531,10 @@ test("unknown native edit send preserves accessible buffer after rollback and ne
   await page
     .getByRole("textbox", { name: "编辑消息" })
     .fill("Retained unknown edit");
-  await page.locator(".codex-native-inline-editor").getByRole("button", { name: "发送", exact: true }).click();
-  await page.getByRole("button", { name: "继续", exact: true }).click();
+  await page
+    .locator(".codex-native-inline-editor")
+    .getByRole("button", { name: "发送", exact: true })
+    .click();
   const recovery = page.locator(".codex-thread-edit-recovery");
   await expect(recovery).toContainText("编辑结果待确认");
   await recovery.locator("summary").click();

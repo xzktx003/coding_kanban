@@ -19,7 +19,9 @@ PLAYWRIGHT_SKIP_WEBSERVER=1 pnpm exec playwright test \
 
 `/reference.json` reports the official package version and SHA-256 of all pinned entry assets. `--extension /absolute/path/to/extension` selects an explicitly supplied package with those exact asset names. A different official build fails at startup instead of silently testing an obsolete component.
 
-`native-goal-reference.js` initializes the original exports and renders the actual card and dialogs. `native-goal-draft-reference.js` and `native-goal-completion-reference.js` use the exact extracted `awa` / `lx` bodies with original exported icon, formatter and Intl primitives; they do not run the full official composer or assistant renderer. Symbol bindings are pinned to `26.51007.21434` and must be audited on upgrades. No official asset is patched.
+The app entry harness (`native-app.html` -> `index-*.js` -> `app-main-*.js`) and the thread/composer discovery modules (`native-thread-reference.js`, `native-composer-reference.js`) are pinned to `26.51021.22027` and reference that build's content-addressed chunks (see `reference-assets.json`).
+
+`native-goal-reference.js` initializes the original exports and renders the actual card and dialogs. `native-goal-draft-reference.js` and `native-goal-completion-reference.js` use the exact extracted `awa` / `lx` bodies with original exported icon, formatter and Intl primitives; they do not run the full official composer or assistant renderer. Those goal/transcript symbol bindings are still pinned to `26.51007.21434` (their imported `app-initial-*.js` chunks do not exist in `26.51021.22027`) and MUST be re-audited before the goal/transcript reference specs can run against the `26.51021.22027` baseline. No official asset is patched.
 
 The reference tests compare six statuses, text, action icons, geometry, two themes, editor and replacement dialogs. Touch tests preserve a separate 44px usability requirement. Without `CODEX_GOAL_REFERENCE_URL`, reference-only cases explicitly skip and cannot be counted as parity acceptance.
 

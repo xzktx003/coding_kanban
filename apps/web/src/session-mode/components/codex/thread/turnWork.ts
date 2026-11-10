@@ -30,6 +30,8 @@ export function projectTurnWork(
     status: string;
     startedAtMs: number | null;
     durationMs: number | null;
+    /** True when the row carries the turn identity but lifecycle evidence is absent. */
+    inferred: boolean;
   };
   const groups = new Map<string, Meta>();
   const valid = (value: unknown): value is number =>
@@ -62,6 +64,7 @@ export function projectTurnWork(
       status: event.method === "turn/started" ? "inProgress" : turn.status,
       startedAtMs,
       durationMs,
+      inferred: false,
     });
   }
   if (timing && ownerId) {
@@ -80,17 +83,30 @@ export function projectTurnWork(
       durationMs:
         previous?.durationMs ??
         (valid(timing.durationMs) ? timing.durationMs : null),
+      inferred: false,
     });
   }
-  const owner = (row: ActivityDisplayRow) => {
+  const ownerDetails = (row: ActivityDisplayRow) => {
     if (row.activity)
-      return turnWorkKey(row.activity.threadId, row.activity.turnId);
+      return {
+        key: turnWorkKey(row.activity.threadId, row.activity.turnId),
+        threadId: row.activity.threadId,
+        turnId: row.activity.turnId,
+      };
     if (row.activityEntry)
-      return turnWorkKey(row.activityEntry.threadId, row.activityEntry.turnId);
+      return {
+        key: turnWorkKey(row.activityEntry.threadId, row.activityEntry.turnId),
+        threadId: row.activityEntry.threadId,
+        turnId: row.activityEntry.turnId,
+      };
     if (row.item.kind === "cmdGroup") {
       const source = row.item.actionSources[0];
       return source?.threadId && source.turnId
-        ? turnWorkKey(source.threadId, source.turnId)
+        ? {
+            key: turnWorkKey(source.threadId, source.turnId),
+            threadId: source.threadId,
+            turnId: source.turnId,
+          }
         : null;
     }
     const event = row.item.event,
@@ -102,8 +118,15 @@ export function projectTurnWork(
         : "turnId" in params
           ? params.turnId
           : null;
-    return turnId ? turnWorkKey(params.threadId, turnId) : null;
+    return turnId
+      ? {
+          key: turnWorkKey(params.threadId, turnId),
+          threadId: params.threadId,
+          turnId,
+        }
+      : null;
   };
+  const owner = (row: ActivityDisplayRow) => ownerDetails(row)?.key ?? null;
   const finalIds = new Map<string, Set<string>>();
   for (const event of events) {
     if (
@@ -117,30 +140,8 @@ export function projectTurnWork(
       finalIds.set(key, ids);
     }
   }
-  // Legacy histories do not always carry phase. Only a confirmed completed
-  // turn permits its last unclassified assistant message to be the report.
-  const legacyFinal = new Map<string, string>();
-  for (const row of rows) {
-    const key = owner(row);
-    if (
-      !key ||
-      groups.get(key)?.status !== "completed" ||
-      finalIds.has(key) ||
-      row.item.kind !== "event"
-    )
-      continue;
-    const event = row.item.event;
-    if (
-      event.method === "item/completed" &&
-      event.params.item.type === "agentMessage" &&
-      event.params.item.phase == null &&
-      !readQuestions(event.params.item).length
-    )
-      legacyFinal.set(key, row.key);
-  }
   const isProcess = (row: ActivityDisplayRow, key: string) => {
     const meta = groups.get(key);
-    if (legacyFinal.get(key) === row.key) return false;
     if (row.activity || row.activityEntry || row.item.kind === "cmdGroup")
       return true;
     const event = row.item.event;
@@ -167,12 +168,17 @@ export function projectTurnWork(
       meta?.status !== "inProgress"
     )
       return false;
-    if (item.type === "agentMessage")
+    if (item.type === "agentMessage") {
+      // A history page without lifecycle events cannot tell commentary from a
+      // final answer when phase was omitted. Keep that text public rather than
+      // hiding a possible report behind the compact work row.
+      if (meta?.inferred && item.phase == null) return false;
       return (
         item.phase !== "final_answer" &&
         !finalIds.get(key)?.has(item.id) &&
         !readQuestions(item).length
       );
+    }
     return [
       "reasoning",
       "plan",
@@ -189,10 +195,53 @@ export function projectTurnWork(
       "imageGeneration",
     ].includes(item.type);
   };
+
+  // Cached/history pages can begin at an item boundary and omit both turn
+  // lifecycle notifications. Keep those process rows under one compact work
+  // header, but leave timing and terminal state unknown until native evidence
+  // arrives. This avoids rendering one completed reasoning/command row per
+  // protocol item without inventing a duration or a successful turn result.
+  for (const row of rows) {
+    const details = ownerDetails(row);
+    if (!details || groups.has(details.key) || !isProcess(row, details.key))
+      continue;
+    groups.set(details.key, {
+      threadId: details.threadId,
+      turnId: details.turnId,
+      status: "history",
+      startedAtMs: null,
+      durationMs: null,
+      inferred: true,
+    });
+  }
+
+  // Legacy histories do not always carry phase. Only a confirmed completed
+  // turn permits its last unclassified assistant message to be the report.
+  const legacyFinal = new Map<string, string>();
+  for (const row of rows) {
+    const key = owner(row);
+    if (
+      !key ||
+      groups.get(key)?.inferred ||
+      groups.get(key)?.status !== "completed" ||
+      finalIds.has(key) ||
+      row.item.kind !== "event"
+    )
+      continue;
+    const event = row.item.event;
+    if (
+      event.method === "item/completed" &&
+      event.params.item.type === "agentMessage" &&
+      event.params.item.phase == null &&
+      !readQuestions(event.params.item).length
+    )
+      legacyFinal.set(key, row.key);
+  }
   const processes = new Map<string, Set<string>>();
   for (const row of rows) {
     const key = owner(row);
     if (!key || !groups.has(key) || !isProcess(row, key)) continue;
+    if (legacyFinal.get(key) === row.key) continue;
     const keys = processes.get(key) ?? new Set<string>();
     keys.add(row.key);
     processes.set(key, keys);
@@ -213,7 +262,8 @@ export function projectTurnWork(
       startedAtMs: meta.startedAtMs,
       durationMs: meta.durationMs,
       processKeys,
-      expanded: !running && !terminal ? true : opened.has(key),
+      expanded:
+        !running && !terminal && !meta.inferred ? true : opened.has(key),
     });
   }
   // Keep the latest public progress and current activity visible in a running

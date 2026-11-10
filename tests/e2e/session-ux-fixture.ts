@@ -225,6 +225,13 @@ export async function installSessionUxFixture(
         },
         requiresOpenaiAuth: false,
       };
+    else if (path.endsWith("/model/config/read"))
+      json = {
+        status: "ready",
+        model: "fixture-model",
+        modelProvider: "openai",
+        reasoningEffort: "medium",
+      };
     else if (path.endsWith("/config/read")) json = { config: {} };
     else if (path.endsWith("/subagents/snapshot"))
       json = {

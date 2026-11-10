@@ -256,13 +256,6 @@ export const followupService = {
     const nativeContext = await readNativeOperationContext();
     if (typeof nativeContext.scopeToken !== "string" || !nativeContext.scopeToken || !isCodexOperationScopeCurrent(operationScope))
       throw new MutationNotStartedError("运行服务范围尚未确认，消息未发送，草稿已保留");
-    beginDeliveryEcho({ ...submittedData, id });
-    const echoKey = JSON.stringify([threadId, id]);
-    const submittedEcho = useCodexDeliveryStore.getState().entries[echoKey];
-    if (useCodexStore.getState().currentThreadId === threadId)
-      window.dispatchEvent(
-        new CustomEvent("session-message-submitted", { detail: { threadId } }),
-      );
     try {
       let result: FollowupThread;
       try {
@@ -314,11 +307,31 @@ export const followupService = {
         throw new Error(
           (item.error ?? "消息未确认送达") + "；内容已保留，请在队列中处理",
         );
+      // The message enters the transcript only after the server receipt confirms
+      // it was accepted. During the occupancy check + submit the draft stays in
+      // the input (send button shows its own spinner), so no duplicate "正在提交"
+      // echo appears alongside the still-checking state.
+      beginDeliveryEcho({ ...submittedData, id });
+      reconcileDeliveryEchoes(threadId, result);
+      if (useCodexStore.getState().currentThreadId === threadId)
+        window.dispatchEvent(
+          new CustomEvent("session-message-submitted", { detail: { threadId } }),
+        );
       return result;
     } catch (error) {
-      if (isCodexOperationScopeCurrent(operationScope) ||
-          useCodexDeliveryStore.getState().entries[echoKey] === submittedEcho)
-        failDeliveryEcho(threadId, id, isCodexOperationScopeCurrent(operationScope) && isExplicitRequestRejection(error));
+      if (isCodexOperationScopeCurrent(operationScope)) {
+        // On failure the message stays in the input draft (no transcript echo),
+        // so the user can retry. Keep a confirmed-unknown delivery tracked so a
+        // later resubmission stays blocked, but never for a receipt the server
+        // already recorded in the queue.
+        const recorded = useFollowupStore
+          .getState()
+          .threads[threadId]?.items.some(
+            (m) => m.id === id || m.nativeClientUserMessageId === id,
+          );
+        if (!recorded)
+          failDeliveryEcho(threadId, id, isExplicitRequestRejection(error));
+      }
       throw error;
     }
   },

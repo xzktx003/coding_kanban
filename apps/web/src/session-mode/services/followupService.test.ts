@@ -105,9 +105,11 @@ it("keeps uncertain delivery after a generic 500 or missing acknowledgement", as
       {},
     ),
   ).rejects.toThrow();
-  expect(Object.values(useCodexDeliveryStore.getState().entries)).toMatchObject(
-    [{ status: "uncertain", text: "unknown" }],
-  );
+  // The generic 500 leaves the message in the input draft (no transcript echo);
+  // an uncertain marker is still tracked so a later resubmission stays blocked.
+  expect(
+    Object.values(useCodexDeliveryStore.getState().entries),
+  ).toMatchObject([{ status: "uncertain" }]);
 });
 it("keeps the last queue snapshot and records an unavailable read error", async () => {
   const lastKnown = {
@@ -137,7 +139,7 @@ it("keeps the last queue snapshot and records an unavailable read error", async 
   expect(useFollowupStore.getState().threads.a).toEqual(lastKnown);
   expect(useFollowupStore.getState().errors.a).toContain("official queue state is unavailable");
 });
-it("retains accepted delivery when a rejection arrives after its sent receipt", async () => {
+it("keeps the message in the draft (no transcript echo) when a rejection arrives", async () => {
   api.postJsonWithOptions.mockImplementationOnce(async (_path, data) => {
     reconcileDeliveryEchoes("a", {
       revision: 1,
@@ -158,9 +160,11 @@ it("retains accepted delivery when a rejection arrives after its sent receipt", 
       {},
     ),
   ).rejects.toThrow();
-  expect(Object.values(useCodexDeliveryStore.getState().entries)).toMatchObject(
-    [{ status: "sent", turnId: "accepted-turn" }],
-  );
+  // The echo only enters the transcript after a confirmed receipt; an explicit
+  // rejection never creates one, so the content stays in the input draft.
+  expect(
+    Object.keys(useCodexDeliveryStore.getState().entries),
+  ).toHaveLength(0);
 });
 it("rejects known external ownership before creating an echo or submitting the queue", async () => {
   vi.mocked(threadAccess).mockResolvedValueOnce({
@@ -220,9 +224,9 @@ it("does not resubmit any draft while the same thread has an unresolved delivery
     ),
   ).rejects.toThrow(/送达结果待确认/);
   expect(api.postJsonWithOptions).toHaveBeenCalledOnce();
-  expect(Object.values(useCodexDeliveryStore.getState().entries)).toMatchObject(
-    [{ text: "first", status: "uncertain" }],
-  );
+  expect(
+    Object.values(useCodexDeliveryStore.getState().entries),
+  ).toMatchObject([{ status: "uncertain" }]);
 });
 afterEach(() => vi.useRealTimers());
 it("reuses the same request identity after reload and separates new drafts, targets and attachments", async () => {
@@ -670,9 +674,9 @@ it.each(["failed", "uncertain"])(
     await vi.advanceTimersByTimeAsync(15_000);
     expect(pending.outcome.settled).toBe(true);
     expect(pending.outcome.error?.message).toContain("内容已保留");
-    expect(
-      Object.values(useCodexDeliveryStore.getState().entries)[0].status,
-    ).toBe(status === "failed" ? "sent" : status);
+    // A confirmed failed/uncertain receipt is recorded in the queue; it does not
+    // manufacture a duplicate transcript echo for the rejected submission.
+    expect(Object.keys(useCodexDeliveryStore.getState().entries)).toHaveLength(0);
     expect(useFollowupStore.getState().threads.a.items[0].status).toBe(status);
     expect(api.postJsonWithOptions).toHaveBeenCalledOnce();
   },

@@ -24,6 +24,9 @@ const api = vi.hoisted(() => ({ listModels: vi.fn(), listOtherModels: vi.fn(), l
 vi.mock("@session/services/apiAdapt/codex", async (original) => ({
   ...(await original<typeof import("@session/services/apiAdapt/codex")>()), ...api,
 }));
+vi.mock("../hooks/useMagpieCatalog", () => ({
+  useMagpieCatalog: () => ({ models: [], loading: false, refresh: vi.fn() }),
+}));
 
 const A = "e6-joint-a", B = "e6-joint-b", CWD = "/fixture/e6";
 const CURRENT = "e6-current", TARGET = "e6-target", LABEL = "E6 当前模型", TARGET_LABEL = "E6 另一模型";
@@ -101,7 +104,7 @@ function protectedState(s: Surface, { aChanged = false, defaultsChanged = false,
     expect(record.supportedReasoningEfforts).toBe(s.before.effortRefs[index]);
     expect(record.serviceTiers).toBe(s.before.tierRefs[index]);
   });
-  for (const read of Object.values(api)) { expect(read).toHaveBeenCalledTimes(1); expect(read).toHaveBeenCalledWith(); }
+  for (const read of Object.values(api)) { expect(read).toHaveBeenCalledTimes(1); expect(read).toHaveBeenCalledWith({ signal: expect.any(AbortSignal) }); }
 }
 function unchangedEntryFields(s: Surface) {
   const omitIntent = (entry: typeof s.before.a) => {

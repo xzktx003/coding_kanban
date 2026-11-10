@@ -15,5 +15,5 @@ export function nativeComposerPlaceholder({
   // before its first turn has produced timing or transcript metadata.
   return threadId !== null
     ? "提出后续变更要求"
-    : "可向 Codex 询问任何问题。输入 @ 使用插件或提及文件";
+    : "随心输入";
 }

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useRef } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useSidebar, Sidebar } from "@session/components/ui/sidebar";
 import { OptionalSessionPanel } from "./OptionalSessionPanel";
 
@@ -8,6 +8,32 @@ const AppSidebar = lazy(() =>
 const RightPanel = lazy(() =>
   import("./RightPanel").then((module) => ({ default: module.RightPanel })),
 );
+
+function SlowPanelLoading({ onClose }: { onClose: () => void }) {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setSlow(true), 10_000);
+    return () => clearTimeout(timer);
+  }, []);
+  return (
+    <div className="space-y-2 p-4 text-sm text-muted-foreground">
+      <p role="status">
+        {slow
+          ? "工具面板加载时间较长，仍在尝试。你可以关闭面板并继续会话。"
+          : "正在加载工具面板…"}
+      </p>
+      {slow && (
+        <button
+          type="button"
+          className="min-h-11 rounded-md border px-3 text-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          onClick={onClose}
+        >
+          关闭工具面板
+        </button>
+      )}
+    </div>
+  );
+}
 
 /** A closed panel does not acquire its optional module graph. Once displayed,
  * keep the exact tree mounted, including editors and terminal connections. */
@@ -52,13 +78,7 @@ export function DeferredRightPanel({
   return (
     <OptionalSessionPanel label="工具面板" visible={visible} onClose={onClose}>
       <Suspense
-        fallback={
-          visible ? (
-            <div role="status" className="p-4 text-sm text-muted-foreground">
-              正在加载工具面板…
-            </div>
-          ) : null
-        }
+        fallback={visible ? <SlowPanelLoading onClose={onClose} /> : null}
       >
         <RightPanel visible={visible} />
       </Suspense>

@@ -12,9 +12,17 @@ const EMPTY_EVENTS: ServerNotification[] = [];
 export function CodexTranscriptPreparing({
   threadId,
   failed = false,
+  failure,
+  retryLabel = "重试完整消息",
+  onRetry,
+  onRefresh,
 }: {
   threadId: string;
   failed?: boolean;
+  failure?: string | null;
+  retryLabel?: string;
+  onRetry?: () => void;
+  onRefresh?: () => void;
 }) {
   const events = useCodexStore(
     (state) => state.events[threadId] ?? EMPTY_EVENTS,
@@ -35,9 +43,41 @@ export function CodexTranscriptPreparing({
         className="text-xs text-muted-foreground mb-3"
       >
         {failed
-          ? "完整消息视图暂时无法加载，已保留近期正文和草稿。可显式刷新页面后重试。"
+          ? "完整消息视图暂时无法加载，近期正文和草稿仍已保留。可以重试加载；若仍失败，刷新页面后重新打开此会话。"
           : "正在准备完整消息视图…"}
       </p>
+      {failed && (
+        <>
+          <div className="mb-3 flex flex-wrap gap-3">
+            {onRetry && (
+              <button
+                type="button"
+                className="text-sm text-primary underline underline-offset-2"
+                onClick={onRetry}
+              >
+                {retryLabel}
+              </button>
+            )}
+            {onRefresh && (
+              <button
+                type="button"
+                className="text-sm text-primary underline underline-offset-2"
+                onClick={onRefresh}
+              >
+                刷新页面
+              </button>
+            )}
+          </div>
+          {failure && (
+            <details className="mb-3 text-xs text-muted-foreground">
+              <summary className="cursor-pointer">查看错误详情</summary>
+              <pre className="mt-2 whitespace-pre-wrap break-all">
+                {failure}
+              </pre>
+            </details>
+          )}
+        </>
+      )}
       <div className="flex flex-col gap-4">
         {rows.map((row) => (
           <div

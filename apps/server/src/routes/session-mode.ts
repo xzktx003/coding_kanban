@@ -30,6 +30,7 @@ import { createSessionCodexCompletionCheck } from "../services/session-codex-com
 import { registerSessionCodexActivityRoutes, readSessionCodexActivity } from "./session-codex-activity.js";
 import type { FeishuCompletionSenderLike } from "../services/agent-completion-feishu-notifier.js";
 import { resolve } from "node:path";
+import { once } from "node:events";
 import { Readable } from "node:stream";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import WebSocket from "ws";
@@ -707,6 +708,30 @@ export function registerSessionModeRoutes(
           return reply.code(response.status).headers({ "cache-control": "no-store", "x-content-type-options": "nosniff" }).send(value);
         }
         clearTimeout(timeout);
+        if (
+          pathname === "/api/events" &&
+          response.body &&
+          response.headers.get("content-type")?.includes("text/event-stream")
+        ) {
+          const stream = chatProjection
+            ? Readable.from(projectChatSseStream(response.body))
+            : Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0]);
+          reply.hijack();
+          reply.raw.writeHead(response.status, {
+            "cache-control": "no-cache, no-transform",
+            "content-type": "text/event-stream; charset=utf-8",
+            "x-accel-buffering": "no",
+            "x-content-type-options": "nosniff",
+          });
+          reply.raw.flushHeaders?.();
+          reply.raw.write(": session-stream\n\n");
+          reply.raw.once("close", () => { if (!reply.raw.writableFinished) controller.abort(); });
+          for await (const frame of stream) {
+            if (!reply.raw.write(frame)) await once(reply.raw, "drain");
+          }
+          reply.raw.end();
+          return;
+        }
         reply.code(response.status);
         for (const name of [
           "content-type",
@@ -766,6 +791,11 @@ export function registerSessionModeRoutes(
         });
         return reply.send(stream);
       } catch (error) {
+        if (reply.raw.headersSent) {
+          controller.abort();
+          if (!reply.raw.writableEnded) reply.raw.end();
+          return;
+        }
         if (error instanceof AuxiliaryHistoryError) {
           controller.abort();
           return reply.code(error.statusCode).headers({ "cache-control": "no-store", "x-content-type-options": "nosniff" }).send({ error: error.message, code: error.code });

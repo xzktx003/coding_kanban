@@ -148,6 +148,22 @@ function resolveLocalWorkingDirectory(input?: string): string {
 
 let defaultLaunchEnvPromise: Promise<NodeJS.ProcessEnv> | null = null;
 
+export async function resolveVsCodeLaunchEnv(
+  readShellEnv: () => Promise<NodeJS.ProcessEnv> = () =>
+    resolveShellStartupEnv(stripNpmConfigEnv(process.env)),
+): Promise<NodeJS.ProcessEnv> {
+  const baseEnv = stripNpmConfigEnv(process.env);
+  try {
+    return stripNpmConfigEnv({ ...baseEnv, ...(await readShellEnv()) });
+  } catch (error) {
+    console.warn(
+      "[vscode-web] login shell did not return an environment; starting with the current process environment",
+      error instanceof Error ? error.message : error,
+    );
+    return baseEnv;
+  }
+}
+
 function stripNpmConfigEnv(
   env: NodeJS.ProcessEnv,
 ): Record<string, string | undefined> {
@@ -164,14 +180,7 @@ function stripNpmConfigEnv(
 
 async function defaultResolveLaunchEnv(): Promise<NodeJS.ProcessEnv> {
   if (!defaultLaunchEnvPromise) {
-    const baseEnv = stripNpmConfigEnv(process.env);
-
-    defaultLaunchEnvPromise = resolveShellStartupEnv(baseEnv)
-      .then((shellEnv) => stripNpmConfigEnv({ ...baseEnv, ...shellEnv }))
-      .catch((error) => {
-        defaultLaunchEnvPromise = null;
-        throw error;
-      });
+    defaultLaunchEnvPromise = resolveVsCodeLaunchEnv();
   }
 
   return defaultLaunchEnvPromise;

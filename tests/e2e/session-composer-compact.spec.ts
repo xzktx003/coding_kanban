@@ -116,7 +116,7 @@ async function identityPlacement(page: Page) {
   expect(identity.y + identity.height).toBeLessThanOrEqual(surface.y + surface.height + 1);
   expect(identity.x).toBeGreaterThanOrEqual(container.x);
 }
-async function setModelNotice(page: Page) {
+async function changeModelForGeometry(page: Page) {
   await page.evaluate(async () => {
     const path = "/src/session-mode/stores/useThreadModelStore.ts";
     const { hydrateThreadModel, changeThreadModel } = await import(
@@ -191,10 +191,7 @@ for (const width of [375, 1440]) {
           .locator(".session-composer-editor")
           .evaluate((el) => el.scrollHeight > el.clientHeight),
       ).toBe(true);
-      await setModelNotice(page);
-      await expect(
-        page.locator(".session-native-composer-status").first(),
-      ).toContainText("模型已从");
+      await changeModelForGeometry(page);
       await fixedHeight(page, stable);
       measurements.modelChange = (await frame.boundingBox())!.height;
       if (width === 375) expect(before).toBeLessThanOrEqual(150);
@@ -275,7 +272,16 @@ test("touch controls, agent label, owner states and narrow desktop pane stay wit
           .evaluateAll((els) =>
             els.map((el) => {
               const r = el.getBoundingClientRect();
-              return { left: r.left, right: r.right, w: r.width, h: r.height };
+              return {
+                label: el.getAttribute("aria-label") ?? el.textContent?.trim() ?? "未命名控件",
+                className: el.className,
+                computedWidth: getComputedStyle(el).width,
+                computedMinWidth: getComputedStyle(el).minWidth,
+                left: r.left,
+                right: r.right,
+                w: r.width,
+                h: r.height,
+              };
             }),
           );
         for (const control of controls) {
@@ -285,7 +291,10 @@ test("touch controls, agent label, owner states and narrow desktop pane stay wit
             coarse || container.width <= 480 ? 44 : 28,
           );
           if (coarse || container.width <= 480)
-            expect(control.w).toBeGreaterThanOrEqual(44);
+            expect(
+              control.w,
+              `${control.label}触控宽度 ${JSON.stringify(control)}`,
+            ).toBeGreaterThanOrEqual(44);
         }
         const model = (await page
           .locator(".session-native-model-trigger")
@@ -335,7 +344,7 @@ test("touch controls, agent label, owner states and narrow desktop pane stay wit
         page.locator(".session-native-composer-status").first(),
       ).toHaveText("规划模式");
       await fixedHeight(page, initial);
-      const goalDraft = page.getByRole("button", { name: "明确目标", exact: true });
+      const goalDraft = page.getByRole("button", { name: "清除目标", exact: true });
       await expect(goalDraft).toBeVisible();
       await openComposerStatus(page);
       await expect(
@@ -630,9 +639,9 @@ test("visual acceptance captures both themes, left thumbnails, direct utilities 
     ).toBeLessThanOrEqual(56);
     expect(
       await page
-        .locator(".session-composer-rail-item").filter({ has: page.locator(".session-queue-shelf") })
+        .locator(".session-composer-rail-content")
         .evaluate((el) => getComputedStyle(el).backgroundColor),
-    ).toContain("0.78");
+    ).toContain("0.84");
     const floating = (await page
       .locator(".session-composer-rail")
       .first()
@@ -643,7 +652,7 @@ test("visual acceptance captures both themes, left thumbnails, direct utilities 
       .boundingBox())!;
     expect(floating.y + floating.height).toBeLessThanOrEqual(frame.y);
     await editor(page).fill("这一轮的补充仍可继续输入");
-    await setModelNotice(page);
+    await changeModelForGeometry(page);
     await fixedHeight(page, before);
     await page.getByRole("button", { name: "查看发送配置与上下文", exact: true }).click();
     const details = page.getByRole("dialog", { name: "待发送消息 · 1", exact: true });

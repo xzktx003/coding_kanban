@@ -324,6 +324,16 @@
   /* The always-visible global menu provides every layout and tool command. */
 }
 @media (max-width: 767px) {
+  .session-mode .session-sidebar-projects button[aria-label="会话排序"],
+  .session-mode .session-sidebar-projects button[aria-label="历史项目"],
+  .session-mode .session-sidebar-projects button[title="添加项目"] {
+    box-sizing: border-box;
+    width: 45px;
+    min-width: 45px;
+    height: 45px;
+    min-height: 45px;
+    padding-inline: 0;
+  }
   .session-mode .session-sidebar-search-row {
     height: 48px;
     padding: 2px 6px;
@@ -353,12 +363,16 @@
     visibility: hidden;
   }
   .session-mode .session-project-heading {
-    min-height: 40px;
+    min-height: 45px;
   }
   .session-mode .session-project-heading .session-project-action {
     opacity: 1;
-    min-height: 40px;
-    width: 32px;
+    box-sizing: border-box;
+    width: 45px;
+    min-width: 45px;
+    height: 45px;
+    min-height: 45px;
+    padding: 0;
   }
   .session-mode .session-load-more {
     height: 44px;
@@ -467,6 +481,11 @@
   cursor: pointer;
   text-align: left;
 }
+.session-mode .session-identity-project-static {
+  display: none;
+  cursor: default;
+  pointer-events: none;
+}
 .session-mode .session-identity-project > span {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -484,6 +503,9 @@
   outline-offset: 2px;
 }
 .session-mode .session-project-details-menu {
+  max-width: min(380px, calc(100vw - 24px));
+}
+.session-mode .session-tab-project-menu {
   max-width: min(380px, calc(100vw - 24px));
 }
 .session-mode .session-project-full-path {
@@ -652,6 +674,27 @@
   }
   .session-mode .session-identity-project {
     min-height: 23px;
+  }
+}
+@media (pointer: coarse) {
+  .session-mode .session-tab-mobile-menu {
+    box-sizing: border-box;
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    min-height: 44px;
+  }
+  .session-mode
+    .session-tab
+    > .session-project-detail
+    .session-identity-project {
+    display: none;
+  }
+  .session-mode
+    .session-tab
+    > .session-project-detail
+    .session-identity-project-static {
+    display: flex;
   }
 }
 .session-mode .session-menu-new {
@@ -943,5 +986,32 @@
   }
   .session-mode .session-top-nav .workbench-mode-switch .mode-switch-label {
     height: 44px;
+  }
+}
+
+/* Keep the three 44px modes and project/status actions in one 320px row. */
+@media (max-width: 374px) {
+  .session-mode .session-top-nav {
+    height: 44px;
+    min-height: 44px;
+    flex: 0 0 44px;
+    flex-wrap: nowrap;
+    gap: 0;
+    padding-inline: 0;
+  }
+  .session-mode .session-top-nav::after {
+    display: none;
+    content: none;
+  }
+  .session-mode .session-top-nav > .workbench-mode-switch {
+    order: 0;
+    gap: 0;
+  }
+  .session-mode .session-top-nav .workbench-mode-switch .mode-switch-label {
+    box-sizing: border-box;
+    flex: 0 0 44px;
+    width: 44px;
+    min-width: 44px;
+    padding-inline: 0;
   }
 }

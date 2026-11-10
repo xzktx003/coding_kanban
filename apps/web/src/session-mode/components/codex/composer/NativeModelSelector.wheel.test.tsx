@@ -74,7 +74,7 @@ async function mount({expanded=false,effort="medium",efforts=["low","medium","hi
   return {...view,editor,submit,before,expanded};
 }
 function assertReads(count=1) {
-  for(const read of Object.values(api)){expect(read).toHaveBeenCalledTimes(count);expect(read).toHaveBeenCalledWith();}
+  for(const read of Object.values(api)){expect(read).toHaveBeenCalledTimes(count);expect(read).toHaveBeenCalledWith({ signal: expect.any(AbortSignal) });}
 }
 function assertProtected(surface:Awaited<ReturnType<typeof mount>>,count=1) {
   const {before}=surface,current=useThreadModelStore.getState().threads[A];

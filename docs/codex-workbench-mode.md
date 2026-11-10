@@ -134,6 +134,8 @@ Codex 模式项目导航复用会话模式的项目索引，并通过会话服�
 
 原生首次发送的 thread 发现、启动列竞争与引导遮挡已补充行为回归；Codex 外壳的布局、启动 thread 映射、项目和侧栏宽度使用标签内视图快照，设备存储仅作为新标签初始模板。关注成员同步沿用原契约。该变化不接管官方 composer 的草稿。
 
+公共发送桥现在精确接受 `26.51002.51308`、`26.51007.21434` 和当前部署的 `26.51021.22027`；未知版本仍不探测 provider。2026-11-08 在局域网 **HTTPS `https://10.30.0.26:8484`** 重新激活官方扩展宿主后，broker 报告当前版本 `sendAvailable=true`。这只证明版本门与 provider 捕获通过，不替代真实轮次验收。
+
 `packages/native-codex-host/refresh-prototype` 的私有常驻进程、版本门控独立连接、原生资源探测与 LRU 已有真实原生测试。它们没有接入默认 launcher、网关或正式宿主；已有安装的 companion 也不会随源码测试被替换。创建管理进程退出不结束 native turn；旧代次/PID、已有记录和端点均拒绝隐式接管。配置、组件 API 及测试见 [组件说明](../packages/native-codex-host/refresh-prototype/README.md)。
 
 两秒性能、官方多端草稿、profile、长历史和长期 RSS 关卡仍未通过或未完成。三页草稿试验的失败与后续页面恢复失败分别保留，不改写为多端已支持；在线配置/认证/状态/历史/RPC 不进入静态缓存。详见 [持续进度与证据边界](designs/codex-mode-audit-20261014/refresh-recovery-progress-20261015.md)。

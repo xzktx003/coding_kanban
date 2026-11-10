@@ -299,6 +299,27 @@ export function observeSubagentHistory(events: readonly ServerNotification[]) {
   seenHistory.add(events);
   for (const event of events) observeSubagents(event, true);
 }
+/** Thread status is stored outside the bounded transcript event list. */
+export function observeSubagentStatus(
+  id: string,
+  status: SubagentThread["status"],
+) {
+  if (!status) return;
+  const state = useSubagentStore.getState();
+  const old = state.nodes[id];
+  if (!old || sameSubagentValue(old.thread.status, status)) return;
+  useSubagentStore.setState({
+    nodes: {
+      ...state.nodes,
+      [id]: {
+        ...old,
+        revision: state.revision + 1,
+        thread: boundedSubagentThread({ ...old.thread, status }),
+      },
+    },
+    revision: state.revision + 1,
+  });
+}
 export function observeSubagents(
   event: ServerNotification,
   historical = false,

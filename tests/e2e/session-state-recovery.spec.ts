@@ -524,8 +524,11 @@ for (const { width, healthFailure } of [
         await expect(outage).toBeVisible({ timeout: 22000 });
         expect(failedHealthReads).toBeGreaterThanOrEqual(5);
         await expect(
-          outage.getByText("正在自动重连。草稿已保留。"),
+          outage.getByText("正在自动重连，草稿已保留。"),
         ).toBeVisible();
+        await outage
+          .getByRole("button", { name: "查看会话服务连接中断详情" })
+          .click();
         await expect(outage.getByText("服务返回 HTTP 503")).toBeVisible();
       }
       await editor.fill("只投递一次，等待真实流恢复");

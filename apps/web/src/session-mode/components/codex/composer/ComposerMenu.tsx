@@ -27,6 +27,7 @@ import { useTranslation } from "react-i18next";
 import { ScreenshotPopover } from "@session/components/codex/composer/ScreenshotPopover";
 import { useCodexStore } from "@session/components/codex/stores";
 import { useThreadModelSettings } from "@session/hooks/useThreadModelSettings";
+import { codexService } from "@session/services/codexService";
 import { useGoalDraft } from "./goalDrafts";
 import { Button } from "@session/components/ui/button";
 import {
@@ -61,7 +62,8 @@ export function SelectFilesMenuItem({
   onFilesSelected,
   onAfterSelect,
   className,
-}: SelectFilesMenuItemProps) {
+  label = "上传设备文件",
+}: SelectFilesMenuItemProps & { label?: string }) {
   const { i18n } = useTranslation();
   const handleSelectFiles = async () => {
     try {
@@ -93,7 +95,7 @@ export function SelectFilesMenuItem({
       onClick={handleSelectFiles}
     >
       <File className="w-4 h-4" />
-      <span>上传设备文件</span>
+      <span>{label}</span>
     </Button>
   );
 }
@@ -165,6 +167,7 @@ export interface ComposerMenuProps {
   onFilesSelected?: (paths: string[]) => void;
   onInsertMention?: (text: string, mention?: NativeInputMention) => void;
   onGoal?: () => void;
+  onSketch?: () => void;
   actions?: (close: () => void, persistentMenuTrigger: ReactNode) => ReactNode;
   persistentMenu?: (props: {
     triggerContainer: HTMLElement | null;
@@ -187,6 +190,7 @@ export function ComposerMenu({
   onFilesSelected,
   onInsertMention,
   onGoal,
+  onSketch,
   actions,
   persistentMenu,
 }: ComposerMenuProps) {
@@ -287,6 +291,19 @@ export function ComposerMenu({
         <ComposerMenuItems>
           {() => (
             <div className="flex flex-col gap-1">
+              <SelectFilesMenuItem
+                label="文件和文件夹"
+                onFilesSelected={onFilesSelected}
+                onAfterSelect={() => setOpenState(false)}
+              />
+              <Button type="button" variant="ghost" className="min-h-11 justify-start gap-2 px-2" onClick={() => { if (onGoal) onGoal(); else setGoalEnabled(true); void codexService.listSkills(workspaceRoot).catch(() => undefined); setOpenState(false); }}>
+                <Target className="w-4 h-4" />
+                <span className="flex-1 text-left">目标<small aria-hidden="true" className="block text-xs text-muted-foreground">设定一个持续推进的目标</small></span>
+              </Button>
+              <Button type="button" variant="ghost" className="min-h-11 justify-start gap-2 px-2" onClick={() => { onSketch?.(); void codexService.listSkills(workspaceRoot).catch(() => undefined); setOpenState(false); }}>
+                <File className="w-4 h-4" />
+                <span className="flex-1 text-left">草图<small aria-hidden="true" className="block text-xs text-muted-foreground">画一张草图</small></span>
+              </Button>
               <Button
                 type="button"
                 variant="ghost"
@@ -321,10 +338,6 @@ export function ComposerMenu({
                 {webSearchRequest && <Check className="w-4 h-4" />}
               </Button>
 
-              <SelectFilesMenuItem
-                onFilesSelected={onFilesSelected}
-                onAfterSelect={() => setOpenState(false)}
-              />
               <Button
                 type="button"
                 variant="ghost"
@@ -361,22 +374,6 @@ export function ComposerMenu({
                   setOpenState(false);
                 }}
               />
-              <Button
-                type="button"
-                variant="ghost"
-                className={cn(
-                  "justify-start gap-2 px-2 hover:bg-accent hover:text-accent-foreground transition-colors",
-                  goalEnabled && "bg-blue-50 text-blue-700",
-                )}
-                onClick={() => {
-                  if (onGoal) onGoal();
-                  else setGoalEnabled(true);
-                  setOpenState(false);
-                }}
-              >
-                <Target className="w-4 h-4" />
-                <span className="flex-1 text-left">{t("goal")}</span>
-              </Button>
               {mentionItems.length > 0 && (
                 <>
                   <Separator className="my-1" />

@@ -145,6 +145,40 @@ it("shows advertised max and ultra, keeps persistent out, and does not rewrite t
   expect(useThreadModelStore.getState().threads[THREAD].reasoningEffort).toBe("max");
 });
 
+it("shows the selected reasoning range and changes the selected tick colors as the effort changes", async () => {
+  mount(["low", "medium", "high", "xhigh", "max", "ultra"], "max");
+  const menu = await openMenu();
+  const range = menu.querySelector<HTMLElement>(".session-native-power-range");
+  expect(range).not.toBeNull();
+  expect(parseFloat(range!.style.width)).toBeCloseTo(152.2);
+  const dots = [...menu.querySelectorAll(".session-native-power-dot")];
+  expect(dots.map((dot) => dot.getAttribute("data-selected"))).toEqual([
+    "true", "true", "true", "true", "true", "false",
+  ]);
+  fireEvent.keyDown(screen.getByRole("menuitem", { name: "强度" }), {
+    key: "ArrowLeft", code: "ArrowLeft",
+  });
+  expect(useThreadModelStore.getState().threads[THREAD].reasoningEffort).toBe("xhigh");
+  expect(parseFloat(range!.style.width)).toBeCloseTo(117.4);
+  expect(dots[4].getAttribute("data-selected")).toBe("false");
+});
+
+it("fills the complete track at the last option and clears it at the first", async () => {
+  mount(["low", "medium", "high", "xhigh", "max"], "max");
+  const menu = await openMenu();
+  const range = menu.querySelector<HTMLElement>(".session-native-power-range")!;
+  expect(parseFloat(range.style.width)).toBe(200);
+  const slider = screen.getByRole("menuitem", { name: "强度" });
+  for (let index = 0; index < 4; index++) {
+    fireEvent.keyDown(slider, { key: "ArrowLeft", code: "ArrowLeft" });
+  }
+  expect(useThreadModelStore.getState().threads[THREAD].reasoningEffort).toBe("low");
+  expect(parseFloat(range.style.width)).toBe(0);
+  expect([...menu.querySelectorAll(".session-native-power-dot")].map((dot) => dot.getAttribute("data-selected"))).toEqual([
+    "true", "false", "false", "false", "false",
+  ]);
+});
+
 it("does not offer max when the catalog does not advertise it", async () => {
   mount(["low", "medium", "high", "xhigh"]);
   const menu = await openMenu();

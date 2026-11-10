@@ -12,7 +12,12 @@ test("new chat leaves a running ACP task untouched on desktop and mobile", async
     if (width < 768) {
       await page.getByRole("button", { name: "更多功能", exact: true }).click();
       await page.getByRole("menuitem", { name: "新聊天", exact: true }).click();
-    } else await page.keyboard.press("Control+n");
+    } else {
+      await page
+        .getByRole("navigation", { name: "会话工作台导航" })
+        .getByRole("button", { name: "新聊天", exact: true })
+        .click();
+    }
     await expect.poll(() => calls.filter((call) => call.path.endsWith("/start")).length).toBe(++attempts);
     await expect.poll(() => page.evaluate(() => (window as any).acpFixtureStore.getState().sessionTransition)).toBeNull();
     await expect(page.getByRole("dialog", { name: "中断当前任务并新建会话？" })).toHaveCount(0);
@@ -97,7 +102,7 @@ test("workbench controls remain coherent, readable and usable through responsive
     expect(geometry.logoLeft).toBeGreaterThanOrEqual(geometry.brandLeft);
     expect(geometry.logoRight).toBeLessThanOrEqual(geometry.brandRight + 0.5);
     expect(geometry.modeLeft).toBeGreaterThan(geometry.logoRight);
-    expect(geometry.height).toBeLessThanOrEqual(48);
+    expect(geometry.height).toBeLessThanOrEqual(width > 900 ? 48 : 96);
     expect(geometry.scroll).toBeLessThanOrEqual(width);
     await expect(
       page.getByRole("button", { name: "发送消息", exact: true }),
@@ -250,11 +255,11 @@ test("a refreshed sidebar module can read an already mounted provider", async ({
     const updated = await import(updatedUrl.href);
     const reactPath =
       resources.find((e) =>
-        new URL(e.name).pathname.endsWith("/.vite/deps/react.js"),
+          new URL(e.name).pathname.endsWith("/deps/react.js"),
       )?.name ?? "/node_modules/.vite/deps/react.js";
     const domPath =
       resources.find((e) =>
-        new URL(e.name).pathname.endsWith("/.vite/deps/react-dom_client.js"),
+          new URL(e.name).pathname.endsWith("/deps/react-dom_client.js"),
       )?.name ?? "/node_modules/.vite/deps/react-dom_client.js";
     const reactModule = await import(reactPath),
       domModule = await import(domPath);

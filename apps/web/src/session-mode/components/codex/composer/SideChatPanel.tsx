@@ -1,6 +1,7 @@
 import { newSessionEditId } from "@session/services/sessionEditIdentity";
 import { composeContextText } from "@agent-orchestrator/shared";
 import { contextForDelivery } from "./v2/selectionAnnotations";
+import { acquireComposerSubmission } from "./v2/composerSubmissionLock";
 import {
   composerDrafts,
   useComposerDraft,
@@ -126,6 +127,11 @@ function SideChat({
     }
     const snapshot = readDraft(owner),
       ids = draft.attachments.map((a) => a.id);
+    const releaseSubmission = acquireComposerSubmission(owner);
+    if (!releaseSubmission) {
+      toast.error("当前会话正在发送，请稍后再试");
+      return;
+    }
     busy.current = true;
     setSending(true);
     try {
@@ -165,6 +171,7 @@ function SideChat({
     } finally {
       busy.current = false;
       setSending(false);
+      releaseSubmission();
     }
   };
   const finishClose = () => {

@@ -1,6 +1,7 @@
 import { useMagpieCatalog } from "../hooks/useMagpieCatalog";
 import { useConfigStore } from "../stores/useConfigStore";
 import { useNewChatModelConfig } from "../hooks/useNewChatModelConfig";
+import { newChatModelConfigStatusLabel } from "@session/services/newChatModelConfig";
 import { commitModelSelectionWithNotice } from "./ModelChangeNotice";
 import {
   useCallback,
@@ -46,6 +47,7 @@ import {
 import { nativeReasoningLabel } from "./nativeReasoningLabel";
 import { nextOrdinaryPowerWheel } from "./nativePowerWheel";
 import {
+  NATIVE_LOGGED_OUT_REASONING_OPTIONS,
   NATIVE_UNKNOWN_REASONING_OPTIONS,
   nativeDisplayReasoningEffort,
   nativeMenuReasoningEffort,
@@ -123,10 +125,18 @@ export function NativeModelSelector({
   const [open, setOpen] = useState(false);
   const magpie = useMagpieCatalog(open && threadId === null);
   const selectionMode = useConfigStore(s => s.modelSelectionMode);
-  const configured = useNewChatModelConfig(threadId === null && selectionMode === "follow-config", open);
+  const willOpenOnMount =
+    initiallyOpen &&
+    (!initialScope || isCodexOperationScopeCurrent(initialScope));
+  const configured = useNewChatModelConfig(
+    threadId === null && selectionMode === "follow-config",
+    open,
+    willOpenOnMount,
+  );
   const followsConfig = threadId === null && selectionMode === "follow-config";
   const [completionTooltipHeld, setCompletionTooltipHeld] = useState(false);
   const [advanced, setAdvanced] = useState(false);
+  const [lockedNotice, setLockedNotice] = useState(false);
   const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState("");
   const [recentOpen, setRecentOpen] = useState(false);
@@ -284,8 +294,15 @@ export function NativeModelSelector({
     modelStatus === "pending";
   const modelSelectionDisabled =
     settings.modelProvider === "openai" && modelStatus === "error";
-  const options =
-    settings.modelProvider === "openai" && model
+  const loggedOutClosed =
+    threadId === null &&
+    !settings.model &&
+    settings.modelProvider === "openai" &&
+    modelStatus === "success" &&
+    !openAiModels?.length;
+  const options = loggedOutClosed
+    ? NATIVE_LOGGED_OUT_REASONING_OPTIONS
+    : settings.modelProvider === "openai" && model
       ? catalogOptions
       : isUnknownOpenAiModel
         ? hasModelSnapshot
@@ -409,7 +426,7 @@ export function NativeModelSelector({
     settings.model ??
     "自定义模型";
   const powerModelLabel = selectedPhysicalPower?.modelLabel ?? label;
-  const statusModelLabel = isUnknownOpenAiModel ? "自定义" : powerModelLabel;
+  const statusModelLabel = isUnknownOpenAiModel || loggedOutClosed ? "自定义" : powerModelLabel;
   const statusEffortLabel =
     settings.modelProvider === "openai" && effort === "medium"
       ? "标准"
@@ -858,7 +875,12 @@ export function NativeModelSelector({
           onBlur={handleCompletionTriggerBlur}
           onPointerLeave={handleCompletionTriggerPointerLeave}
           disabled={modelPending && !followsConfig}
-          configurationLabel={followsConfig ? `跟随配置 · ${configured.value?.model ?? (configured.error ? "无法核实" : "读取中…")}` : undefined}
+          configurationLabel={
+            followsConfig
+              ? `跟随配置 · ${newChatModelConfigStatusLabel(configured)}`
+              : undefined
+          }
+          aria-busy={configured.loading || undefined}
           pickerOpen={enhancedTrigger && open}
           pickerSimple={enhancedTrigger && !showAdvanced}
           pickerOpenLabel={enhancedTrigger ? triggerOpenLabel : undefined}
@@ -1001,6 +1023,17 @@ export function NativeModelSelector({
               }}>{item.id}</DropdownMenuItem>)}
             </div>
           )}
+          {error && (
+            <div className="session-native-model-error">
+              <span role="alert">{error}</span>
+              <DropdownMenuItem onSelect={(event) => {
+                event.preventDefault();
+                void reload();
+              }}>
+                重试
+              </DropdownMenuItem>
+            </div>
+          )}
           {showAdvanced ? (
             <div
               className="session-native-model-list"
@@ -1054,14 +1087,6 @@ export function NativeModelSelector({
                 />
               )}
               {settings.modelProvider !== "openai" && loading && <p role="status">正在加载模型…</p>}
-              {settings.modelProvider !== "openai" && error && (
-                <p role="alert">
-                  {error}
-                  <button type="button" onClick={() => void reload()}>
-                    重试
-                  </button>
-                </p>
-              )}
               {pickerPresentation && pickerPresentation.presets.length > 0 && (
                 <DropdownMenuItem
                   disabled={modelPending || modelSelectionDisabled}
@@ -1168,6 +1193,10 @@ export function NativeModelSelector({
                   }}
                   onSelect={(e) => {
                     e.preventDefault();
+                    if (loggedOutClosed) {
+                      setLockedNotice(true);
+                      return;
+                    }
                     setAdvanced(true);
                   }}
                 >
@@ -1196,6 +1225,7 @@ export function NativeModelSelector({
                     />
                   </span>
                 </DropdownMenuItem>
+                {lockedNotice && <p role="status">已锁定，打开访问选项。用量已达上限。</p>}
                 <NativeServiceTierControl model={model} threadId={threadId} />
                 {isNativeModelProvider && effectiveSelectionMode === "model" &&
                   pickerPresentation?.defaultChoice && (
@@ -1222,6 +1252,11 @@ export function NativeModelSelector({
                 ref={capturePowerSlider}
                 className="session-native-power-slider"
                 onPointerDown={(e) => {
+                  const thumb = e.target instanceof Element && e.target.closest(".session-native-power-thumb");
+                  if (thumb) {
+                    if (position + 1 < powerOptions.length) selectEffort(position + 1);
+                    return;
+                  }
                   e.currentTarget.setPointerCapture?.(e.pointerId);
                   dragEffort(e);
                 }}
@@ -1235,10 +1270,18 @@ export function NativeModelSelector({
                 }}
               >
                 <div className="session-native-power-track">
+                  <span
+                    aria-hidden="true"
+                    className="session-native-power-range"
+                    style={{
+                      width: `${position === 0 ? 0 : position === powerOptions.length - 1 ? POWER_TRACK_WIDTH : POWER_ENDPOINT_INSET + (position / (powerOptions.length - 1)) * POWER_TRAVEL}px`,
+                    }}
+                  />
                   {powerOptions.map((option, index) => (
                     <span
                       key={physicalPowerChoices ? `${physicalPowerChoices[index]?.id}:${index}` : option}
                       className="session-native-power-dot"
+                      data-selected={index <= position}
                       style={{
                         left: `${POWER_ENDPOINT_INSET + (index / (powerOptions.length - 1)) * POWER_TRAVEL}px`,
                       }}

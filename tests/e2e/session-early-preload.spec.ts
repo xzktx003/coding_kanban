@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { installSessionUxFixture } from "./session-ux-fixture";
 
-for (const mode of ["session", "terminal", "codex"])
+for (const mode of ["session", "terminal", "codex", "chatgpt"])
   test(`early entry preloads only the selected session without running application effects (${mode})`, async ({
     page,
   }) => {

@@ -87,7 +87,7 @@ PLAYWRIGHT_SKIP_WEBSERVER=1 pnpm exec playwright test \
 - **真实页面空闲观测**：稳定代码、真实后端、未发任务、未开右侧面板，125 秒 renderer RSS 从 266.5 到 253.8 MiB，范围 230.4–288.7 MiB，未强制 GC；最近历史读取 3 次，旧采样为 16 次。这是一次观测，不是所有设备必须达到的固定阈值。
 - **前端物理留存**：保留 `SlicedString` 回归；逻辑字符数、事件数和 DOM 行数不能替代 GC 后留存量测量。直接调用假 EventSource 回调的测试不能替代原生网络测试。
 - **现场反馈**：用户已确认本次修复后内存控制住。未来若再次出现增长，分别记录任务活动/空闲、网络入站量、读取次数、JS heap、renderer RSS、自然 GC 后的趋势及观察时间；区分短期分配、持续留存与其他进程，不凭单个峰值判断泄漏。不用开发热更新/构建中的采样充当稳定代码对照。
-- **独立未解决项**：1 万条历史 / 30 标签的输入延迟阈值尚未稳定达标，旧版本对照也超过 200ms；这与本次内存修复的用户确认分别记录，不能因此声称所有性能问题都已解决。
+- **输入延迟复核（2026-11-10）**：旧版本曾记录 1 万条历史 / 30 个关注会话的两帧输入 P95 超过 200ms，现行代码的这个组合先前也缺少稳定的复测。本轮新增 `tests/e2e/session-long-history-input-latency.spec.ts`：10,000 个历史事件、30 个关注会话、4 个可见窗格，30 次真实按键在 5 个新页面中重复；每次 P95 为 39.3–41.9ms，均低于 100ms 门槛。该证据来自单页 LAN 浏览器和内存夹具，不等同三页并发、原生 HTTP 传输、旧源码同机对照或其他设备验收；保留这些边界，不外推为所有性能问题已解决。
 
 维护本约定时同步更新 [bug 清单](debug_list.md)及[仓库记忆镜像](../memories/repo/debug_list.md)。未来发现更好的实现，应保留这里的故障背景和验证理由，让下一位维护者知道为什么这些限制存在。
 
@@ -280,3 +280,21 @@ Codex store 热更新须立即注册并复用同一个 store，更新 actions �
 ## 2026-10-31：后台连接与正文回收独立
 
 页面隐藏不主动关闭健康SSE，也不为保活取消正文回收或恢复完整历史轮询。前台唤醒只重连缺失/CLOSED流，不拆健康或CONNECTING候选，不解除offline/超预算保护；共享监听随最后消费者退出清理，保留原序号和有界repair。修改须运行eventStream、真实HTTP后台续接及原休眠/恢复/审批回归。浏览器被系统挂起期间不承诺JS或网络持续运行，服务端任务与页面生命周期独立。
+
+## 2026-11-10：流式转录复制复用有界 scratch buffer
+
+`copyTranscriptText` 继续逐 UTF-16 code unit 复制，保证 emoji、组合字符、孤立代理项和 NUL 不变，并确保结果不保留源大字符串；分块工作区复用一个固定 4096 code unit 的模块内 `Uint16Array`，不为每个流式 delta/分块新建 backing store。读取 buffer 的函数保持同步，`String.fromCharCode` 完成独立字符串复制后才写入下一块。`setStreamingAgentDeltas` 对大于 16 KiB 且仍在 256 KiB 显示预算内的聚合 delta 保留为一个独立复制片段；同一帧里同一 turn/item 的连续小 delta 也先在原 256 KiB 上限内合并再分段。每条原通知仍单独计入流量压力，身份变化、非正文通知或预算边界会冲刷当前批次。实时 Markdown 已切换到有界纯文本路径，不再为无效格式化把它拆成多个 8 KiB 字符串。对应 `codexTranscriptMemoryBudget`、`eventsSlice`、`sessionMemoryGovernor`、`sessionMemoryReadingProtection`、`session-codex-stream-memory`、冷历史及空闲回收/恢复测试；既有字节、事件及音频预算不变。
+
+2026-11-10 本轮 10 分钟自然 GC 低点差为 26,628,096 bytes；同一源码的 30 分钟用例仍红，首窗口 RSS 低点 301,195,264 bytes，末窗口低点 461,680,640 bytes，差 160,485,376 bytes，未达到既有 128 MiB 比较门槛。JS heap / DOM / 监听器均有自然回落且无采样错误；不以短测通过替代长测，不改阈值，继续保留这条长期 RSS 红灯。
+
+随后复现同帧 30 条约 6 KiB 的助手增量会逐条生成 21 个流式片段；合并后 store 保留一个独立的约 180 KiB 片段。单测、流式/背压/完整视图浏览器回归均通过。当前合并版 10 分钟自然 GC 低点为 309,321,728→381,186,048 bytes（+71,864,320 bytes）。30 分钟原负载随后通过一次：882 轮/882 样本，同一 renderer PID/start ticks `3567593/331694245`，首末窗口 RSS 低点 341,299,200→463,171,584 bytes（+121,872,384 bytes），比 128 MiB 门槛低 12,345,344 bytes；JS heap 低点 +9,715,468 bytes，峰值 heap/RSS 为 135,327,876/575,754,240 bytes，pageerror 与 RSS 采样错误均为空。源目录指纹前后未变。此次裕量不大，且修改前当前源码曾超门槛 146,243,584 bytes；需保留红绿两次记录并再复验，不把一次通过外推为所有长时场景稳定。
+
+2026-11-10 同源码复验期间，模型目录源文件有修改，不能作为固定源码证据；30 分钟测试仍完成 881 轮/881 样本，并在同一 renderer PID/start ticks `3593773/331896123` 上失败，首末窗口 RSS 低点 288,153,600→456,175,616 bytes（+168,022,016 bytes，超过 128 MiB）；JS heap 低点差、错误数组及 RSS 采样错误数组见 `.dev-runtime/session-ux-audit-20261110/stream-batch-coalesced-repeat-30m/session-idle-memory-long-r-a1e3c--natural-garbage-collection/natural-gc-soak.json`。保留此次红灯但不视作固定源码验收；需源码冻结后再次运行完整 30 分钟，不改负载或门槛。
+
+2026-11-10 冻结源码复验：881 轮/881 样本，同一 renderer PID/start ticks `3865190/332109387`，首末窗口 RSS 低点 291,254,272→455,761,920 bytes（+164,507,648 bytes，超过 128 MiB 门槛 30,289,920 bytes）。JS heap 低点 +8,263,784 bytes，峰值 heap/RSS 为 169,341,960/530,468,864 bytes；pageerror、RSS 采样错误为空，React measure 为零，源目录指纹前后同为 `d7a275d561fd25013d3161ffe6bd09570bb8b544d73bf9fbec1db2fd869f716c`。测试在 RSS 断言失败，末尾音频归零断言未执行；此前一次窄裕量通过不能覆盖此红灯，仍未证明长期 RSS 已稳定。
+
+2026-11-10 transcript 虚拟列表现先用 index+key 核对虚拟项仍属于当前 rows，再创建逐行边界；已删除/重排的旧虚拟项会跳过，越界 key 有唯一回退。显示行数可以随历史整理变化，正文、审批、序号、音频及预算均未放宽。该 renderer 改动后的 30 分钟自然 GC RSS 验收待执行；上面的 RSS 红灯是本保护之前的版本，不代表本次版本结果。
+
+2026-11-10 transcript 虚拟行保护后的固定源码 30 分钟复验仍红：881 轮/881 样本，同 renderer PID/start ticks `4165562/332373159`，首末窗口 RSS 低点 300,244,992→457,474,048 bytes（+157,229,056 bytes＞128 MiB）；JS heap 低点 +6,437,372 bytes，峰值 heap/RSS 160,743,648/496,766,976 bytes。pageerror、RSS 采样错误为空，React measure 为零，源目录指纹前后同为 `2146cbf8ac03e9294e1ecdbacaf7fd0e0ba3519cb50f827e87b12ad792253fbe`。RSS 断言失败，最后音频归零断言未执行；显示行 index/key 修复没有验证或声称解决长期 RSS。
+
+后续固定源码十分钟原生快照诊断的 RSS 低点增长 27,983,872 bytes，未发现可直接归因的单一内存类别。快照可能影响自然回收，短测通过不覆盖上述三十分钟红灯；具体过程、受检范围和证据见[原生内存归因](session-native-memory-attribution.md#2026-11-10固定源码的十分钟自然采样与原生快照)。

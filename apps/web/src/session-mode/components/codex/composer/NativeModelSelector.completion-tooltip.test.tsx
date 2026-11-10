@@ -99,7 +99,7 @@ function protect(s: Surface, changed = false, current = A) {
     expect(s.cache.openAiModels).toBe(s.response.data); expect(s.cache.modelSnapshot).toBe(s.response.data);
     s.response.data.forEach((record, i) => { expect(record).toBe(s.before.records[i]); expect(record.supportedReasoningEfforts).toBe(s.before.efforts[i]); expect(record.serviceTiers).toBe(s.before.tiers[i]); });
   }
-  for (const read of Object.values(api)) { expect(read).toHaveBeenCalledTimes(s.readCount); expect(read).toHaveBeenCalledWith(); }
+  for (const read of Object.values(api)) { expect(read).toHaveBeenCalledTimes(s.readCount); expect(read).toHaveBeenCalledWith({ signal: expect.any(AbortSignal) }); }
   if (changed) {
     const stable = (value: typeof s.before.a) => { const { model, providerModels, reasoningEffort, revision, pending, pendingFields, notice, ...rest } = value; return rest; };
     expect(stable(entry())).toEqual(stable(s.before.aValue));

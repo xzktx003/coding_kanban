@@ -190,3 +190,89 @@ for (const [width, ambiguous] of [
       await stream.close();
     }
   });
+
+test("a busy shared status worker does not turn an unstarted receipt read into a timeout", async ({
+  page,
+  baseURL,
+}) => {
+  test.setTimeout(90_000);
+  const fixture = await installSessionUxFixture(page, 1);
+  let receiptReads = 0;
+  await page.route(
+    "**/api/session/followups/steer-receipts?**",
+    async (route) => {
+      receiptReads++;
+      await route.fulfill({
+        json: {
+          data: [
+            {
+              sourceId: "queued-operation",
+              operationId: "queued-operation",
+              clientId: "queued-client",
+              threadId: "ux-0",
+              turnId: "original-turn",
+              scope: "fixture-old-scope",
+              namespace: "ux-fixture-native-domain",
+              createdAt: 1,
+              status: "accepted",
+              nativeIdentityUnique: true,
+              text: "Receipt restored after the busy worker",
+              images: [],
+            },
+          ],
+          nextCursor: null,
+        },
+      });
+    },
+  );
+  const stream = await liveStream(page, baseURL!);
+  try {
+    await page.goto("/?mode=session", { waitUntil: "domcontentloaded" });
+    await seedSessionUx(page, 1);
+    await page.evaluate(async () => {
+      const path = "/src/session-mode/services/sessionReadQueue.ts";
+      const { enqueueSessionRead } = await import(
+        performance
+          .getEntriesByType("resource")
+          .findLast((entry) => new URL(entry.name).pathname === path)?.name ??
+          path
+      );
+      let started!: () => void;
+      const active = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      void enqueueSessionRead(
+        "status",
+        "isolated-steer-busy-worker",
+        () =>
+          new Promise<void>((resolve) => {
+            (window as any).__releaseSteerBusyWorker = resolve;
+            started();
+          }),
+      );
+      await active;
+    });
+    await page
+      .getByRole("button", { name: /Agent: Codex 中文会话 0/ })
+      .first()
+      .click();
+    await page.waitForTimeout(10_500);
+    expect(receiptReads).toBe(0);
+    await expect(page.getByText("补充说明读取超时，请重试。")).toHaveCount(0);
+    await page.evaluate(() => (window as any).__releaseSteerBusyWorker());
+    await expect(
+      page.locator('[data-steer-receipt="queued-operation"]'),
+    ).toBeVisible({ timeout: 20_000 });
+    expect(receiptReads).toBe(1);
+    expect(
+      fixture.calls.filter((call) =>
+        /turn\/(?:start|steer)|thread\/resume/.test(call.path),
+      ),
+    ).toEqual([]);
+  } finally {
+    await page
+      .evaluate(() => (window as any).__releaseSteerBusyWorker?.())
+      .catch(() => {});
+    await stream.close();
+  }
+});

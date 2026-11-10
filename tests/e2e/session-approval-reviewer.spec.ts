@@ -8,6 +8,7 @@ test("approval-for-me reaches the queued native turn without expanding permissio
   const f = await setup(page);
   try {
     await page.locator(".session-access-trigger").first().click();
+    await page.getByRole("button", { name: "更多权限", exact: true }).click();
     await expect(
       page.getByRole("menuitemradio", { name: /^帮我批准/ }),
     ).toBeDisabled();
@@ -66,6 +67,7 @@ test("approval-for-me reaches the queued native turn without expanding permissio
     await page
       .getByRole("button", { name: "执行权限：请求批准", exact: true })
       .click();
+    await page.getByRole("button", { name: "更多权限", exact: true }).click();
     const autoReview = page.getByRole("menuitemradio", { name: /^帮我批准/ });
     await expect(autoReview).toBeEnabled();
     await autoReview.click();
@@ -80,7 +82,9 @@ test("approval-for-me reaches the queued native turn without expanding permissio
     await expect(
       page.getByRole("status", { name: "本轮结束后发送", exact: true }),
     ).toBeVisible();
-    await composer.getByRole("button", { name: "加入队列", exact: true }).click();
+    await composer
+      .getByRole("button", { name: "加入队列", exact: true })
+      .click();
     await expect
       .poll(async () => (await f.queue.get("ux-0")).items.length)
       .toBe(1);

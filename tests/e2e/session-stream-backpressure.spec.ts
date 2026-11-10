@@ -22,8 +22,10 @@ test("a suspended browser frame cannot accumulate an unlimited delta batch and f
     (window as any).$RefreshSig$ = () => (type: unknown) => type;
     (window as any).__vite_plugin_react_preamble_installed__ = true;
     const main = await (await fetch("/src/main.tsx")).text();
-    const thread = await (
-      await fetch("/src/session-mode/components/codex/thread/CodexThread.tsx")
+    const transcript = await (
+      await fetch(
+        "/src/session-mode/components/codex/thread/CodexTranscript.tsx",
+      )
     ).text();
     const dependency = (source: string, name: string) => {
       const path = [...source.matchAll(/from "([^"]+)"/g)]
@@ -41,7 +43,7 @@ test("a suspended browser frame cannot accumulate an unlimited delta batch and f
     ] = await Promise.all([
       dependency(main, "react"),
       dependency(main, "react-dom_client"),
-      dependency(thread, "react-dom"),
+      dependency(transcript, "react-dom"),
       import("/src/session-mode/components/codex/hooks/useServerNotificationHandler.ts"),
       import("/src/session-mode/components/codex/stores/index.ts"),
     ]);

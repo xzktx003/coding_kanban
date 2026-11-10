@@ -7,6 +7,7 @@ import { NativeComposerIcon } from "./NativeComposerIcon";
 import { ComposerTooltip } from "./ComposerTooltip";
 import { ComposerFooterLabel } from "./ComposerToolbarContext";
 import { useModels } from "../hooks/useModels";
+import { useThreadModelStore } from "@session/stores/useThreadModelStore";
 import { useOrdinaryNativePickerModels } from "./ordinaryNativePickerModels";
 import { nativeReasoningLabel } from "./nativeReasoningLabel";
 import {
@@ -49,7 +50,10 @@ export const NativeModelTrigger = forwardRef<
   const threadId = useCodexStore((s) => s.currentThreadId);
   const { model, modelProvider, reasoningEffort } =
     useThreadModelSettings(threadId);
-  const { providerItems, openAiModels, modelStatus } = useModels();
+  const hasThreadModel =
+    !!threadId && !!useThreadModelStore.getState().threads[threadId];
+  const { providerItems, openAiModels, modelStatus, hasModelSnapshot } =
+    useModels();
   useEffect(() => {
     if (threadId !== null || modelStatus !== "success") return;
     const state = useConfigStore.getState();
@@ -99,13 +103,29 @@ export const NativeModelTrigger = forwardRef<
       (threadId !== null && reasoningEffort === null))
       ? nativeDisplayReasoningEffort(reasoningEffort, options)
       : reasoningEffort;
-  const label =
-    ((modelProvider === "openai"
-      ? catalog?.displayName || catalog?.model
-      : providerItems(modelProvider).find((item) => item.id === model)
-          ?.label) ??
-      model) ||
-    "选择模型";
+  const loggedOutClosed =
+    threadId === null &&
+    !model &&
+    modelProvider === "openai" &&
+    modelStatus === "success" &&
+    !openAiModels?.length;
+  const catalogUnavailable =
+    modelProvider === "openai" &&
+    modelStatus === "error" &&
+    !hasModelSnapshot &&
+    !model;
+  const label = catalogUnavailable
+    ? "模型目录不可用"
+    : loggedOutClosed
+      ? "自定义"
+      : model === "" && hasThreadModel
+        ? ""
+        : ((modelProvider === "openai"
+            ? catalog?.displayName || catalog?.model
+            : providerItems(modelProvider).find((item) => item.id === model)
+                ?.label) ??
+            model) ||
+          "选择模型";
   const effort = displayedEffort || "默认";
   const enhancedTrigger =
     !configurationLabel &&
@@ -117,7 +137,11 @@ export const NativeModelTrigger = forwardRef<
   const triggerProps: React.ComponentProps<typeof Button> = {
     "aria-label": configurationLabel ?? (modelPending
       ? "Loading model…"
-      : `模型：${model || "选择模型"}，${effort}`),
+      : catalogUnavailable
+        ? "模型目录不可用"
+        : loggedOutClosed
+          ? "自定义，中"
+          : `模型：${model || "选择模型"}，${effort}`),
     ...props,
   };
   if (showPurpose) {
@@ -168,7 +192,7 @@ export const NativeModelTrigger = forwardRef<
         className="session-model-trigger session-native-model-trigger"
         {...triggerProps}
         disabled={(!configurationLabel && modelPending) || props.disabled}
-        aria-busy={modelPending || undefined}
+        aria-busy={modelPending || props["aria-busy"] || undefined}
       >
         {enhancedTrigger ? (
           <span

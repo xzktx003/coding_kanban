@@ -157,6 +157,7 @@ it("initializing the new-chat model also preserves a supported reasoning prefere
     model: "",
     providerModels: {},
     reasoningEffort: "high",
+    modelSelectionMode: "manual",
   });
   render(<ModelReasonSelector mode="panel" threadId={null} />);
   expect(useConfigStore.getState()).toMatchObject({

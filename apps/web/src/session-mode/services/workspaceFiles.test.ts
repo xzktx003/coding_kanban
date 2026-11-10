@@ -156,6 +156,21 @@ describe("workspaceFiles transfer helpers", () => {
       { suppressToast: true },
     );
   });
+  test("file reads forward cancellation to the captured workspace request", async () => {
+    const controller = new AbortController();
+    vi.mocked(postJsonWithOptions).mockResolvedValueOnce({
+      content: "ok",
+      version: "v",
+    });
+    await readWorkspaceText("/project", "/project/a.ts", {
+      signal: controller.signal,
+    });
+    expect(postJsonWithOptions).toHaveBeenLastCalledWith(
+      "/workspace-files/read",
+      { root: "/project", path: "/project/a.ts" },
+      { suppressToast: true, signal: controller.signal },
+    );
+  });
   test("a project symlink denied by the project resolver is resolved through the local endpoint", async () => {
     vi.mocked(postJsonWithOptions)
       .mockReset()

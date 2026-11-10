@@ -8,7 +8,11 @@ import {
   Plus,
   Search,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import {
+  useEffect,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import { NewAgentButton } from "../common/NewAgentButton";
 import { useTranslation } from "react-i18next";
 import { SideBarBotPane } from "@session/components/bot";
@@ -28,6 +32,7 @@ import {
   SidebarFooter,
   SidebarHeader,
   SidebarTrigger,
+  useSidebar,
 } from "@session/components/ui/sidebar";
 import { useIsMobile } from "@session/hooks/use-mobile";
 import { isPhone } from "@session/hooks/runtime";
@@ -43,6 +48,7 @@ import { UserInfo } from "./UserInfo";
 
 export function AppSideBar() {
   const mobile = useIsMobile();
+  const sidebar = useSidebar();
   const { t } = useTranslation("sidebar");
   const { activeSidebarTab, sidebarMode, setHasSeenBotTab } = useLayoutStore();
   const [sessionManagerOpen, setSessionManagerOpen] = useState(false);
@@ -107,9 +113,21 @@ export function AppSideBar() {
           </div>
         </SidebarHeader>
 
-        <SidebarContent className="min-w-0 max-w-full overflow-x-hidden gap-0 px-0">
-
-
+        <SidebarContent
+          className="min-w-0 max-w-full overflow-x-hidden gap-0 px-0"
+          onClickCapture={(event: ReactMouseEvent<HTMLDivElement>) => {
+            if (!sidebar.isMobile || !sidebar.openMobile) return;
+            const target = event.target;
+            if (!(target instanceof Element)) return;
+            if (
+              !target.closest(".session-nav-row[role='button']") ||
+              target.closest(".session-row-menu")
+            ) {
+              return;
+            }
+            sidebar.setOpenMobile(false);
+          }}
+        >
           <SideBarPinnedList />
 
           <Collapsible className="session-sidebar-projects" open={projectsOpen} onOpenChange={setProjectsOpen}>

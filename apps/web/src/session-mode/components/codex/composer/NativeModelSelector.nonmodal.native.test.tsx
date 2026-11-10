@@ -128,7 +128,7 @@ function guard(s: Surface, providerChanged = false, readCount = 1) {
     expect(useModelCacheStore.getState().openAiModels).toBe(s.records); expect(useModelCacheStore.getState().modelSnapshot).toBe(s.records);
     s.records.forEach((row, i) => { expect(row).toBe(s.before.recordRefs[i]); expect(row.supportedReasoningEfforts).toBe(s.before.effortRefs[i]); });
   }
-  for (const read of Object.values(api)) { expect(read).toHaveBeenCalledTimes(readCount); expect(read).toHaveBeenCalledWith(); }
+  for (const read of Object.values(api)) { expect(read).toHaveBeenCalledTimes(readCount); expect(read).toHaveBeenCalledWith({ signal: expect.any(AbortSignal) }); }
 }
 async function frames() { await act(async () => { await new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))); }); }
 async function open(s: Surface) {

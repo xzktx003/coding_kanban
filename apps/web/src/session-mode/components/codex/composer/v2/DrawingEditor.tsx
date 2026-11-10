@@ -7,19 +7,16 @@ import {
   type CSSProperties,
 } from "react";
 import {
-  Hand,
   MousePointer2,
   Pencil,
   ArrowUpRight,
   Circle,
   Square,
   Type,
-  MessageSquare,
   Undo2,
   Redo2,
   Trash2,
-  Minus,
-  Plus,
+  Paperclip,
   Slash,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -49,6 +46,25 @@ import {
   type DrawingMark,
   type Point,
 } from "./drawing";
+
+function EraserGlyph() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M21 21H8a2 2 0 0 1-1.42-.587l-3.994-3.999a2 2 0 0 1 0-2.828l10-10a2 2 0 0 1 2.829 0l5.999 6a2 2 0 0 1 0 2.828L12.834 21" />
+      <path d="m5.082 11.09 8.828 8.828" />
+    </svg>
+  );
+}
 
 function DrawingText({
   mark,
@@ -123,9 +139,12 @@ export function DrawingEditor({
     [ready, setReady] = useState(!item),
     [error, setError] = useState<string | null>(null),
     [saving, setSaving] = useState(false);
+  const [shapesOpen, setShapesOpen] = useState(false);
   const [tool, setTool] = useState<DrawingTool>("pen"),
-    [color, setColor] = useState("#d76b26"),
-    [width, setWidth] = useState(4);
+    [color, setColor] = useState("#ffffff"),
+    [customColor, setCustomColor] = useState("#a855f7"),
+    [preset, setPreset] = useState("#ffffff"),
+    [width, setWidth] = useState(12);
   const [view, setView] = useState({ x: 0, y: 0, zoom: 1 }),
     [active, setActive] = useState<DrawingMark | null>(null),
     [redo, setRedo] = useState<DrawingMark[]>([]),
@@ -317,6 +336,12 @@ export function DrawingEditor({
       };
       return;
     }
+    if (tool === "eraser") {
+      const target = point(e);
+      const index = docRef.current.marks.reduce((found, mark, markIndex) => mark.points.some((item) => Math.hypot(item.x - target.x, item.y - target.y) <= Math.max(12, mark.width + 8)) ? markIndex : found, -1);
+      if (index >= 0) { setRedo((items) => [...items, docRef.current.marks[index]]); commit({ ...docRef.current, marks: docRef.current.marks.filter((_, markIndex) => markIndex !== index) }); }
+      return;
+    }
     if (pointers.current.size > 1 || tool === "hand" || tool === "select")
       return;
     if (tool === "text" || tool === "comment") {
@@ -433,7 +458,7 @@ export function DrawingEditor({
     commit({ ...docRef.current, marks: docRef.current.marks.slice(0, -1) });
   };
   async function save() {
-    if (!ready || saving) return;
+    if (!ready || saving || !docRef.current.marks.length) return;
     setSaving(true);
     setError(null);
     try {
@@ -478,7 +503,7 @@ export function DrawingEditor({
   return (
     <ComposerSheet
       full
-      title={item ? "标注图片" : "画草图"}
+      title={item ? "标注图片" : "草图编辑器"}
       description="返回保留编辑；完成后加入草稿，不直接发送。"
       onClose={() => {
         if (!saving) onClose();
@@ -493,10 +518,13 @@ export function DrawingEditor({
           <button
             type="button"
             className="session-v2-primary"
-            disabled={!ready || saving || !!pending}
+            aria-label="附加草图"
+            title="附加草图"
+            aria-busy={saving || undefined}
+            disabled={!ready || saving || !!pending || !doc.marks.length}
             onClick={() => void save()}
           >
-            {saving ? "正在附加…" : "完成并附加"}
+            <Paperclip />
           </button>
         </>
       }
@@ -552,35 +580,34 @@ export function DrawingEditor({
       >
         {(
           [
-            { id: "select", name: "工件：选择", Icon: MousePointer2 },
-            { id: "arrow", name: "工件：箭头", Icon: ArrowUpRight },
-            { id: "line", name: "工件：直线", Icon: Slash },
-            { id: "hand", name: "工件：平移", Icon: Hand },
+            { id: "select", name: "选择", Icon: MousePointer2 },
             { id: "pen", name: "画笔", Icon: Pencil },
-            { id: "rect", name: "工件：矩形", Icon: Square },
-            { id: "ellipse", name: "工件：圆形", Icon: Circle },
-            { id: "text", name: "工件：文本", Icon: Type },
-            { id: "comment", name: "工件：便签", Icon: MessageSquare },
+            { id: "text", name: "文字", Icon: Type },
           ] as const
         ).map(({ id, name, Icon }) => (
           <button
             type="button"
             key={id}
-            aria-label={id === "comment" ? "批注" : name}
+            aria-label={name}
             title={name}
             aria-pressed={tool === id}
             onClick={() => {
               finish();
               setTool(id);
               setPending(null);
+              setShapesOpen(false);
             }}
           >
             <Icon />
           </button>
         ))}
+        <button type="button" aria-label="形状" title="形状" aria-pressed={["line", "arrow", "rect", "ellipse"].includes(tool)} aria-expanded={shapesOpen} onClick={() => setShapesOpen((open) => !open)}><Square /></button>
+        <button type="button" aria-label="橡皮" title="橡皮" aria-pressed={tool === "eraser"} onClick={() => { finish(); setTool("eraser"); setPending(null); setShapesOpen(false); }}><EraserGlyph /></button>
+        {shapesOpen && <div role="dialog" aria-label="形状">{([["line", "直线", Slash], ["arrow", "箭头", ArrowUpRight], ["rect", "矩形", Square], ["ellipse", "椭圆", Circle]] as const).map(([id, name, Icon]) => <button type="button" aria-label={name} title={name} key={id} onClick={() => { finish(); setTool(id); setShapesOpen(false); }}><Icon /></button>)}</div>}
         <button
           type="button"
-          aria-label="撤销上一笔"
+          aria-label="撤销"
+          title="撤销"
           disabled={!doc.marks.length}
           onClick={undo}
         >
@@ -588,7 +615,8 @@ export function DrawingEditor({
         </button>
         <button
           type="button"
-          aria-label="重做上一笔"
+          aria-label="重做"
+          title="重做"
           disabled={!redo.length}
           onClick={() => {
             const mark = redo.at(-1)!;
@@ -601,53 +629,22 @@ export function DrawingEditor({
         >
           <Redo2 />
         </button>
+        <section aria-label={item ? "标注图片" : "草图编辑器"}>
+        {([["使用白色", "#ffffff"], ["使用灰色", "#6b7280"], ["使用棕色", "#92400e"], ["使用红色", "#dc2626"], ["使用橙色", "#f97316"], ["使用黄色", "#f59e0b"], ["使用绿色", "#16a34a"], ["使用蓝绿色", "#0d9488"], ["使用青色", "#06b6d4"], ["使用蓝色", "#2563eb"], ["使用靛蓝色", "#4f46e5"], ["使用紫色", "#9333ea"], ["使用粉色", "#db2777"]] as const).map(([name, value]) => <button type="button" key={value} aria-label={name} aria-pressed={preset === value} style={{ background: value }} onClick={() => { setPreset(value); setColor(value); }} />)}
         <label>
-          颜色
           <input
             type="color"
-            aria-label="画笔颜色"
-            value={color}
-            onChange={(e) => setColor(e.target.value)}
+            aria-label="选择自定义颜色"
+            value={customColor}
+            onChange={(event) => { setPreset(""); setCustomColor(event.target.value); setColor(event.target.value); }}
           />
         </label>
         <label>
-          线宽
-          <select
-            aria-label="线宽"
-            value={width}
-            onChange={(e) => setWidth(Number(e.target.value))}
-          >
-            {[2, 4, 8, 12].map((w) => (
-              <option key={w} value={w}>
-                {w}
-              </option>
-            ))}
-          </select>
+          <input aria-label="线宽" type="range" min={2} max={48} value={width} onChange={(event) => setWidth(Number(event.target.value))} />
         </label>
+        </section>
       </div>
-      <div className="session-drawing-zoom">
-        <button
-          type="button"
-          aria-label="缩小画布"
-          onClick={() =>
-            setView((v) => ({ ...v, zoom: Math.max(0.25, v.zoom / 1.25) }))
-          }
-        >
-          <Minus />
-        </button>
-        <button type="button" onClick={() => setView({ x: 0, y: 0, zoom: 1 })}>
-          {Math.round(view.zoom * 100)}% · 复位视图
-        </button>
-        <button
-          type="button"
-          aria-label="放大画布"
-          onClick={() =>
-            setView((v) => ({ ...v, zoom: Math.min(5, v.zoom * 1.25) }))
-          }
-        >
-          <Plus />
-        </button>
-      </div>
+
       <div className="session-drawing-stage">
         <svg
           ref={svg}

@@ -27,12 +27,12 @@ vi.mock("../thread/rowState", () => ({
 it("mounts one session column body and composer with the plugin surface markers", () => {
   const view = render(
     <div data-session-column>
-      <UserMessageItem content={[{ type: "text", text: "看一下这个函数" }]} />
+      <UserMessageItem content={[{ type: "text", text: "看一下这个函数", text_elements: [] }]} />
       <AgentMessageItem text={"结果如下\n\n| 名称 | 值 |\n| --- | --- |\n| a | 1 |"} />
       <NativeCodeFence code="const value = 1;" language="typescript" />
       <NativeToolDisclosure summary="读取文件">body</NativeToolDisclosure>
       <ReasoningSummaryItem summary={["**标题**\n\n先看范围"]} />
-      <ComposerEditor value="" onChange={() => {}} placeholder="可向 Codex 询问任何问题。输入 @ 使用插件或提及文件" />
+      <ComposerEditor value="" onChange={() => {}} onSubmit={() => {}} placeholder="可向 Codex 询问任何问题。输入 @ 使用插件或提及文件" />
     </div>,
   );
   expect(view.container.querySelector("[data-message-author=user]")?.textContent).toContain(

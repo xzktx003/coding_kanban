@@ -3,7 +3,7 @@ import { installSessionUxFixture, seedSessionUx } from "./session-ux-fixture";
 
 for(const width of [1440,393])test(`real file editor preserves full documents and unsaved per-file drafts across tools with guarded hidden input (${width}px)`, async ({
   page,
-}) => {
+}, info) => {
   test.setTimeout(90000);
   await page.setViewportSize({width,height:900});
   const complete = Array.from(
@@ -274,7 +274,7 @@ for(const width of [1440,393])test(`real file editor preserves full documents an
     ).toBe(false);
   }
   await page.screenshot({
-    path: `.dev-runtime/session-uiux/files-draft-safety-${width}.png`,
+    path: info.outputPath(`files-draft-safety-${width}.png`),
   });
   expect(
     fileRequests

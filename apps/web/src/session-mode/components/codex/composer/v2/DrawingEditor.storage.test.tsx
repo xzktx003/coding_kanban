@@ -43,6 +43,91 @@ afterEach(() => {
   exportImage.mockReset();
 });
 
+it("keeps an empty sketch from attaching", () => {
+  render(<DrawingEditor owner={"drawing-empty:" + crypto.randomUUID()} attachments={{ addFiles: vi.fn() } as any} onClose={vi.fn()} />);
+  const attach = screen.getByRole("button", { name: "附加草图" }) as HTMLButtonElement;
+  expect(attach.disabled).toBe(true);
+  expect(attach.textContent).toBe("");
+  expect(attach.getAttribute("title")).toBe("附加草图");
+});
+
+it("opens four shape choices from one menu", () => {
+  render(<DrawingEditor owner={"drawing-shapes:" + crypto.randomUUID()} attachments={{ addFiles: vi.fn() } as any} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "形状" }));
+  expect(screen.getByRole("dialog", { name: "形状" })).toBeTruthy();
+  for (const name of ["直线", "箭头", "矩形", "椭圆"]) {
+    const item = screen.getByRole("button", { name });
+    expect(item.textContent).toBe("");
+    expect(item.getAttribute("title")).toBe(name);
+  }
+  fireEvent.click(screen.getByRole("button", { name: "直线" }));
+  expect(screen.getByRole("button", { name: "形状" }).getAttribute("aria-pressed")).toBe("true");
+  expect(screen.queryByRole("dialog", { name: "形状" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "形状" }));
+  fireEvent.click(screen.getByRole("button", { name: "形状" }));
+  expect(screen.getByRole("button", { name: "形状" }).getAttribute("aria-pressed")).toBe("true");
+  expect(screen.queryByRole("dialog", { name: "形状" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "形状" }));
+  fireEvent.click(screen.getByRole("button", { name: "矩形" }));
+  fireEvent.click(screen.getByRole("button", { name: "画笔" }));
+  expect(screen.getByRole("button", { name: "画笔" }).getAttribute("aria-pressed")).toBe("true");
+  expect(screen.getByRole("button", { name: "形状" }).getAttribute("aria-pressed")).toBe("false");
+  fireEvent.click(screen.getByRole("button", { name: "形状" }));
+  fireEvent.click(screen.getByRole("button", { name: "椭圆" }));
+  fireEvent.click(screen.getByRole("button", { name: "文字" }));
+  expect(screen.getByRole("button", { name: "文字" }).getAttribute("aria-pressed")).toBe("true");
+  expect(screen.getByRole("button", { name: "形状" }).getAttribute("aria-pressed")).toBe("false");
+  fireEvent.click(screen.getByRole("button", { name: "形状" }));
+  fireEvent.click(screen.getByRole("button", { name: "椭圆" }));
+  fireEvent.click(screen.getByRole("button", { name: "橡皮" }));
+  expect(screen.getByRole("button", { name: "橡皮" }).getAttribute("aria-pressed")).toBe("true");
+  expect(screen.getByRole("button", { name: "形状" }).getAttribute("aria-pressed")).toBe("false");
+  fireEvent.click(screen.getByRole("button", { name: "形状" }));
+  expect(screen.getByRole("dialog", { name: "形状" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "画笔" }));
+  expect(screen.getByRole("button", { name: "画笔" }).getAttribute("aria-pressed")).toBe("true");
+  expect(screen.queryByRole("dialog", { name: "形状" })).toBeNull();
+  expect(screen.getByRole("button", { name: "形状" }).getAttribute("aria-expanded")).toBe("false");
+});
+
+it("selects a preset ink color without changing saved strokes", () => {
+  const owner = "drawing-color:" + crypto.randomUUID();
+  composerDrafts.drawing(owner, "sketch", document(["saved"]));
+  render(<DrawingEditor owner={owner} attachments={{ addFiles: vi.fn() } as any} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "使用红色" }));
+  expect(screen.getByRole("button", { name: "使用红色" }).getAttribute("aria-pressed")).toBe("true");
+  expect(composerDrafts.read(owner).drawings.sketch.marks[0].color).not.toBe("#dc2626");
+});
+
+it("names a new sketch editor and its ink controls", () => {
+  render(<DrawingEditor owner={"drawing-label:" + crypto.randomUUID()} attachments={{ addFiles: vi.fn() } as any} onClose={vi.fn()} />);
+  expect(screen.getByRole("region", { name: "草图编辑器" })).toBeTruthy();
+  for (const name of ["选择", "画笔", "橡皮", "文字", "撤销", "重做"]) expect(screen.getByRole("button", { name })).toBeTruthy();
+  const eraserIcon = screen
+    .getByRole("button", { name: "橡皮" })
+    .querySelector("svg");
+  expect(eraserIcon?.getAttribute("viewBox")).toBe("0 0 24 24");
+  expect(screen.queryByRole("button", { name: "平移" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "批注" })).toBeNull();
+  const shapes = screen.getByRole("button", { name: "形状" });
+  expect(shapes.textContent).toBe("");
+  expect(shapes.getAttribute("title")).toBe("形状");
+  expect(screen.queryByRole("button", { name: "缩小画布" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "放大画布" })).toBeNull();
+  expect(screen.getByRole("button", { name: "撤销" }).getAttribute("title")).toBe("撤销");
+  expect(screen.getByRole("button", { name: "重做" }).getAttribute("title")).toBe("重做");
+  expect((screen.getByRole("button", { name: "撤销" }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole("button", { name: "重做" }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByLabelText("选择自定义颜色") as HTMLInputElement).value).toBe("#a855f7");
+  expect(screen.queryByText("颜色")).toBeNull();
+  expect(screen.getByRole("button", { name: "画笔" }).getAttribute("aria-pressed")).toBe("true");
+  expect(screen.getByRole("button", { name: "使用白色" }).getAttribute("aria-pressed")).toBe("true");
+  fireEvent.change(screen.getByLabelText("选择自定义颜色"), { target: { value: "#112233" } });
+  expect(screen.getByRole("button", { name: "使用白色" }).getAttribute("aria-pressed")).toBe("false");
+  expect((screen.getByLabelText("线宽") as HTMLInputElement).value).toBe("12");
+  expect(screen.queryByText("线宽")).toBeNull();
+});
+
 it("a delayed image export clears only its captured drawing and preserves later strokes", async () => {
   const owner = "drawing-export:" + crypto.randomUUID();
   await composerDrafts.ensure(owner);
@@ -64,7 +149,7 @@ it("a delayed image export clears only its captured drawing and preserves later 
       onClose={close}
     />,
   );
-  fireEvent.click(screen.getByText("完成并附加"));
+  fireEvent.click(screen.getByRole("button", { name: "附加草图" }));
   await waitFor(() => expect(exportImage).toHaveBeenCalledOnce());
   act(() =>
     composerDrafts.drawing(owner, "sketch", document(["exported", "later"])),

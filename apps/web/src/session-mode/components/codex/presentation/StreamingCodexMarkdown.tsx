@@ -149,6 +149,7 @@ export function StreamingCodexMarkdown({
         <LiveMarkdownTail
           key={`${state.generation}:${state.stable.length}`}
           value={state.pending + current}
+          threadId={threadId}
         />
       ) : (
         <>

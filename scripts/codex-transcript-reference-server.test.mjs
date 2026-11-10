@@ -15,7 +15,7 @@ test("current transcript reference exposes only read-only fixtures and unchanged
     child.once("exit", code => reject(new Error(`fixture exited ${code}`)));
   });
   try {
-    assert.equal(identity.version, "26.51007.21434");
+    assert.equal(identity.version, "26.51021.22027");
     const base = new URL(identity.urls[0]).origin;
     const html = await fetch(`${base}/native-transcript.html`);
     assert.equal(html.status, 200);
@@ -23,9 +23,9 @@ test("current transcript reference exposes only read-only fixtures and unchanged
     assert.equal((await fetch(`${base}/native-transcript-reference.js`)).status, 200);
     assert.equal((await fetch(`${base}/native-transcript.html`, { method: "POST" })).status, 405);
     assert.equal((await fetch(`${base}/package.json`)).status, 404);
-    const name = "sites-end-resource-733bd1c6da06.js";
+    const name = "index-e622cadf605d.js";
     const bytes = Buffer.from(await (await fetch(`${base}/assets/${name}`)).arrayBuffer());
-    const original = await readFile(`third_party/openai.chatgpt-26.51007.21434-linux-x64/extension/webview/assets/${name}`);
+    const original = await readFile(`third_party/openai.chatgpt-26.51021.22027-linux-x64/extension/webview/assets/${name}`);
     assert.equal(createHash("sha256").update(bytes).digest("hex"), createHash("sha256").update(original).digest("hex"));
   } finally { child.kill("SIGTERM"); await stopped; }
 });

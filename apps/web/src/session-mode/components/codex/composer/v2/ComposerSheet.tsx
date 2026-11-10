@@ -16,6 +16,7 @@ export function ComposerSheet({
   footer,
   full = false,
   returnFocus,
+  closeLabel,
 }: {
   title: string;
   description?: string;
@@ -24,7 +25,9 @@ export function ComposerSheet({
   footer?: ReactNode;
   full?: boolean;
   returnFocus?: () => void;
+  closeLabel?: string;
 }) {
+  const accessibleCloseLabel = closeLabel ?? (full ? "关闭草图编辑器" : "关闭面板");
   useComposerSheetHistory(onClose);
   return (
     <Dialog
@@ -52,7 +55,8 @@ export function ComposerSheet({
           <button
             type="button"
             onClick={onClose}
-            aria-label={full ? "返回并保留草稿" : "关闭面板"}
+            aria-label={accessibleCloseLabel}
+            title={full ? accessibleCloseLabel : undefined}
           >
             {full ? <ArrowLeft /> : <X />}
           </button>

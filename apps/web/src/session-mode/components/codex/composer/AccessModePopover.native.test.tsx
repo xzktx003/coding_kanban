@@ -29,12 +29,35 @@ it("keeps the active native planning mode visible in the compact permission trig
   render(<AccessModePopover threadId="owner" />);
   expect(screen.getByRole("button", { name: "执行权限：plan" })).toBeDefined();
 });
+it("keeps only approval and full access on the official first permission level", async () => {
+  native.mode = "default";
+  render(<AccessModePopover threadId="owner" />);
+  fireEvent.keyDown(screen.getByRole("button", { name: /执行权限/ }), { key: "ArrowDown" });
+  expect(await screen.findByRole("menuitemradio", { name: /请求批准/ })).toBeDefined();
+  expect(screen.getByRole("menuitemradio", { name: /完全访问权限/ })).toBeDefined();
+  expect(screen.queryByRole("menuitemradio", { name: /帮我批准/ })).toBeNull();
+  expect(screen.queryByRole("menuitemradio", { name: "只读" })).toBeNull();
+  expect(screen.queryByRole("menuitem", { name: "计划模式" })).toBeNull();
+});
+
+it("shows both permission descriptions immediately and keeps them after Learn more", async () => {
+  native.mode = "default";
+  render(<AccessModePopover threadId="owner" />);
+  fireEvent.keyDown(screen.getByRole("button", { name: /执行权限/ }), { key: "ArrowDown" });
+  expect(await screen.findByText("编辑外部文件和使用互联网时始终询问")).toBeDefined();
+  expect(screen.getByText("可不受限制地访问互联网和你电脑上的任何文件")).toBeDefined();
+  fireEvent.click(screen.getByRole("button", { name: "了解更多" }));
+  expect(screen.getByText("编辑外部文件和使用互联网时始终询问")).toBeDefined();
+  expect(screen.queryByRole("link", { name: "了解更多" })).toBeNull();
+});
+
 it("uses real default permissions and does not enable native auto approval without an authoritative capability", async () => {
   native.mode = "default";
   render(<AccessModePopover threadId="owner" />);
   fireEvent.keyDown(screen.getByRole("button", { name: /执行权限/ }), {
     key: "ArrowDown",
   });
+  fireEvent.click(screen.getByRole("button", { name: "更多权限" }));
   expect(
     (
       await screen.findByRole("menuitemradio", { name: /帮我批准/ })

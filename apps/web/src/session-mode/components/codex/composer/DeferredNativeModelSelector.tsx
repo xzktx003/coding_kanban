@@ -1,5 +1,6 @@
 import { useConfigStore } from "../stores/useConfigStore";
 import { useNewChatModelConfig } from "../hooks/useNewChatModelConfig";
+import { newChatModelConfigStatusLabel } from "@session/services/newChatModelConfig";
 import { lazy, Suspense, useState } from "react";
 import { activeDraftOwner } from "@session/stores/useInputStore";
 import { isSessionInteractionVisible } from "@session/session-dom";
@@ -16,10 +17,24 @@ export function DeferredNativeModelSelector(props: { threadId: string | null; dr
   const current = requested?.owner === owner;
   const follows = useConfigStore(s => props.threadId === null && s.modelSelectionMode === "follow-config");
   const configured = useNewChatModelConfig(follows && !current, false);
-  const trigger = <NativeModelTrigger configurationLabel={follows ? `跟随配置 · ${configured.value?.model ?? (configured.error ? "无法核实" : "读取中…")}` : undefined} aria-busy={current || undefined} onClick={(event) => {
-    if (!isSessionInteractionVisible() || event.currentTarget.closest("[hidden], [inert]") || (props.draftOwner && activeDraftOwner() !== props.draftOwner)) return;
-    setRequested({ owner, scope: captureCodexOperationScope() });
-  }} />;
+  const configurationLabel = follows
+    ? `跟随配置 · ${newChatModelConfigStatusLabel(configured)}`
+    : undefined;
+  const trigger = (
+    <NativeModelTrigger
+      configurationLabel={configurationLabel}
+      aria-busy={configured.loading || current || undefined}
+      onClick={(event) => {
+        if (
+          !isSessionInteractionVisible() ||
+          event.currentTarget.closest("[hidden], [inert]") ||
+          (props.draftOwner && activeDraftOwner() !== props.draftOwner)
+        )
+          return;
+        setRequested({ owner, scope: captureCodexOperationScope() });
+      }}
+    />
+  );
   if (!current) return trigger;
   return <OptionalSessionPanel label="模型选择" overlay onClose={() => setRequested(null)}>
     <Suspense fallback={<>{trigger}<div role="status" className="session-optional-panel-error session-optional-panel-overlay"><strong>正在加载模型选择</strong><button type="button" onClick={() => setRequested(null)}>取消打开</button></div></>}>

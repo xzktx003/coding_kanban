@@ -68,6 +68,7 @@ import type {
 import {
   SessionApiError,
   getJson,
+  getJsonWithOptions,
   postJson,
   postJsonWithOptions,
   postNoContent,
@@ -76,12 +77,16 @@ import {
 export * from "./mcp";
 export * from "./skills";
 
-export async function listModels() {
+export async function listModels(options?: { signal?: AbortSignal }) {
   const params: ModelListParams = {
     cursor: null,
     limit: 100,
   };
-  return await postJson<ModelListResponse>("/api/codex/model/list", params);
+  return await postJsonWithOptions<ModelListResponse>(
+    "/api/codex/model/list",
+    params,
+    options,
+  );
 }
 
 export async function threadStart(
@@ -679,12 +684,18 @@ export async function allowSleep(conversationId?: string | null) {
   });
 }
 
-export async function listOtherModels() {
-  return await getJson<FrontendProviderModels[]>("/api/codex/model/list-other");
+export async function listOtherModels(options?: { signal?: AbortSignal }) {
+  return await getJsonWithOptions<FrontendProviderModels[]>(
+    "/api/codex/model/list-other",
+    options,
+  );
 }
 
-export async function listProviderPresets() {
-  return await getJson<ProviderPreset[]>("/api/codex/provider/presets");
+export async function listProviderPresets(options?: { signal?: AbortSignal }) {
+  return await getJsonWithOptions<ProviderPreset[]>(
+    "/api/codex/provider/presets",
+    options,
+  );
 }
 
 // Persists the provider into the user's codex config.toml.
@@ -701,8 +712,11 @@ export async function addModelProvider(params: {
 }
 
 // Providers actually present in the user's config.toml.
-export async function listConfigProviders() {
-  return await getJson<ConfigProvider[]>("/api/codex/provider/list");
+export async function listConfigProviders(options?: { signal?: AbortSignal }) {
+  return await getJsonWithOptions<ConfigProvider[]>(
+    "/api/codex/provider/list",
+    options,
+  );
 }
 
 export async function removeModelProvider(provider: string) {

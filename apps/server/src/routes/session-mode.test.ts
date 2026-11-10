@@ -372,6 +372,7 @@ test("session gateway chat SSE projection strips tool bodies before browser deli
     const frames = response.body
       .trim()
       .split("\n\n")
+      .filter((frame) => frame !== ": session-stream")
       .map((frame) => JSON.parse(frame.replace(/^data: /, "")));
     assert.equal(frames[0].seq, 1);
     assert.equal(frames[0].payload.params.delta, undefined);
@@ -409,6 +410,74 @@ test("session gateway chat SSE projection strips tool bodies before browser deli
   }
 });
 
+test("session gateway chat SSE sends each frame before the upstream closes", async () => {
+  const app = Fastify();
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  registerSessionModeRoutes(app, {
+    origin: "http://127.0.0.1:12345",
+    fetch: async () =>
+      new Response(
+        new ReadableStream({
+          async start(controller) {
+            controller.enqueue(Buffer.from("data: {\"seq\":1,\"event\":\"codex:notification\",\"payload\":{}}\n\n"));
+            await released;
+            controller.close();
+          },
+        }),
+        { headers: { "content-type": "text/event-stream" } },
+      ),
+  });
+  try {
+    const address = await app.listen({ host: "127.0.0.1", port: 0 });
+    const response = await fetch(`${address}/api/session/api/events?view=chat`);
+    assert.equal(response.headers.get("x-accel-buffering"), "no");
+    assert.equal(response.headers.get("cache-control"), "no-cache, no-transform");
+    const reader = response.body!.getReader();
+    const first = await Promise.race([
+      reader.read(),
+      new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("first SSE frame was buffered")), 1000)),
+    ]);
+    assert.equal(first.done, false, "SSE should stay open after the first frame");
+    assert.ok(first.value);
+    assert.match(Buffer.from(first.value).toString(), /: session-stream/);
+    await reader.cancel();
+  } finally {
+    release();
+    await app.close();
+  }
+});
+
+test("session gateway chat SSE closes a hijacked stream without sending twice", async () => {
+  const app = Fastify();
+  const errors: unknown[] = [];
+  app.addHook("onError", async (_request, _reply, error) => {
+    errors.push(error);
+  });
+  registerSessionModeRoutes(app, {
+    origin: "http://127.0.0.1:9",
+    fetch: async () =>
+      new Response(
+        new ReadableStream({
+          async pull() {
+            await new Promise((resolve) => setTimeout(resolve, 20));
+            throw new Error("upstream closed");
+          },
+        }),
+        { headers: { "content-type": "text/event-stream" } },
+      ),
+  });
+  try {
+    const response = await app.inject({ url: "/api/session/api/events?view=chat" });
+    assert.notEqual(response.statusCode, 500);
+    assert.equal(errors.some((error) => String(error).includes("already sent")), false);
+  } finally {
+    await app.close();
+  }
+});
+
 test("session gateway chat SSE projection stops on oversized frames", async () => {
   const app = Fastify();
   const oversized = "x".repeat(17 * 1024 * 1024);
@@ -438,7 +507,7 @@ test("session gateway chat SSE projection stops on oversized frames", async () =
     });
     assert.equal(response.statusCode, 200);
     assert.equal(response.body.includes(oversized), false);
-    assert.match(response.body, /^event: session-projection-error\n/);
+    assert.match(response.body, /event: session-projection-error\n/);
     assert.match(
       response.body,
       /Session event frame exceeds chat projection limit/,

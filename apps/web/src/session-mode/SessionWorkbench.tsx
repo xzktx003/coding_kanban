@@ -47,25 +47,42 @@ type ConnectionStatus = "checking" | "ready" | "offline";
 function SessionNotice({
   title,
   role,
+  summary,
+  onRetry,
   children,
 }: {
   title: string;
   role: "alert" | "status";
+  summary: string;
+  onRetry: () => void;
   children: ReactNode;
 }) {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   return (
     <div className="session-outage" role={role}>
       <div className="session-outage-heading">
-        <strong>{title}</strong>
-        <button
-          type="button"
-          aria-label={`${expanded ? "收起" : "展开"}${title}`}
-          aria-expanded={expanded}
-          onClick={() => setExpanded((value) => !value)}
-        >
-          {expanded ? "收起" : "详情"}
-        </button>
+        <div className="session-outage-copy">
+          <strong>{title}</strong>
+          <span>{summary}</span>
+        </div>
+        <div className="session-outage-actions">
+          <button
+            type="button"
+            className="session-outage-retry"
+            aria-label="立即重试会话服务"
+            onClick={onRetry}
+          >
+            立即重试
+          </button>
+          <button
+            type="button"
+            aria-label={`${expanded ? "隐藏" : "查看"}${title}详情`}
+            aria-expanded={expanded}
+            onClick={() => setExpanded((value) => !value)}
+          >
+            {expanded ? "隐藏详情" : "查看原因"}
+          </button>
+        </div>
       </div>
       {expanded && <div className="session-outage-details">{children}</div>}
     </div>
@@ -209,17 +226,17 @@ function SessionWorkbenchContent({
         timer = setTimeout(check, 10_000);
       } catch (error) {
         if (controller.signal.aborted) return;
-        connectionCheckFailed("health", error);
+        const failureKind = connectionCheckFailed("health", error);
         setConnectionError(
           error instanceof SessionSyncError && error.status
             ? `服务返回 HTTP ${error.status}`
-            : error instanceof Error && error.name === "TimeoutError"
-              ? "连接检测请求超时（5 秒）"
+            : failureKind === "timeout"
+              ? "会话服务暂时没有响应（5 秒超时）。"
               : error instanceof TypeError
-                ? "浏览器无法访问服务，请检查网络或证书"
+                ? "无法连接到会话服务，请检查网络或安全证书。"
                 : error instanceof SyntaxError
-                  ? "服务返回的数据格式错误"
-                  : "会话服务尚未就绪",
+                  ? "会话服务返回了异常数据。"
+                  : "会话服务尚未就绪，系统会继续重试。",
         );
         setStatus("checking");
         if (++tries < 5) timer = setTimeout(check, 1500);
@@ -263,10 +280,14 @@ function SessionWorkbenchContent({
       <div className="session-notices-anchor">
         <div className="session-notices">
           {(loaded || hasCachedTranscript) && status === "offline" && (
-            <SessionNotice title="会话服务连接中断" role="alert">
-              <span>正在自动重连。草稿已保留。</span>
+            <SessionNotice
+              title="会话服务连接中断"
+              role="alert"
+              summary="正在自动重连，草稿已保留。"
+              onRetry={retry}
+            >
               {connectionError && <span>{connectionError}</span>}
-              <button onClick={retry}>立即重试</button>
+              {!connectionError && <span>服务恢复后会自动继续同步。</span>}
             </SessionNotice>
           )}
         </div>

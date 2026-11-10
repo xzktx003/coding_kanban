@@ -4,9 +4,10 @@ import { installSessionUxFixture, seedSessionUx } from "./session-ux-fixture";
 async function readInputTarget(page: Page) {
   return page.evaluate(async () => {
     const mounted = (path: string) =>
-      performance.getEntriesByType("resource").findLast(
-        (entry) => new URL(entry.name).pathname === path,
-      )?.name ?? path;
+      performance
+        .getEntriesByType("resource")
+        .findLast((entry) => new URL(entry.name).pathname === path)?.name ??
+      path;
     const { useCodexStore } = await import(
       mounted("/src/session-mode/components/codex/stores/useCodexStore.ts")
     );
@@ -23,6 +24,19 @@ test("merged navigation keeps projects, followed sessions and pending status rea
   page,
 }) => {
   const fixture = await installSessionUxFixture(page, 5);
+  await page.route("**/api/app-version", (route) =>
+    route.fulfill({
+      json: {
+        version: "fixture",
+        autoUpdate: {
+          enabled: true,
+          phase: "available",
+          branch: "main",
+          remoteHead: "abcdef123456",
+        },
+      },
+    }),
+  );
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   const startupErrors: string[] = [];
@@ -109,6 +123,7 @@ test("merged navigation keeps projects, followed sessions and pending status rea
   await expect(
     nav.getByRole("button", { name: "待确认 1", exact: true }),
   ).toBeVisible();
+  await expect(nav.getByRole("button", { name: /远程有新版本/ })).toBeVisible();
   for (const width of [390, 320, 768, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     expect(
@@ -126,16 +141,36 @@ test("merged navigation keeps projects, followed sessions and pending status rea
       ).toBeVisible();
       await expect(page.locator(".session-group-switch")).toHaveCount(0);
     }
+    if (width === 320) {
+      const modeControls = await nav
+        .getByRole("group", { name: "工作模式", exact: true })
+        .getByRole("button")
+        .all();
+      const topControls = [
+        nav.getByRole("button", { name: "展开项目列表", exact: true }),
+        ...modeControls,
+        nav.getByRole("button", { name: "待确认 1", exact: true }),
+        nav.getByRole("button", { name: /远程有新版本/ }),
+        nav.getByRole("button", { name: "更多功能", exact: true }),
+      ];
+      for (const control of topControls) {
+        const bounds = (await control.boundingBox())!;
+        expect(bounds.width).toBeGreaterThanOrEqual(44);
+        expect(bounds.height).toBeGreaterThanOrEqual(44);
+      }
+    }
   }
   await page.setViewportSize({ width: 390, height: 900 });
   await nav.getByRole("button", { name: "待确认 1", exact: true }).click();
   await expect(page.getByRole("menu")).toContainText("仅统计关注会话");
   await page.getByRole("menuitem").filter({ hasText: "中文会话 1 " }).click();
   // The native Codex composer no longer renders the legacy target label.
-  await expect.poll(() => readInputTarget(page)).toEqual({
-    threadId: "ux-1",
-    agent: "codex",
-  });
+  await expect
+    .poll(() => readInputTarget(page))
+    .toEqual({
+      threadId: "ux-1",
+      agent: "codex",
+    });
   await expect(
     page.getByText("/fixture/pending-target", { exact: true }),
   ).toBeVisible();
@@ -186,7 +221,9 @@ test("merged navigation keeps projects, followed sessions and pending status rea
   await editor.fill("手机键盘尺寸变化后保留的草稿");
   await editor.focus();
   await expect(
-    page.getByRole("button", { name: /^(发送|停止)$/ }),
+    page
+      .locator(".session-codex-composer .session-composer-send:visible")
+      .last(),
   ).toBeInViewport();
   await expect(nav).toBeInViewport();
   await page.setViewportSize({ width: 390, height: 900 });
@@ -197,17 +234,19 @@ test("merged navigation keeps projects, followed sessions and pending status rea
     .getByRole("button", { name: "终端", exact: true })
     .click();
   await expect(page.locator(".session-mode")).toBeHidden();
-  await page.getByRole("button", { name: "会话", exact: true }).click();
+  await page.getByRole("link", { name: "会话", exact: true }).click();
   await expect(nav).toBeVisible();
   await expect(page.locator('[data-tab-key="codex:ux-1"]')).toHaveAttribute(
     "aria-selected",
     "true",
   );
   await page.locator(".session-tabs .session-new-tab button").click();
-  await expect.poll(() => readInputTarget(page)).toEqual({
-    threadId: null,
-    agent: "codex",
-  });
+  await expect
+    .poll(() => readInputTarget(page))
+    .toEqual({
+      threadId: null,
+      agent: "codex",
+    });
   expect(
     fixture.calls.filter((c) => /turn\/start|approval.*respond/.test(c.path)),
   ).toEqual([]);

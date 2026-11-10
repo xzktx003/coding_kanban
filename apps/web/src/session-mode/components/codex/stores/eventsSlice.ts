@@ -95,6 +95,20 @@ function appendTextSegments(
   };
 }
 
+function appendLargeTextSegment(
+  segments: string[],
+  current: string,
+  delta: string,
+) {
+  const nextSegments = current
+    ? [...segments, copyTranscriptText(current)]
+    : [...segments];
+  // Large deltas already exceed the live Markdown parse tail. Keep one detached,
+  // bounded string instead of copying it into many 8 KiB strings and joins.
+  nextSegments.push(copyTranscriptText(delta));
+  return { segments: nextSegments, current: "" };
+}
+
 function isCurrentTurn(state: CodexStore, threadId: string, turnId: string) {
   const timing = state.turnTimingMap[threadId];
   return (
@@ -510,14 +524,10 @@ export const createEventsSlice: StateCreator<
     if (!events.length || isCodexTranscriptDormant(threadId)) return;
     set((state: CodexStore) => {
       let current = state.streamingAgentMessages?.[threadId];
-      for (const event of events) {
-        if (event.method !== "item/agentMessage/delta") continue;
-        recordTranscriptTraffic(estimateTranscriptBytes(event));
+      const appendDelta = (event: DeltaEvent, delta: string) => {
         const sameItem =
           current?.turnId === event.params.turnId &&
           current.itemId === event.params.itemId;
-        const delta = event.params.delta;
-        if (!delta) continue;
         let segments: string[] = [];
         let currentText = "";
         let length = delta.length;
@@ -531,6 +541,14 @@ export const createEventsSlice: StateCreator<
             const text = `${current.segments.join("")}${current.current}${delta}`;
             preview = createStreamingTextPreview(text);
             length = STREAMING_TEXT_LIMIT;
+          } else if (delta.length > STREAMING_TEXT_SEGMENT_CHARS * 2) {
+            const appended = appendLargeTextSegment(
+              current.segments,
+              current.current,
+              delta,
+            );
+            segments = appended.segments;
+            currentText = appended.current;
           } else {
             const appended = appendTextSegments(
               current.segments,
@@ -544,6 +562,10 @@ export const createEventsSlice: StateCreator<
           if (delta.length > STREAMING_TEXT_LIMIT) {
             preview = createStreamingTextPreview(delta);
             length = STREAMING_TEXT_LIMIT;
+          } else if (delta.length > STREAMING_TEXT_SEGMENT_CHARS * 2) {
+            const appended = appendLargeTextSegment([], "", delta);
+            segments = appended.segments;
+            currentText = appended.current;
           } else {
             const appended = appendTextSegments([], "", delta);
             segments = appended.segments;
@@ -558,7 +580,47 @@ export const createEventsSlice: StateCreator<
           length,
           ...(preview ? { preview } : {}),
         };
+      };
+      let pendingEvent: DeltaEvent | undefined;
+      let pendingParts: string[] = [];
+      let pendingLength = 0;
+      const flushPending = () => {
+        if (!pendingEvent) return;
+        appendDelta(
+          pendingEvent,
+          pendingParts.length === 1 ? pendingParts[0]! : pendingParts.join(""),
+        );
+        pendingEvent = undefined;
+        pendingParts = [];
+        pendingLength = 0;
+      };
+      for (const event of events) {
+        if (event.method !== "item/agentMessage/delta") {
+          flushPending();
+          continue;
+        }
+        // Traffic pressure is based on the original notifications and must not
+        // change when their display-only text is coalesced below.
+        recordTranscriptTraffic(estimateTranscriptBytes(event));
+        const delta = event.params.delta;
+        if (!delta) {
+          flushPending();
+          continue;
+        }
+        const sameBatchItem =
+          pendingEvent?.params.turnId === event.params.turnId &&
+          pendingEvent.params.itemId === event.params.itemId;
+        if (
+          !sameBatchItem ||
+          pendingLength + delta.length > STREAMING_TEXT_LIMIT
+        )
+          flushPending();
+        pendingEvent ??= event;
+        pendingParts.push(delta);
+        pendingLength += delta.length;
+        if (pendingLength >= STREAMING_TEXT_LIMIT) flushPending();
       }
+      flushPending();
       if (!current || current === state.streamingAgentMessages?.[threadId])
         return state;
       let retryNoticeMap = state.retryNoticeMap;

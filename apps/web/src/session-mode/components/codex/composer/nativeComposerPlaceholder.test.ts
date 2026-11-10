@@ -3,7 +3,7 @@ import { nativeComposerPlaceholder } from "./nativeComposerPlaceholder";
 
 it("uses native local task and follow-up placeholders", () => {
   expect(nativeComposerPlaceholder({ threadId: null })).toBe(
-    "可向 Codex 询问任何问题。输入 @ 使用插件或提及文件",
+    "随心输入",
   );
   expect(nativeComposerPlaceholder({ threadId: "existing" })).toBe(
     "提出后续变更要求",

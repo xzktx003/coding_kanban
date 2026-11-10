@@ -2,6 +2,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 const post = vi.hoisted(() => vi.fn());
 vi.mock("./apiAdapt/shared", () => ({ postJsonWithOptions: post }));
 import {
+  newChatModelConfigStatusLabel,
   readNewChatModelConfig,
   resolveNewChatModelConfig,
 } from "./newChatModelConfig";
@@ -46,4 +47,32 @@ it("uses null native defaults rather than inventing an openai provider", () => {
       },
     ),
   ).toEqual({ model: null, modelProvider: null, reasoningEffort: null });
+});
+
+it("labels the loaded native default and distinguishes pending and unavailable states", () => {
+  expect(
+    newChatModelConfigStatusLabel({
+      cwd: "/project",
+      loading: false,
+      value: {
+        status: "ready",
+        model: null,
+        modelProvider: null,
+        reasoningEffort: null,
+      },
+    }),
+  ).toBe("原生默认");
+  expect(
+    newChatModelConfigStatusLabel({ cwd: "/project", loading: true }),
+  ).toBe("读取中…");
+  expect(
+    newChatModelConfigStatusLabel({
+      cwd: "/project",
+      loading: false,
+      error: "offline",
+    }),
+  ).toBe("无法核实");
+  expect(newChatModelConfigStatusLabel({ cwd: null, loading: false })).toBe(
+    "选择项目",
+  );
 });

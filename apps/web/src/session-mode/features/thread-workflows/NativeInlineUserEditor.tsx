@@ -3,7 +3,6 @@ import type { HookRunSummary } from "@session/bindings/v2/HookRunSummary";
 import type { UserInput } from "@session/bindings/v2";
 import { useTranslation } from "react-i18next";
 import { UserMessageItem } from "@session/components/codex/items/UserMessageItem";
-import { EditRollbackConfirmDialog } from "@session/components/codex/items/EditRollbackConfirmDialog";
 import { useCodexStore } from "@session/components/codex/stores";
 import { codexRuntimeState } from "@session/utils/codexRuntimeState";
 import { useTranscriptInspection } from "@session/components/codex/thread/inspection";
@@ -56,7 +55,6 @@ export function NativeInlineUserEditor({
     (state) => codexRuntimeState(state, threadId).running,
   );
   const [editing, setEditing] = useState(!!stored),
-    [confirm, setConfirm] = useState(false),
     [submitting, setSubmitting] = useState(false),
     [error, setError] = useState<string | null>(null);
   const busy = useRef(false);
@@ -82,7 +80,6 @@ export function NativeInlineUserEditor({
         useThreadWorkflowStore.getState().inlineEdits[
           inlineEditKey(chosen.source)
         ];
-      setConfirm(false);
       // The service clears only its captured submit revision. A newer buffer remains editable.
       setEditing(!!current);
     } catch (e) {
@@ -107,7 +104,7 @@ export function NativeInlineUserEditor({
       inputs: structuredClone(content),
     };
     setError(null);
-    setConfirm(true);
+    void confirmSend();
   };
   const cancel = () => {
     if (submitting) return;
@@ -171,16 +168,6 @@ export function NativeInlineUserEditor({
             </div>
           ) : undefined
         }
-      />
-      <EditRollbackConfirmDialog
-        open={confirm}
-        submitting={submitting}
-        confirmDisabled={uncertain}
-        error={error}
-        onOpenChange={(open) => {
-          if (!submitting) setConfirm(open);
-        }}
-        onConfirm={() => void confirmSend()}
       />
     </>
   );

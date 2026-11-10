@@ -65,7 +65,7 @@ function dataSnapshot(value: object) {
   return structuredClone(Object.fromEntries(Object.entries(value).filter(([, item]) => typeof item !== "function")));
 }
 function stableDefaults(value: Record<string, unknown>) {
-  const { model, reasoningEffort, serviceTier, providerModels, ...rest } = value;
+  const { model, reasoningEffort, serviceTier, providerModels, modelSelectionMode, ...rest } = value;
   return rest;
 }
 function capture() {
@@ -92,9 +92,10 @@ function defaultsProtected(before: ReturnType<typeof capture>) {
   expect(useThreadModelStore.getState()).toBe(before.threads);
   expect(useThreadModelStore.getState().threads.A).toBe(before.a);
   expect(useThreadModelStore.getState().threads.A).toEqual(before.values.a);
-  const { model: _m, reasoningEffort: _e, serviceTier: _t, providerModels: _p, ...rest } = before.defaults;
-  const { model: _m2, reasoningEffort: _e2, serviceTier: _t2, providerModels: _p2, ...after } = useConfigStore.getState();
+  const { model: _m, reasoningEffort: _e, serviceTier: _t, providerModels: _p, modelSelectionMode: _mode, ...rest } = before.defaults;
+  const { model: _m2, reasoningEffort: _e2, serviceTier: _t2, providerModels: _p2, modelSelectionMode, ...after } = useConfigStore.getState();
   expect(after).toEqual(rest);
+  expect(modelSelectionMode).toBe("manual");
   expect(stableDefaults(dataSnapshot(useConfigStore.getState()))).toEqual(stableDefaults(before.values.defaults));
   expect(dataSnapshot(before.defaults)).toEqual(before.values.defaults);
 }
@@ -144,6 +145,7 @@ it("exposes a defaults joint action that emits only the final pair and current-p
 });
 
 it("keeps an exact selected defaults pair and equal explicit tier as a no-op", () => {
+  useConfigStore.getState().setModelSelectionMode("manual");
   useConfigStore.setState(s => ({ providerModels: { ...s.providerModels, openai: "stale-remembered-only" } }));
   const before = capture(), seen: unknown[] = [];
   const release = useConfigStore.subscribe(s => { seen.push(s); });

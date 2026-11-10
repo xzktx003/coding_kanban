@@ -290,3 +290,132 @@ it("folds streamed plans, terminal input, hooks and child-agent process records 
     raw.map((row) => row.key),
   );
 });
+
+it("folds completed item history when lifecycle boundaries were omitted", () => {
+  const events = [
+    event("item/completed", {
+      threadId: "thread",
+      turnId: "turn",
+      item: {
+        id: "reason-1",
+        type: "reasoning",
+        summary: ["先检查目录"],
+        content: [],
+      },
+    }),
+    event("item/completed", {
+      threadId: "thread",
+      turnId: "turn",
+      item: {
+        id: "command-1",
+        type: "commandExecution",
+        command: "rg -n TODO",
+        cwd: "/project",
+        status: "completed",
+        commandActions: [],
+        aggregatedOutput: "src/a.ts:1 TODO",
+        exitCode: 0,
+        durationMs: 12,
+      },
+    }),
+    event("item/completed", {
+      threadId: "thread",
+      turnId: "turn",
+      item: {
+        id: "reason-2",
+        type: "reasoning",
+        summary: ["再核对结果"],
+        content: [],
+      },
+    }),
+    event("item/completed", {
+      threadId: "thread",
+      turnId: "turn",
+      item: {
+        id: "final",
+        type: "agentMessage",
+        phase: "final_answer",
+        text: "最终报告",
+      },
+    }),
+  ] as ServerNotification[];
+  const raw = groupThreadActivities(buildThreadRows(events), events);
+  const rows = projectTurnWork(raw, events, undefined, new Set(), "thread");
+
+  expect(rows.filter((row) => row.work)).toHaveLength(1);
+  expect(rows.find((row) => row.work)?.work).toMatchObject({
+    running: false,
+    durationMs: null,
+    expanded: false,
+  });
+  expect(rows.filter((row) => !row.work)).toHaveLength(1);
+  expect(rows.at(-1)?.item).toMatchObject({
+    event: { params: { item: { id: "final", phase: "final_answer" } } },
+  });
+});
+
+it("keeps an unclassified lifecycle-less assistant message public", () => {
+  const events = [
+    event("item/completed", {
+      threadId: "thread",
+      turnId: "turn",
+      item: {
+        id: "reason",
+        type: "reasoning",
+        summary: ["过程摘要"],
+        content: [],
+      },
+    }),
+    event("item/completed", {
+      threadId: "thread",
+      turnId: "turn",
+      item: { id: "report", type: "agentMessage", text: "可能是最终报告" },
+    }),
+  ] as ServerNotification[];
+  const rows = projectTurnWork(
+    groupThreadActivities(buildThreadRows(events), events),
+    events,
+    undefined,
+    new Set(),
+    "thread",
+  );
+
+  expect(rows.filter((row) => row.work)).toHaveLength(1);
+  expect(rows.some((row) => row.key.includes("report") && !row.work)).toBe(
+    true,
+  );
+});
+
+it("keeps lifecycle-less process groups separate for different turns", () => {
+  const item = (
+    turnId: string,
+    id: string,
+    type: "reasoning" | "agentMessage",
+  ) =>
+    event("item/completed", {
+      threadId: "thread",
+      turnId,
+      item:
+        type === "reasoning"
+          ? { id, type, summary: [`${turnId} 过程`], content: [] }
+          : { id, type, phase: "final_answer", text: `${turnId} 报告` },
+    });
+  const events = [
+    item("one", "reason-one", "reasoning"),
+    item("one", "final-one", "agentMessage"),
+    item("two", "reason-two", "reasoning"),
+    item("two", "final-two", "agentMessage"),
+  ] as ServerNotification[];
+  const rows = projectTurnWork(
+    groupThreadActivities(buildThreadRows(events), events),
+    events,
+    undefined,
+    new Set(),
+    "thread",
+  );
+
+  expect(rows.filter((row) => row.work).map((row) => row.work?.turnId)).toEqual(
+    ["one", "two"],
+  );
+  expect(rows.filter((row) => !row.work)).toHaveLength(2);
+});

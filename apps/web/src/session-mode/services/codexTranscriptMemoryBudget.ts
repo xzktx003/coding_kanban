@@ -11,6 +11,10 @@ const TRUNCATION_MARKER = "\n...[truncated ";
 const DISPLAY_PREVIEW_MARKER = "\n\n...[中间内容因会话内存限制已省略]...\n\n";
 const DEFAULT_TOOL_TEXT_LIMIT = 64 * 1024;
 const DEFAULT_STREAM_TEXT_LIMIT = 256 * 1024;
+const TRANSCRIPT_COPY_CHUNK_CODE_UNITS = 4096;
+const TRANSCRIPT_COPY_BUFFER = new Uint16Array(
+  TRANSCRIPT_COPY_CHUNK_CODE_UNITS,
+);
 export const CODEX_TRANSCRIPT_MAX_BYTES = 8 * 1024 * 1024;
 export const CODEX_TRANSCRIPT_MAX_EVENTS = 3000;
 export const STREAMING_TEXT_LIMIT = DEFAULT_STREAM_TEXT_LIMIT;
@@ -77,10 +81,30 @@ export interface StreamingTextPreview {
 }
 
 // V8 slices/concatenations can retain the entire source string. Copy only the
-// bounded display text; split/join preserves UTF-16 (including lone surrogates).
-// Do not replace this with slice(), substring(), or a prefix-and-slice trick.
+// bounded display text in small UTF-16 chunks; code-unit copying preserves lone
+// surrogates without split("")'s per-character array allocation. Reuse one
+// synchronous scratch buffer so streaming deltas do not allocate a backing
+// store per chunk. String.fromCharCode copies the units into each returned
+// string before the buffer is reused. Do not replace this with slice(),
+// substring(), or a prefix-and-slice trick.
 export function copyTranscriptText(text: string): string {
-  return text.split("").join("");
+  const chunks: string[] = [];
+  for (
+    let offset = 0;
+    offset < text.length;
+    offset += TRANSCRIPT_COPY_CHUNK_CODE_UNITS
+  ) {
+    const length = Math.min(
+      TRANSCRIPT_COPY_CHUNK_CODE_UNITS,
+      text.length - offset,
+    );
+    for (let index = 0; index < length; index++)
+      TRANSCRIPT_COPY_BUFFER[index] = text.charCodeAt(offset + index);
+    chunks.push(
+      String.fromCharCode(...TRANSCRIPT_COPY_BUFFER.subarray(0, length)),
+    );
+  }
+  return chunks.join("");
 }
 
 function splitStreamingText(text: string) {

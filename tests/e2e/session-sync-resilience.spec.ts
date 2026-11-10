@@ -48,16 +48,30 @@ for (const width of [1440, 393])
       const trigger = page.getByRole("button", {
         name: /同步待重试.*关注列表读取重试中/,
       });
-      await expect(trigger).toBeVisible();
-      await expect(trigger).toHaveAttribute("aria-expanded", "false");
+      const mobile = width <= 500;
+      if (mobile) {
+        const more = page.getByRole("button", { name: "更多功能", exact: true });
+        await expect(more).toHaveAttribute("data-attention", "true");
+      }
+      expect(await editor.evaluate((el) => document.activeElement === el)).toBe(
+        true,
+      );
+      if (mobile)
+        await page
+          .getByRole("button", { name: "更多功能", exact: true })
+          .click();
+      const visibleTrigger = mobile
+        ? page.getByRole("menuitem", {
+            name: /同步待重试.*关注列表读取重试中/,
+          })
+        : trigger;
+      await expect(visibleTrigger).toBeVisible();
+      await expect(visibleTrigger).toHaveAttribute("aria-expanded", "false");
       await expect(
         page.getByText("修改已保存在本机，连接恢复后自动同步。", {
           exact: true,
         }),
       ).toHaveCount(0);
-      expect(await editor.evaluate((el) => document.activeElement === el)).toBe(
-        true,
-      );
       await expect(page.locator(".session-top-nav")).toHaveAttribute(
         "data-connection-state",
         "ready",
@@ -65,7 +79,7 @@ for (const width of [1440, 393])
       await page.screenshot({
         path: info.outputPath("compact-read-retry.png"),
       });
-      await trigger.click();
+      await visibleTrigger.click();
       await expect(
         page.getByText("关注列表读取暂不可用", { exact: true }),
       ).toBeVisible();
@@ -94,12 +108,19 @@ for (const width of [1440, 393])
       expect(diagnosticText).not.toContain(
         "Keep typing during metadata retries",
       );
-      await page
-        .getByRole("button", { name: "收起同步详情", exact: true })
-        .click();
+      const closeDetails = page.getByRole("button", {
+        name: "收起同步详情",
+        exact: true,
+      });
+      if (mobile) {
+        // The nested menu dismisses the popover after its download action.
+        await expect(closeDetails).toBeHidden();
+      } else if (await closeDetails.isVisible().catch(() => false)) {
+        await closeDetails.click();
+      }
       failReads = false;
       await page.clock.runFor(5100);
-      await expect(trigger).toBeHidden();
+      await expect(visibleTrigger).toBeHidden();
       failReads = true;
       await expect
         .poll(async () => {
@@ -107,15 +128,17 @@ for (const width of [1440, 393])
           return failures;
         })
         .toBe(2);
-      await expect(trigger).toHaveAttribute("aria-expanded", "false");
+      await expect(visibleTrigger).toHaveAttribute("aria-expanded", "false");
       failReads = false;
-      await trigger.click();
+      await visibleTrigger.click();
       await page.getByRole("button", { name: "立即同步", exact: true }).click();
-      await expect(trigger).toBeHidden();
+      await expect(visibleTrigger).toBeHidden();
       await expect(editor).toHaveText("Keep typing during metadata retries");
       // An intermittent failure can recover before a person opens its detail.
       // The permanent menu entry still exports the last fixed metadata record.
-      await page.getByRole("button", { name: "更多功能", exact: true }).click();
+      const moreMenu = page.getByRole("menu", { name: "更多功能" });
+      if (!(await moreMenu.isVisible().catch(() => false)))
+        await page.locator(".session-top-more").click();
       const recoveredDownload = page.waitForEvent("download");
       await page
         .getByRole("menuitem", { name: "导出连接诊断", exact: true })

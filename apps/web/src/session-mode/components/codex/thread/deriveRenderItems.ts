@@ -82,7 +82,6 @@ export function deriveRenderItems(events: ServerNotification[]): RenderItem[] {
     actionSources.push(...actions.map(() => source));
     return source;
   };
-
   const finishTurn = (
     threadId: string,
     turnId: string,
@@ -128,6 +127,14 @@ export function deriveRenderItems(events: ServerNotification[]): RenderItem[] {
     actionSources = [];
     cmdBufferKey = "";
   };
+  const flushCommandForTurnChange = (threadId: string, turnId: string) => {
+    const first = actionSources[0];
+    if (
+      cmdBuffer.length &&
+      (first?.threadId !== threadId || first.turnId !== turnId)
+    )
+      flushCmdBuffer(true);
+  };
 
   for (let i = 0; i < events.length; i++) {
     const event = events[i];
@@ -137,6 +144,7 @@ export function deriveRenderItems(events: ServerNotification[]): RenderItem[] {
       event.method === "item/started" &&
       event.params.item.type === "commandExecution"
     ) {
+      flushCommandForTurnChange(event.params.threadId, event.params.turnId);
       if (
         !sourcesById.has(
           keyOf(
@@ -159,10 +167,13 @@ export function deriveRenderItems(events: ServerNotification[]): RenderItem[] {
       const commandId = event.params.item.id;
       // These references are local to this derivation. Updating once keeps all
       // actions of the command aligned, including completion after a flush.
-      const source =
-        sourcesById.get(
-          keyOf(event.params.threadId, event.params.turnId, commandId),
-        ) ?? addCommand(event);
+      let source = sourcesById.get(
+        keyOf(event.params.threadId, event.params.turnId, commandId),
+      );
+      if (!source) {
+        flushCommandForTurnChange(event.params.threadId, event.params.turnId);
+        source = addCommand(event);
+      }
       if (source) {
         Object.assign(source, {
           aggregatedOutput: commandOutput,

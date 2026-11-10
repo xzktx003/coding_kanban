@@ -26,6 +26,11 @@ import {
 } from "@session/services/workspaceFiles";
 import { useEditorStore } from "@session/stores/useEditorStore";
 import { useFileDocumentStore } from "@session/stores/useFileDocumentStore";
+import {
+  beginFileOperation,
+  fileOperationContains,
+  useFileSaveStatusStore,
+} from "@session/stores/useFileSaveStatusStore";
 import { copyTextToClipboard } from "../../../lib/clipboard";
 import type { FileAction } from "./explorer/types";
 export type FileOperationTarget = {
@@ -114,6 +119,13 @@ export function FileOperations({
   const operationIsDir = selectedTarget?.isDir ?? true;
   const operationDir = operationIsDir ? operationPath : parent(operationPath);
   const downloadLabel = operationIsDir ? "下载文件夹（ZIP）" : "下载文件";
+  const savingFiles = useFileSaveStatusStore((state) => state.pending);
+  const blockedBySave =
+    !!action &&
+    ["delete", "rename", "move"].includes(action.type) &&
+    Array.from(savingFiles.keys()).some((file) =>
+      fileOperationContains(action.path, action.isDir, file),
+    );
   useEffect(
     () => () => {
       conflictAnswer.current?.(null);
@@ -226,7 +238,10 @@ export function FileOperations({
     busyRef.current = true;
     setBusy(true);
     setError("");
+    let releaseOperation: (() => void) | undefined;
     try {
+      if (["delete", "rename", "move"].includes(target.type))
+        releaseOperation = beginFileOperation(target.path, target.isDir);
       if (target.type === "delete") {
         await workspaceFileRequest("trash", {
           root: target.root,
@@ -273,6 +288,7 @@ export function FileOperations({
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
+      releaseOperation?.();
       busyRef.current = false;
       setBusy(false);
     }
@@ -596,6 +612,11 @@ export function FileOperations({
               {error}
             </p>
           )}
+          {blockedBySave && (
+            <p role="status" className="text-sm text-muted-foreground">
+              此位置包含正在保存的文件，请等待保存结果后再操作。
+            </p>
+          )}
           <DialogFooter>
             <Button
               disabled={busy}
@@ -607,6 +628,7 @@ export function FileOperations({
             <Button
               disabled={
                 busy ||
+                blockedBySave ||
                 (!["delete", "purge"].includes(action?.type ?? "") &&
                   !validName)
               }

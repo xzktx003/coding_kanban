@@ -1573,4 +1573,8 @@
     min-width: 44px;
     min-height: 44px;
   }
+  .session-mode .codex-sources-trigger {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }

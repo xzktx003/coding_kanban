@@ -38,16 +38,21 @@ const message: FollowupMessage = {
 const snapshot = (
   items = [message],
   paused: string | null = "消息发送失败",
+  error?: string,
 ) => ({
   state: { revision: 7, paused, items },
-  error: undefined,
+  error,
 });
-function mount(items = [message], paused: string | null = "消息发送失败") {
+function mount(
+  items = [message],
+  paused: string | null = "消息发送失败",
+  error?: string,
+) {
   return render(
     <FollowupQueueContent
       threadId="owner"
       turnId={null}
-      snapshot={snapshot(items, paused)}
+      snapshot={snapshot(items, paused, error)}
     />,
   );
 }
@@ -88,6 +93,30 @@ it.each([
   mount([{ ...message, status: "queued", error: undefined }], reason);
   expect(screen.getByText(reason)).toBeTruthy();
   expect(screen.queryByText("由于你中断了当前响应，队列已暂停")).toBeNull();
+});
+it("shows an unknown queue read explicitly and offers a read-only retry", async () => {
+  const empty = mount([], null, "FOLLOWUP_READ_UNAVAILABLE");
+
+  expect(screen.getByRole("alert").textContent).toContain(
+    "已保留已知内容，不会按空队列处理",
+  );
+  expect(screen.getByRole("button", { name: "重试读取队列" })).toBeTruthy();
+  expect(screen.queryByText("没有排队消息")).toBeNull();
+
+  fireEvent.click(screen.getByRole("button", { name: "重试读取队列" }));
+  await waitFor(() =>
+    expect(followupService.load).toHaveBeenCalledExactlyOnceWith("owner"),
+  );
+  expect(followupService.change).not.toHaveBeenCalled();
+
+  empty.unmount();
+  mount(
+    [{ ...message, status: "queued", error: undefined }],
+    null,
+    "FOLLOWUP_READ_UNAVAILABLE",
+  );
+  expect(screen.getByRole("alert")).toBeTruthy();
+  expect(screen.getByText("你好")).toBeTruthy();
 });
 it.each(["interrupted", "由于你中断了当前响应，队列已暂停"])(
   "shows legacy interruption %s without inventing a user stop or resending",
@@ -277,4 +306,50 @@ it("keeps a retry unchanged when the read-only access check fails", async () => 
   expect(followupService.change).not.toHaveBeenCalled();
   expect(screen.getByText("你好")).toBeTruthy();
   expect(screen.getByAltText("排队附件 1")).toBeTruthy();
+});
+
+it("steers a native queued message directly without an extra confirmation dialog", async () => {
+  access("owned");
+  const native: FollowupMessage = {
+    id: "q1",
+    threadId: "owner",
+    text: "你好",
+    images: [],
+    parameters: { model: "captured", cwd: "/original" },
+    mode: "queue",
+    createdAt: 1,
+    fingerprint: "captured",
+    status: "queued",
+    nativeQueuedSubmissionId: "native-1",
+  };
+  render(
+    <FollowupQueueContent
+      threadId="owner"
+      turnId="t1"
+      snapshot={{
+        state: {
+          revision: 7,
+          paused: null,
+          authority: "native",
+          items: [native],
+        },
+        error: undefined,
+      }}
+    />,
+  );
+  const steer = await screen.findByRole("button", { name: "立即引导" });
+  fireEvent.click(steer);
+  await waitFor(() =>
+    expect(followupService.change).toHaveBeenCalledExactlyOnceWith("owner", 7, {
+      type: "steer",
+      id: "q1",
+      expectedTurnId: "t1",
+    }),
+  );
+  // Steer submits directly, so the native confirmation dialog never opens.
+  expect(screen.queryByText("将排队消息用于当前轮次？")).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: "确认引导当前轮次" }),
+  ).toBeNull();
+  expect(screen.queryByRole("button", { name: "取消" })).toBeNull();
 });

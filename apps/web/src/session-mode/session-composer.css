@@ -545,6 +545,15 @@
   transition-property: background-color, color, border-color, opacity;
 }
 
+.session-mode .session-followup-queue-recovery button.session-followup-queue-retry {
+  min-height: 44px;
+  padding: 6px 10px;
+  color: var(--primary);
+  font-size: 14px;
+  text-decoration-line: underline;
+  text-underline-offset: 2px;
+}
+
 .session-mode .session-composer-desktop-voice {
   display: flex;
   flex-shrink: 0;

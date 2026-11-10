@@ -119,6 +119,8 @@ import {
   findTranscriptMatchRange,
   setTranscriptSearchHighlight,
 } from "./threadSearchHighlight";
+import { TranscriptRowBoundary } from "./TranscriptRowBoundary";
+import { transcriptRowForVirtualItem } from "./transcriptVirtualRow";
 
 const EMPTY_EVENTS: ServerNotification[] = [];
 // Only a starting estimate; every mounted row still measures its real height.
@@ -144,6 +146,7 @@ const ThreadMessage = memo(
     nativeEditUser = false,
     alwaysShowAssistantActions = false,
     hookRuns,
+    getHookRuns,
     onToggleWork,
     retryNotice,
     hasLiveMessage = false,
@@ -152,10 +155,14 @@ const ThreadMessage = memo(
     nativeEditUser?: boolean;
     alwaysShowAssistantActions?: boolean;
     hookRuns?: readonly HookRunSummary[];
+    getHookRuns?: (
+      row: TranscriptWorkRow,
+    ) => readonly HookRunSummary[] | undefined;
     onToggleWork?: (key: string) => void;
     retryNotice?: string;
     hasLiveMessage?: boolean;
   }) {
+    const resolvedHookRuns = getHookRuns?.(row) ?? hookRuns;
     if (row.work)
       return (
         <TurnWorkHeader
@@ -181,7 +188,7 @@ const ThreadMessage = memo(
         context={row.context}
         nativeEditUser={nativeEditUser}
         alwaysShowAssistantActions={alwaysShowAssistantActions}
-        hookRuns={hookRuns}
+        hookRuns={resolvedHookRuns}
       />
     );
   },
@@ -197,7 +204,11 @@ const ThreadMessage = memo(
     if (before.nativeEditUser !== after.nativeEditUser) return false;
     if (before.alwaysShowAssistantActions !== after.alwaysShowAssistantActions)
       return false;
-    if (before.hookRuns !== after.hookRuns) return false;
+    if (
+      before.hookRuns !== after.hookRuns ||
+      before.getHookRuns !== after.getHookRuns
+    )
+      return false;
     if (before.row === after.row) return true;
     if (before.row.activity || after.row.activity)
       return before.row.activity === after.row.activity;
@@ -279,21 +290,24 @@ const CodexTranscript = memo(function CodexTranscript({
     previousHooks.current = next;
     return next;
   }, [events]);
-  const rowHooks = (row: TranscriptWorkRow) => {
-    if (row.work) return;
-    if (row.item.kind !== "event") return;
-    const params = row.item.event.params;
-    if ("threadId" in params && "turnId" in params && params.turnId)
-      return nativeHookRunsForTurn(
-        hooks,
-        params.threadId,
-        params.turnId,
-        { ...runtime, threadId: activeThreadId },
-        completedHookTurns,
-      );
-  };
   const runtime = useCodexStore(
     useShallow((state) => codexRuntimeState(state, activeThreadId)),
+  );
+  const rowHooks = useCallback(
+    (row: TranscriptWorkRow) => {
+      if (row.work) return;
+      if (row.item.kind !== "event") return;
+      const params = row.item.event.params;
+      if ("threadId" in params && "turnId" in params && params.turnId)
+        return nativeHookRunsForTurn(
+          hooks,
+          params.threadId,
+          params.turnId,
+          { ...runtime, threadId: activeThreadId },
+          completedHookTurns,
+        );
+    },
+    [hooks, runtime, activeThreadId, completedHookTurns],
   );
   const retryNotice = useCodexStore((s) => s.retryNoticeMap[activeThreadId]);
   const activityRows = useMemo(
@@ -530,7 +544,11 @@ const CodexTranscript = memo(function CodexTranscript({
       ) ?? null,
     [],
   );
-  const getItemKey = useCallback((index: number) => rows[index].key, [rows]);
+  const getItemKey = useCallback(
+    (index: number) =>
+      rows[index]?.key ?? `missing-transcript-row:${activeThreadId}:${index}`,
+    [rows, activeThreadId],
+  );
   const updateRowScrollMargin = useCallback(() => {
     const element = viewport();
     const list = rowListRef.current;
@@ -1482,17 +1500,19 @@ const CodexTranscript = memo(function CodexTranscript({
               }}
             >
               {virtualizer.getVirtualItems().map((item) => {
-                let state = disclosure.current.get(rows[item.index].key);
+                const row = transcriptRowForVirtualItem(rows, item);
+                if (!row) return null;
+                let state = disclosure.current.get(row.key);
                 if (!state) {
                   state = new Map();
-                  disclosure.current.set(rows[item.index].key, state);
+                  disclosure.current.set(row.key, state);
                 }
                 return (
                   <div
                     key={item.key}
                     ref={virtualizer.measureElement}
                     data-index={item.index}
-                    data-codex-row={rows[item.index].key}
+                    data-codex-row={row.key}
                     style={{
                       position: "absolute",
                       top: 0,
@@ -1503,66 +1523,80 @@ const CodexTranscript = memo(function CodexTranscript({
                     }}
                   >
                     <RowStateContext.Provider value={state}>
-                      <ThreadMessage
-                        row={rows[item.index]}
-                        onToggleWork={toggleWork}
-                        retryNotice={
-                          rows[item.index].work?.turnId === turnTiming?.turnId
-                            ? retryNotice
-                            : undefined
-                        }
-                        hasLiveMessage={
-                          !!streamingMessage?.length &&
-                          rows[item.index].work?.turnId ===
-                            streamingMessage.turnId
-                        }
-                        nativeEditUser={
-                          rows[item.index].key === workflow.lastUserRowId
-                        }
-                        alwaysShowAssistantActions={
-                          rows[item.index].key === persistentAssistantRowId
-                        }
-                        hookRuns={rowHooks(rows[item.index])}
-                      />
-                      <GoalTranscriptAnnouncements
-                        announcements={goalSlots.afterRow.get(
-                          rows[item.index].key,
-                        )}
-                      />
-                      {completionSlot?.afterRow === rows[item.index].key &&
-                        completionTarget && (
-                          <GoalCompletionFallback
-                            threadId={activeThreadId}
-                            turnId={completionTarget.turnId}
-                          />
-                        )}
+                      <TranscriptRowBoundary
+                        threadId={activeThreadId}
+                        rowKey={row.key}
+                      >
+                        <ThreadMessage
+                          row={row}
+                          onToggleWork={toggleWork}
+                          retryNotice={
+                            row.work?.turnId === turnTiming?.turnId
+                              ? retryNotice
+                              : undefined
+                          }
+                          hasLiveMessage={
+                            !!streamingMessage?.length &&
+                            row.work?.turnId ===
+                              streamingMessage.turnId
+                          }
+                          nativeEditUser={
+                            row.key === workflow.lastUserRowId
+                          }
+                          alwaysShowAssistantActions={
+                            row.key === persistentAssistantRowId
+                          }
+                          getHookRuns={rowHooks}
+                        />
+                        <GoalTranscriptAnnouncements
+                          announcements={goalSlots.afterRow.get(
+                            row.key,
+                          )}
+                        />
+                        {completionSlot?.afterRow === row.key &&
+                          completionTarget && (
+                            <GoalCompletionFallback
+                              threadId={activeThreadId}
+                              turnId={completionTarget.turnId}
+                            />
+                          )}
+                      </TranscriptRowBoundary>
                     </RowStateContext.Provider>
                   </div>
                 );
               })}
             </div>
             {streamingMessage && (
-              <div className="py-1" data-codex-live-message>
-                <AgentMessageItem
-                  text=""
-                  threadId={activeThreadId}
-                  itemId={streamingMessage.itemId}
-                  turnId={streamingMessage.turnId}
-                  streaming
-                  streamingSegments={
-                    streamingMessage.preview
-                      ? undefined
-                      : streamingMessage.segments
-                  }
-                  streamingCurrent={streamingMessage.current}
-                  streamingPreview={streamingMessage.preview}
-                />
-                {turnTiming?.turnId === streamingMessage.turnId && (
-                  <MessageTimestamp
-                    fallback={{ ms: turnTiming.startedAtMs, label: "轮次开始" }}
+              <TranscriptRowBoundary
+                key={`${streamingMessage.turnId}:${streamingMessage.itemId}`}
+                threadId={activeThreadId}
+                rowKey={`stream:${streamingMessage.turnId}:${streamingMessage.itemId}`}
+              >
+                <div className="py-1" data-codex-live-message>
+                  <AgentMessageItem
+                    text=""
+                    threadId={activeThreadId}
+                    itemId={streamingMessage.itemId}
+                    turnId={streamingMessage.turnId}
+                    streaming
+                    streamingSegments={
+                      streamingMessage.preview
+                        ? undefined
+                        : streamingMessage.segments
+                    }
+                    streamingCurrent={streamingMessage.current}
+                    streamingPreview={streamingMessage.preview}
                   />
-                )}
-              </div>
+                  {turnTiming?.turnId === streamingMessage.turnId && (
+                    <MessageTimestamp
+                      fallback={{
+                        ms: turnTiming.startedAtMs,
+                        label: "轮次开始",
+                      }}
+                    />
+                  )}
+                </div>
+              </TranscriptRowBoundary>
             )}
             <div className="space-y-2">
               <CodexDeliveryEchoes threadId={activeThreadId} events={events} />

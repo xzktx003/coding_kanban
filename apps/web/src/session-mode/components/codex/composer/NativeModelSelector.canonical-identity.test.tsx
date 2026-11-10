@@ -58,7 +58,7 @@ function GenericItemsProbe() {
 
 function assertReads() {
   expect(api.listModels).toHaveBeenCalledTimes(1);
-  expect(api.listModels).toHaveBeenCalledWith();
+  expect(api.listModels).toHaveBeenCalledWith({ signal: expect.any(AbortSignal) });
   expect(api.listOtherModels).toHaveBeenCalledTimes(1);
   expect(api.listConfigProviders).toHaveBeenCalledTimes(1);
   expect(api.listProviderPresets).toHaveBeenCalledTimes(1);

@@ -1,5 +1,6 @@
 import { postJsonWithOptions } from "./apiAdapt/shared";
 import { authHeaders, buildEventUrl, buildUrl } from "@session/hooks/runtime";
+import { beginFileSave } from "@session/stores/useFileSaveStatusStore";
 export interface TextSnapshot {
   path: string;
   content: string;
@@ -15,12 +16,17 @@ export interface TrashEntry {
 }
 const fileEndpoint = (root: string) =>
   root === "/" ? "/local-files/" : "/workspace-files/";
-export const workspaceFileRequest = <T>(action: string, body: unknown) =>
+export const workspaceFileRequest = <T>(
+  action: string,
+  body: unknown,
+  options?: { signal?: AbortSignal },
+) =>
   postJsonWithOptions<T>(
     fileEndpoint((body as { root?: string })?.root ?? "") + action,
     body,
     {
       suppressToast: true,
+      ...(options?.signal ? { signal: options.signal } : {}),
     },
   );
 export const resolveWorkspaceFileReference = async (
@@ -63,20 +69,54 @@ export const resolveWorkspaceFileReference = async (
 };
 export const readWorkspaceVisualization = (root: string, path: string) =>
   workspaceFileRequest<TextSnapshot>("visualization", { root, path });
-export const readWorkspaceText = (root: string, path: string) =>
-  workspaceFileRequest<TextSnapshot>("read", { root, path });
-export const saveWorkspaceText = (
+export const readWorkspaceText = (
+  root: string,
+  path: string,
+  options?: { signal?: AbortSignal },
+) => workspaceFileRequest<TextSnapshot>("read", { root, path }, options);
+const absolutePathIdentity = (path: string) =>
+  path.startsWith("/") && !path.split("/").includes("..")
+    ? "/" +
+      path
+        .split("/")
+        .filter((part) => part && part !== ".")
+        .join("/")
+    : null;
+export const saveWorkspaceText = async (
   root: string,
   path: string,
   content: string,
   version: string,
-) =>
-  workspaceFileRequest<{ path: string; version: string }>("save", {
-    root,
-    path,
-    content,
-    version,
-  });
+) => {
+  const finish = beginFileSave(path);
+  try {
+    const result = await workspaceFileRequest<{
+      path: string;
+      version: string;
+    }>("save", {
+      root,
+      path,
+      content,
+      version,
+    });
+    if (
+      !result ||
+      typeof result.path !== "string" ||
+      !result.path ||
+      typeof result.version !== "string" ||
+      !result.version ||
+      (absolutePathIdentity(path) !== null &&
+        absolutePathIdentity(result.path) !== absolutePathIdentity(path))
+    ) {
+      throw new Error("保存结果无法确认，请检查磁盘内容和草稿");
+    }
+    finish({ ok: true });
+    return result;
+  } catch (error) {
+    finish({ ok: false, error });
+    throw error;
+  }
+};
 export interface UploadWorkspaceFileOptions {
   signal?: AbortSignal;
   onProgress?: (progress: number) => void;

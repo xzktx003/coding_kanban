@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 import { copyTextToClipboard } from "../../../lib/clipboard";
 import { FileOperations } from "./FileOperations";
@@ -7,6 +13,10 @@ import {
   uploadWorkspaceFile,
   workspaceFileRequest,
 } from "@session/services/workspaceFiles";
+import {
+  beginFileSave,
+  useFileSaveStatusStore,
+} from "@session/stores/useFileSaveStatusStore";
 
 vi.mock("../../../lib/clipboard", () => ({
   copyTextToClipboard: vi.fn(),
@@ -19,21 +29,108 @@ vi.mock("@session/services/workspaceFiles", () => ({
 }));
 
 vi.mock("@session/stores/useEditorStore", () => ({
-  useEditorStore: { getState: () => ({ openFile: vi.fn(), openFiles: [] }) },
+  useEditorStore: {
+    getState: () => ({ openFile: vi.fn(), moveFiles: vi.fn(), openFiles: [] }),
+  },
 }));
 
 vi.mock("@session/stores/useFileDocumentStore", () => ({
-  useFileDocumentStore: { getState: () => ({ move: vi.fn() }) },
+  useFileDocumentStore: {
+    getState: () => ({ move: vi.fn(), markSaveUnconfirmed: vi.fn() }),
+  },
 }));
 
 beforeEach(() => {
   vi.clearAllMocks();
+  useFileSaveStatusStore.setState({
+    pending: new Map(),
+    failures: new Map(),
+    operations: new Map(),
+  });
   vi.mocked(copyTextToClipboard).mockResolvedValue(true);
   vi.mocked(uploadWorkspaceFile).mockResolvedValue({
     path: "/repo/src/upload.txt",
     version: "v1",
   });
   vi.mocked(workspaceFileRequest).mockResolvedValue({ version: "v1" });
+});
+
+test("a directory cannot be removed while a file inside it is still saving", async () => {
+  const finishSave = beginFileSave("/repo/src/file.ts");
+  render(
+    <FileOperations
+      root="/repo"
+      action={{ type: "delete", root: "/repo", path: "/repo/src", isDir: true }}
+      onAction={vi.fn()}
+    />,
+  );
+  const dialog = screen.getByRole("dialog");
+  expect(dialog.textContent).toContain("正在保存");
+  expect(
+    (screen.getByRole("button", { name: "确认" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+  expect(workspaceFileRequest).not.toHaveBeenCalled();
+  act(() => finishSave({ ok: true }));
+  fireEvent.click(screen.getByRole("button", { name: "确认" }));
+  await waitFor(() =>
+    expect(workspaceFileRequest).toHaveBeenCalledWith("trash", {
+      root: "/repo",
+      path: "/repo/src",
+    }),
+  );
+});
+
+test("a pending directory move blocks new saves inside it but not in another directory", async () => {
+  let finishOperation!: (value: unknown) => void;
+  vi.mocked(workspaceFileRequest).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finishOperation = resolve;
+      }),
+  );
+  render(
+    <FileOperations
+      root="/repo"
+      action={{ type: "rename", root: "/repo", path: "/repo/src", isDir: true }}
+      onAction={vi.fn()}
+    />,
+  );
+  fireEvent.change(screen.getByRole("textbox", { name: "文件或文件夹名称" }), {
+    target: { value: "renamed" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "确认" }));
+  expect(() => beginFileSave("/repo/src/file.ts")).toThrow("文件操作");
+  const finishOther = beginFileSave("/repo/src-old/file.ts");
+  finishOther({ ok: true });
+  await act(async () => finishOperation({ path: "/repo/renamed" }));
+  const finishAfter = beginFileSave("/repo/src/file.ts");
+  finishAfter({ ok: true });
+});
+
+test("a failed file operation releases its save guard and preserves the dialog", async () => {
+  vi.mocked(workspaceFileRequest).mockRejectedValueOnce(
+    new Error("操作未确认"),
+  );
+  render(
+    <FileOperations
+      root="/repo"
+      action={{
+        type: "delete",
+        root: "/repo",
+        path: "/repo/src/file.ts",
+        isDir: false,
+      }}
+      onAction={vi.fn()}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "确认" }));
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "操作未确认",
+  );
+  const finish = beginFileSave("/repo/src/file.ts");
+  finish({ ok: true });
+  expect(screen.getByRole("dialog")).toBeTruthy();
 });
 
 test("toolbar actions use the selected directory as their target and show Chinese labels", () => {

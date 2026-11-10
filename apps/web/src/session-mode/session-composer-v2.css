@@ -776,6 +776,13 @@
     grid-column: 4;
     display: block;
   }
+  .session-mode
+    .session-codex-composer
+    .session-composer-desktop-voice
+    button.session-composer-voice-button {
+    width: 44px !important;
+    min-width: 44px !important;
+  }
   .session-mode .session-codex-composer .session-composer-stop {
     grid-row: 2;
     grid-column: 5;
@@ -809,6 +816,15 @@
   }
   .session-mode .session-context-chip strong {
     max-width: 100%;
+  }
+}
+@media (max-width: 900px) {
+  .session-mode
+    .session-codex-composer
+    .session-composer-desktop-voice
+    button.session-composer-voice-button {
+    width: 44px !important;
+    min-width: 44px !important;
   }
 }
 @media (max-width: 767px) {

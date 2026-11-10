@@ -9,12 +9,23 @@ const calls = vi.hoisted(() => ({
   effortValue: "high",
   options: ["low", "medium", "high"],
   currentThreadId: "original" as string | null,
+  modelStatus: "success" as "success" | "error",
+  modelError: null as string | null,
+  hasModelSnapshot: true,
+  reload: vi.fn(),
+}));
+const newChatCatalog = vi.hoisted(() => ({
+  magpieModels: [{ id: "kimi/k3" }],
 }));
 beforeEach(() => {
   useConfigStore.setState({modelSelectionMode:"manual"});
   calls.effortValue = "high";
   calls.options = ["low", "medium", "high"];
   calls.currentThreadId = "original";
+  calls.modelStatus = "success";
+  calls.modelError = null;
+  calls.hasModelSnapshot = true;
+  calls.reload.mockReset();
   useLayoutStore.setState({ view: "agent" });
 });
 vi.mock("@session/components/codex/stores", () => ({
@@ -40,8 +51,10 @@ vi.mock("@session/hooks/useThreadModelSettings", () => ({
 vi.mock("../hooks/useModels", () => ({
   useModels: () => ({
     loading: false,
-    error: null,
-    reload: vi.fn(),
+    error: calls.modelError,
+    reload: calls.reload,
+    modelStatus: calls.modelStatus,
+    hasModelSnapshot: calls.hasModelSnapshot,
     providerItems: () => [
       { id: "model-one", label: "原生模型一" },
       { id: "model-two", label: "原生模型二" },
@@ -69,6 +82,26 @@ vi.mock("../hooks/useModels", () => ({
     ],
   }),
 }));
+vi.mock("../hooks/useMagpieCatalog", () => ({
+  useMagpieCatalog: () => ({
+    models: newChatCatalog.magpieModels,
+    loading: false,
+    refresh: vi.fn(),
+  }),
+}));
+vi.mock("../hooks/useNewChatModelConfig", () => ({
+  useNewChatModelConfig: () => ({
+    cwd: "/project",
+    value: {
+      status: "ready",
+      model: "configured-model",
+      modelProvider: "magpie",
+      reasoningEffort: "high",
+    },
+    loading: false,
+    refresh: vi.fn(),
+  }),
+}));
 it("uses native simple power view and switches to native radio model rows without losing supported effort", async () => {
   render(<NativeModelSelector threadId="original" />);
   fireEvent.keyDown(screen.getByRole("button", { name: /^模型：/ }), {
@@ -89,6 +122,49 @@ it("uses native simple power view and switches to native radio model rows withou
   expect(calls.model).toHaveBeenCalledWith("model-two");
   expect(calls.effort).not.toHaveBeenCalledWith("low");
 });
+
+it("retains the known model and offers retry when a refresh fails", async () => {
+  calls.modelStatus = "error";
+  calls.modelError = "读取模型目录超时，请重试";
+  render(<NativeModelSelector threadId="original" />);
+  const trigger = screen.getByRole("button", { name: /^模型：model-one/ });
+  fireEvent.keyDown(trigger, { key: "ArrowDown" });
+  expect((await screen.findByRole("alert")).textContent).toContain("读取模型目录超时，请重试");
+  expect(trigger.getAttribute("aria-label")).toContain("model-one");
+  fireEvent.click(screen.getByRole("menuitem", { name: "重试" }));
+  expect(calls.reload).toHaveBeenCalledTimes(1);
+});
+
+it.each(["Magpie catalog selection", "pinning the configured model"])(
+  "%s switches a following new chat to manual model selection",
+  async (selection) => {
+    calls.currentThreadId = null;
+    useConfigStore.setState({
+      modelSelectionMode: "follow-config",
+      model: "new-chat-default",
+      modelProvider: "openai",
+    });
+    render(<NativeModelSelector threadId={null} />);
+    fireEvent.keyDown(
+      screen.getByRole("button", { name: /^跟随配置/ }),
+      { key: "ArrowDown" },
+    );
+    const choice = await screen.findByRole("menuitem", {
+      name: selection === "Magpie catalog selection"
+        ? "kimi/k3"
+        : "固定使用 configured-model",
+    });
+    fireEvent.click(choice);
+
+    expect(useConfigStore.getState()).toMatchObject({
+      modelSelectionMode: "manual",
+      model: selection === "Magpie catalog selection"
+        ? "kimi/k3"
+        : "configured-model",
+      modelProvider: "magpie",
+    });
+  },
+);
 
 it("matches native pointer view changes by focusing the menu container", async () => {
   render(<NativeModelSelector threadId="original" />);

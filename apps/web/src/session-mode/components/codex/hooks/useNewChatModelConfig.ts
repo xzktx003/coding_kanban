@@ -12,7 +12,11 @@ import {
 } from "@session/services/codexOperationScope";
 
 /** A single visible selector owns this bounded read; no background polling. */
-export function useNewChatModelConfig(enabled: boolean, open: boolean) {
+export function useNewChatModelConfig(
+  enabled: boolean,
+  open: boolean,
+  willOpenOnMount = false,
+) {
   const cwd = useWorkspaceStore((s) => s.cwd);
   const visible = useAgentInteractionVisible();
   const namespace = useCodexStore(s => s.accountNamespace);
@@ -25,6 +29,7 @@ export function useNewChatModelConfig(enabled: boolean, open: boolean) {
   }>({ cwd: null, loading: false });
   const serial = useRef(0);
   const wasOpen = useRef(false);
+  const skipInitialOpenRefresh = useRef(willOpenOnMount);
   const refresh = useCallback(async () => {
     if (!enabled || !visible || !cwd) return;
     const id = ++serial.current;
@@ -44,13 +49,20 @@ export function useNewChatModelConfig(enabled: boolean, open: boolean) {
     }
   }, [enabled, visible, cwd, namespace, hasAccount]);
   useEffect(() => {
+    // The selector can mount with its menu already open. Seed the open edge
+    // before the separate open effect runs so that mount performs one read.
+    wasOpen.current = open;
+    if (open) skipInitialOpenRefresh.current = false;
     void refresh();
     return () => {
       serial.current++;
     };
   }, [refresh]);
   useEffect(() => {
-    if (open && !wasOpen.current) void refresh();
+    if (open && !wasOpen.current) {
+      if (!skipInitialOpenRefresh.current) void refresh();
+      skipInitialOpenRefresh.current = false;
+    }
     wasOpen.current = open;
   }, [open, refresh]);
   useEffect(() => {

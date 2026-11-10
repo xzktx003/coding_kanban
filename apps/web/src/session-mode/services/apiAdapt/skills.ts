@@ -23,9 +23,9 @@ export type CentralSkillItem = {
   linkedCc: boolean;
 };
 
-export async function skillList(cwd: string) {
+export async function skillList(cwd: string | null) {
   return await postJson<SkillsListResponse>('/api/codex/skills/list', {
-    cwds: [cwd],
+    cwds: cwd ? [cwd] : ["/"],
   });
 }
 

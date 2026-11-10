@@ -104,6 +104,14 @@ it("cancels a streaming highlight after the fence leaves the viewport", () => {
     act(() => vi.advanceTimersByTime(120));
     expect(callbacks).toHaveLength(0);
     act(() => vi.advanceTimersByTime(120));
+    expect(callbacks).toHaveLength(0);
+    act(() => {
+      observer.callback(
+        [{ isIntersecting: true } as IntersectionObserverEntry],
+        observer as unknown as IntersectionObserver,
+      );
+    });
+    act(() => vi.advanceTimersByTime(120));
     expect(callbacks).toHaveLength(1);
     act(() => {
       observer.callback(

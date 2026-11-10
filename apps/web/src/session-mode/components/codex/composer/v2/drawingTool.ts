@@ -2,6 +2,7 @@ export type DrawingTool =
   | "select"
   | "hand"
   | "pen"
+  | "eraser"
   | "arrow"
   | "line"
   | "rect"

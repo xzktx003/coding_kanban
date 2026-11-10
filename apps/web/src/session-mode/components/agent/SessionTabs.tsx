@@ -11,7 +11,7 @@ import {
   useState,
   type KeyboardEvent,
 } from "react";
-import { MoreHorizontal, Plus, X } from "lucide-react";
+import { Copy, LocateFixed, MoreHorizontal, Plus, X } from "lucide-react";
 import { useCodexStore } from "@session/components/codex/stores";
 import { useSessionTabActions } from "@session/hooks/useSessionTabs";
 import {
@@ -35,6 +35,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
 import { FollowedSessionsMenu } from "./FollowedSessionsMenu";
@@ -48,6 +49,7 @@ import {
 } from "./sessionTabDrag";
 import { createSessionTabInsertionMarker } from "./sessionTabPreview";
 import { toast } from "sonner";
+import { writeNativeMarkdownClipboard } from "../codex/presentation/nativeMarkdownClipboard";
 
 const SessionTab = memo(function SessionTab({
   card,
@@ -110,6 +112,7 @@ const SessionTab = memo(function SessionTab({
         other.id.slice(0, 12)) === title
     );
   });
+  const projectPath = project.path;
   return (
     <>
       <button
@@ -161,11 +164,59 @@ const SessionTab = memo(function SessionTab({
               <MoreHorizontal size={16} />
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem disabled={!windowAction} onSelect={() => {
-              try { windowAction?.({ kind: card.kind, id: card.id, cwd: card.worktreePath || card.cwd }); }
-              catch (error) { toast.error(error instanceof Error ? error.message : "无法打开新窗口"); }
-            }}>
+          <DropdownMenuContent
+            align="end"
+            className="session-tab-project-menu"
+          >
+            <DropdownMenuLabel className="session-project-full-path">
+              {projectPath || "项目未知：这条会话尚无项目目录，请先确认项目。"}
+            </DropdownMenuLabel>
+            {projectPath && (
+              <>
+                <DropdownMenuItem
+                  onSelect={() => {
+                    window.dispatchEvent(new Event("session-open-projects"));
+                    requestAnimationFrame(() =>
+                      window.dispatchEvent(
+                        new CustomEvent("session-reveal-project", {
+                          detail: project.projectPath || projectPath,
+                        }),
+                      ),
+                    );
+                  }}
+                >
+                  <LocateFixed size={14} />
+                  在侧栏定位项目
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => {
+                    if (!projectPath) return;
+                    void writeNativeMarkdownClipboard(projectPath).catch(
+                      () => toast.error("复制失败，请从项目详情中重试。"),
+                    );
+                  }}
+                >
+                  <Copy size={14} />
+                  复制项目路径
+                </DropdownMenuItem>
+              </>
+            )}
+            <DropdownMenuItem
+              disabled={!windowAction}
+              onSelect={() => {
+                try {
+                  windowAction?.({
+                    kind: card.kind,
+                    id: card.id,
+                    cwd: card.worktreePath || card.cwd,
+                  });
+                } catch (error) {
+                  toast.error(
+                    error instanceof Error ? error.message : "无法打开新窗口",
+                  );
+                }
+              }}
+            >
               在新窗口打开
             </DropdownMenuItem>
             <DropdownMenuItem

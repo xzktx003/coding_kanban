@@ -37,10 +37,11 @@ const extension = await realpath(
   resolve(
     repository,
     values.extension ??
-      "third_party/openai.chatgpt-26.51007.21434-linux-x64/extension",
+      "third_party/openai.chatgpt-26.51021.22027-linux-x64/extension",
   ),
 );
 const assetRoot = await realpath(resolve(extension, "webview/assets"));
+const webviewRoot = await realpath(resolve(extension, "webview"));
 const manifest = JSON.parse(
   await readFile(resolve(extension, "package.json"), "utf8"),
 );
@@ -51,6 +52,10 @@ const files = new Set([
   "native-goal-draft-reference.js",
   "native-transcript.html",
   "native-transcript-reference.js",
+  "native-app.html",
+  "native-app-reference.js",
+  "native-thread-reference.js",
+  "native-composer-reference.js",
 ]);
 const expected = JSON.parse(
   await readFile(resolve(fixture, "reference-assets.json"), "utf8"),
@@ -102,7 +107,18 @@ const server = createServer(async (request, response) => {
     }
     if (files.has(pathname.slice(1)))
       path = resolve(fixture, pathname.slice(1));
-    else if (/^\/assets\/[a-zA-Z0-9_.\/-]+$/.test(pathname)) {
+    else if (pathname === "/index.html")
+      path = resolve(webviewRoot, "index.html");
+    else if (pathname === "/app.html")
+      path = resolve(webviewRoot, "index.html");
+    else if (/^\/service-worker\/[a-zA-Z0-9_.\/-]+$/.test(pathname)) {
+      path = await realpath(
+        resolve(webviewRoot, pathname.slice(1)),
+      );
+      const child = relative(webviewRoot, path);
+      if (isAbsolute(child) || child === ".." || child.startsWith(`..${sep}`))
+        throw new Error("Outside webview directory");
+    } else if (/^\/assets\/[a-zA-Z0-9_.\/-]+$/.test(pathname)) {
       path = await realpath(
         resolve(assetRoot, pathname.slice("/assets/".length)),
       );

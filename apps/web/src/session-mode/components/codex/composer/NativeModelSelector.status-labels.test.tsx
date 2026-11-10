@@ -86,7 +86,7 @@ function catalog(): ModelListResponse {
 function assertFourReads() {
   for (const read of Object.values(api)) {
     expect(read).toHaveBeenCalledTimes(1);
-    expect(read).toHaveBeenCalledWith();
+    expect(read).toHaveBeenCalledWith({ signal: expect.any(AbortSignal) });
   }
   expect(globalThis.fetch).not.toHaveBeenCalled();
 }

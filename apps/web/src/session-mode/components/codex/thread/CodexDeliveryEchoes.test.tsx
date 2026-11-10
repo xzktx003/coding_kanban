@@ -186,7 +186,7 @@ it("does not merge identical messages by their text", () => {
     "second",
   );
 });
-it("shows submission before HTTP returns and retains content on a lost response", async () => {
+it("keeps the content in the draft (no transcript echo) until the server confirms", async () => {
   let reject!: (e: Error) => void;
   api.postJsonWithOptions.mockImplementation(
     () =>
@@ -208,13 +208,17 @@ it("shows submission before HTTP returns and retains content on a lost response"
     )
     .catch((e) => e);
   await vi.waitFor(() => expect(api.postJsonWithOptions).toHaveBeenCalled());
-  expect(screen.getByText("正在提交")).toBeTruthy();
+  // The message only enters the transcript after a confirmed receipt; while the
+  // submit is pending it stays in the input draft, so no "正在提交" echo shows.
+  expect(screen.queryByText("正在提交")).toBeNull();
   await act(async () => {
     reject(new Error("network lost"));
     await pending;
   });
-  expect(screen.getByText("hello")).toBeTruthy();
-  expect(screen.getByText("送达待确认，请核对会话或队列")).toBeTruthy();
+  // A lost response keeps the content in the draft and does not manufacture a
+  // duplicate uncertain transcript echo.
+  expect(screen.queryByText("hello")).toBeNull();
+  expect(screen.queryByText("送达待确认，请核对会话或队列")).toBeNull();
 });
 it("an event before the HTTP response cannot be reinserted by that response", async () => {
   let resolve!: (v: any) => void;

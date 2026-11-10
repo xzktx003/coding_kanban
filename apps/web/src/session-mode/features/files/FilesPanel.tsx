@@ -1,5 +1,6 @@
 import { openWorkspaceFileReference } from "@session/services/openWorkspaceFileReference";
 import { useFileDocumentStore } from "@session/stores/useFileDocumentStore";
+import { useFileSaveStatusStore } from "@session/stores/useFileSaveStatusStore";
 import { FileCloseDialog } from "./FileCloseDialog";
 import { FileOperations, type FileOperationTarget } from "./FileOperations";
 import { ArrowUp, Folders, X } from "lucide-react";
@@ -284,7 +285,11 @@ export default function FilesPanel() {
   };
   const requestClose = (path: string) => {
     const doc = useFileDocumentStore.getState().documents[path];
-    if (doc && doc.draft !== doc.base) setClosing(path);
+    if (
+      (doc && (doc.draft !== doc.base || doc.saveUnconfirmed)) ||
+      useFileSaveStatusStore.getState().pending.has(path)
+    )
+      setClosing(path);
     else closeFile(path);
   };
   const isMobile = useIsMobile();

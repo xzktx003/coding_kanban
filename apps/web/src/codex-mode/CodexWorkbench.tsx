@@ -734,23 +734,13 @@ export default function CodexWorkbench({
   useEffect(() => {
     if (!active || !status?.available) return;
     let cancelled = false;
-    void (workerProbe.current ?? probeVsCodeWebServiceWorker()).then(
-      (result) => {
-        if (cancelled) return;
-        if (result.state === "ready") {
-          setWorkerReady(true);
-          setWorkerError(null);
-        } else
-          setWorkerError({
-            title:
-              result.reason === "certificate"
-                ? "浏览器尚未信任 HTTPS 证书"
-                : "原生聊天无法启动",
-            detail: result.detail.slice(0, 500),
-            certificate: result.reason === "certificate",
-          });
-      },
-    );
+    // The probe only predicts whether the browser will trust the shared
+    // certificate. The native host serves its own service worker over the
+    // same origin, so a failed probe must not replace the chat with a
+    // blocking card; the frame reports its own load failure.
+    void (workerProbe.current ?? probeVsCodeWebServiceWorker()).then(() => {
+      if (!cancelled) setWorkerReady(true);
+    });
     return () => {
       cancelled = true;
     };

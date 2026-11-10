@@ -11,6 +11,7 @@ import {
   VsCodeWebManager,
   VsCodeWebUnavailableError,
   resolveSshTunnelTarget,
+  resolveVsCodeLaunchEnv,
 } from "./vscode-web-manager.js";
 
 const TEST_DATA_ROOT = "/tmp/coding-kanban-vscode-root";
@@ -767,6 +768,17 @@ test("ensureSession reuses a persisted port across global server restarts so the
   );
 
   await manager.dispose();
+});
+
+test("a timed-out login shell still provides the current process environment", async () => {
+  let reads = 0;
+  const env = await resolveVsCodeLaunchEnv(async () => {
+    reads += 1;
+    throw new Error("The operation was aborted due to timeout");
+  });
+  assert.equal(reads, 1);
+  assert.equal(env.PATH, process.env.PATH);
+  assert.equal(env.npm_config_prefix, undefined);
 });
 
 test("ensureSession uses the resolved shell env and strips inherited VS Code IPC hooks before spawning", async () => {

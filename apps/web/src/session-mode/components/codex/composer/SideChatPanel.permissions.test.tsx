@@ -155,7 +155,9 @@ async function openPermissions() {
   fireEvent.keyDown(within(side).getByRole("button", { name: /^执行权限：/ }), {
     key: "ArrowDown",
   });
-  return screen.findByRole("menu");
+  const menu = await screen.findByRole("menu");
+  fireEvent.click(within(menu).getByRole("button", { name: "更多权限" }));
+  return menu;
 }
 
 function expectIsolated(mainBefore: ThreadModelEntry) {
@@ -253,6 +255,7 @@ it("uses explicit null for a new draft's defaults even while another thread is s
   fireEvent.keyDown(screen.getByRole("button", { name: /^执行权限：/ }), {
     key: "ArrowDown",
   });
+  fireEvent.click(await screen.findByRole("button", { name: "更多权限" }));
   fireEvent.click(await screen.findByRole("menuitemradio", { name: "只读" }));
   expect(getThreadModelSettings(null).sandbox).toBe("read-only");
   expect(getThreadModelSettings("main").sandbox).toBe("workspace-write");

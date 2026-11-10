@@ -180,6 +180,41 @@ test("local pause cannot claim to pause accepted native work; resume uses offici
     1,
   );
 });
+
+test("continuing an interrupted empty queue reports the empty state before any native write", async () => {
+  const f = fixture();
+  await f.queue.observe({
+    method: "turn/completed",
+    params: { threadId: "thread", turn: { id: "turn", status: "interrupted" } },
+  });
+  const snapshot = await f.queue.get("thread");
+  await assert.rejects(
+    f.queue.change("thread", snapshot.revision, { type: "resume" }),
+    /没有待发送的原生消息/,
+  );
+  assert.equal(f.calls.some((call) => call.method === "thread/queue/start"), false);
+  const after = await f.queue.get("thread");
+  assert.equal(after.items.some((item) => item.status === "uncertain"), false);
+  assert.ok(after.paused);
+});
+
+test("a queue/start transport failure after a nonempty preflight remains unknown and is never retried", async () => {
+  const f = fixture();
+  const originalCall = f.runtime.call;
+  f.runtime.call = async (method, params) => {
+    if (method === "thread/queue/start") {
+      f.calls.push({ method, params });
+      throw new Error("queue is empty");
+    }
+    return originalCall(method, params);
+  };
+  const before = await f.queue.submit(message);
+  const result = await f.queue.change("thread", before.revision, { type: "resume" });
+  assert.equal(result.operation?.status, "unknown");
+  assert.equal(result.items.some((item) => item.status === "uncertain"), true);
+  await f.queue.get("thread");
+  assert.equal(f.calls.filter((call) => call.method === "thread/queue/start").length, 1);
+});
 test("duplicate official client IDs retain separate queue identities and delete the exact row", async () => {
   const f = fixture();
   f.state.items = [

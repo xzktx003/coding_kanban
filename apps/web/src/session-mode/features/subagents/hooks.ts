@@ -21,7 +21,11 @@ import {
   inParentTurn,
   isKnownRootThread,
 } from "./model";
-import { observeSubagentHistory, useSubagentStore } from "./store";
+import {
+  observeSubagentHistory,
+  observeSubagentStatus,
+  useSubagentStore,
+} from "./store";
 import { subagentService, resetSubagentRuntime } from "./service";
 import { subagentScope, subagentStorageKey } from "./scope";
 const EMPTY_EVENTS: readonly ServerNotification[] = [];
@@ -209,9 +213,17 @@ export function useSubagentFamilySync() {
   const historyEvents = useCodexStore(
     useShallow((s) => historyIds.map((id) => s.events[id] ?? EMPTY_EVENTS)),
   );
+  const historyStatuses = useCodexStore(
+    useShallow((s) => historyIds.map((id) => s.threadStatusMap[id])),
+  );
   useEffect(() => {
     for (const entries of historyEvents) observeSubagentHistory(entries);
   }, [historyEvents]);
+  useEffect(() => {
+    historyIds.forEach((id, index) =>
+      observeSubagentStatus(id, historyStatuses[index]),
+    );
+  }, [historyIds, historyStatuses]);
   useEffect(() => {
     const groups = pendingFamilies(nodes, roots.split("\n"), [
       ...approvals,

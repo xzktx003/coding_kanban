@@ -43,6 +43,7 @@ export function AccessModePopover({ threadId }: { threadId: string | null }) {
   } = useNativeFullAccessConfirmation();
   const [menuOpen, setMenuOpen] = useState(false);
   const [profilesOpen, setProfilesOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const full = !permissions && permissionsKnown && sandbox === "danger-full-access";
   const auto = !permissions && permissionsKnown && approvalsReviewer !== "user";
   const readOnly = !permissions && permissionsKnown && sandbox === "read-only";
@@ -115,7 +116,7 @@ export function AccessModePopover({ threadId }: { threadId: string | null }) {
   ];
   return (
     <>
-      <DropdownMenu open={menuOpen} onOpenChange={(open) => { setMenuOpen(open); if (!open) setProfilesOpen(false); }}>
+      <DropdownMenu open={menuOpen} onOpenChange={(open) => { setMenuOpen(open); if (!open) { setProfilesOpen(false); setMoreOpen(false); } }}>
         <ComposerTooltip
           label="更改权限"
           popupOpen={menuOpen || fullAccessOpen}
@@ -126,7 +127,6 @@ export function AccessModePopover({ threadId }: { threadId: string | null }) {
               size="sm"
               className="session-access-trigger h-8 gap-2 px-2"
               aria-label={`执行权限：${label}`}
-              title={`执行权限：${label}`}
             >
               {collaborationMode === "plan" ? (
                 <ListChecks className="h-4 w-4" />
@@ -160,15 +160,9 @@ export function AccessModePopover({ threadId }: { threadId: string | null }) {
         >
           <div className="session-native-permission-heading">
             <span>应如何批准 Codex 操作？</span>
-            <a
-              href="https://developers.openai.com/codex/concepts/sandboxing#how-you-control-it"
-              target="_blank"
-              rel="noreferrer"
-            >
-              了解更多
-            </a>
+            <button type="button">了解更多</button>
           </div>
-          {rows.map((row) => (
+          {rows.filter((row) => moreOpen || row.key === "default" || row.key === "full").map((row) => (
             <DropdownMenuItem
               key={row.key}
               role="menuitemradio"
@@ -194,7 +188,8 @@ export function AccessModePopover({ threadId }: { threadId: string | null }) {
               {row.active && <NativeComposerIcon name="check" />}
             </DropdownMenuItem>
           ))}
-          {custom && (
+          {!moreOpen && <button type="button" className="session-native-permission-more" onClick={() => setMoreOpen(true)}>更多权限</button>}
+          {moreOpen && custom && (
             <DropdownMenuItem
               role="menuitemradio"
               aria-checked
@@ -208,8 +203,8 @@ export function AccessModePopover({ threadId }: { threadId: string | null }) {
               <NativeComposerIcon name="check" />
             </DropdownMenuItem>
           )}
-          {profilesOpen ? <PermissionProfiles cwd={threadId ? threadCwd ?? null : workspaceCwd ?? null} selected={permissions} onSelect={(id) => { setPermissions(id); finish(); }} /> : <DropdownMenuItem disabled={!!threadId && !threadCwd} title={threadId && !threadCwd ? "会话工作目录尚待核对" : undefined} onSelect={(event) => { event.preventDefault(); setProfilesOpen(true); }}>选择权限配置…</DropdownMenuItem>}
-          <div className="session-native-permission-adaptations">
+          {moreOpen && (profilesOpen ? <PermissionProfiles cwd={threadId ? threadCwd ?? null : workspaceCwd ?? null} selected={permissions} onSelect={(id) => { setPermissions(id); finish(); }} /> : <DropdownMenuItem disabled={!!threadId && !threadCwd} title={threadId && !threadCwd ? "会话工作目录尚待核对" : undefined} onSelect={(event) => { event.preventDefault(); setProfilesOpen(true); }}>选择权限配置…</DropdownMenuItem>)}
+          {moreOpen && <div className="session-native-permission-adaptations">
             <DropdownMenuItem
               role="menuitemradio"
               aria-checked={readOnly}
@@ -235,7 +230,7 @@ export function AccessModePopover({ threadId }: { threadId: string | null }) {
                 <NativeComposerIcon name="check" />
               )}
             </DropdownMenuItem>
-          </div>
+          </div>}
         </DropdownMenuContent>
       </DropdownMenu>
       {confirmation}

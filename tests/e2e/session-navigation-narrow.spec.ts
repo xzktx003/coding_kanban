@@ -41,6 +41,7 @@ test("narrow navigation retains full touch targets, theme and sync actions witho
     });
     for (const [width, height] of [
       [320, 852],
+      [375, 852],
       [393, 852],
       [768, 393],
       [932, 430],
@@ -59,6 +60,26 @@ test("narrow navigation retains full touch targets, theme and sync actions witho
               .getByRole("button", { name: label, exact: true }),
             width,
           );
+      expect(
+        await nav.evaluate((element) => element.scrollWidth),
+      ).toBeLessThanOrEqual(
+        await nav.evaluate((element) => element.clientWidth),
+      );
+      if (width === 320) {
+        const modeRow = await nav
+          .getByRole("group", { name: "工作模式" })
+          .boundingBox();
+        const projectRow = await project.boundingBox();
+        expect(Math.abs(modeRow!.y - projectRow!.y)).toBeLessThanOrEqual(1);
+        expect((await nav.boundingBox())!.height).toBeLessThanOrEqual(46);
+      }
+      if (width === 375 || width === 393) {
+        const modeRow = await nav
+          .getByRole("group", { name: "工作模式" })
+          .boundingBox();
+        const projectRow = await project.boundingBox();
+        expect(Math.abs(modeRow!.y - projectRow!.y)).toBeLessThanOrEqual(1);
+      }
       if (width < 768) {
         await expect(nav.locator(".session-theme-toggle")).toHaveCount(0);
         await expect(nav.locator(".session-sync-indicator")).toHaveCount(0);

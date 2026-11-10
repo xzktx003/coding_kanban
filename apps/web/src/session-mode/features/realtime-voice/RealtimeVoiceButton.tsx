@@ -341,6 +341,7 @@ export function RealtimeVoiceButton({
         type="button"
         size="icon"
         variant="ghost"
+        className="session-composer-voice-button"
         disabled={disabled || !threadId}
         aria-label="语音对话"
         title={threadId ? "语音对话" : "先创建会话，再开始语音对话"}
