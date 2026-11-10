@@ -1,4 +1,7 @@
-import { useSessionSplitStore } from "@session/stores/useSessionSplitStore";
+import {
+  splitGroups,
+  useSessionSplitStore,
+} from "@session/stores/useSessionSplitStore";
 import { useCallback, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { useCodexStore } from "@session/components/codex/stores";
@@ -94,6 +97,10 @@ export function useRestoreSessionTabs() {
         return;
       }
       const tabs = useAgentCenterStore.getState();
+      if (tabs.newChatIntent) {
+        restored.current = true;
+        return;
+      }
       const kind = useAgentSettingsStore.getState().selectedAgent;
       const codex = useCodexStore.getState();
       const currentId =
@@ -127,11 +134,65 @@ export function useRestoreSessionTabs() {
       if (saved) {
         restored.current = true;
         void selectTab(saved);
-      } else if (tabs.sharedTabsInitialized && !tabs.currentAgentCardId)
-        restored.current = true;
+        return;
+      }
+
+      // A reload can restore the shared tab membership and split layout before
+      // the per-window input target.  In that window the layout still has an
+      // explicit selected card, while currentAgentCardId is temporarily null;
+      // treating that as a new chat leaves the centre on the welcome screen
+      // even though the tab strip contains the user's conversations.  Recover
+      // the selected card once during startup.  New-agent actions run after
+      // this hook has settled, so an intentional empty composer remains empty.
+      if (tabs.sharedTabsInitialized) {
+        const groups = splitGroups(useSessionSplitStore.getState().tree);
+        const activeGroup =
+          groups.find(
+            (group) =>
+              group.id === useSessionSplitStore.getState().activeGroupId,
+          ) ?? groups[0];
+        const layoutKey = activeGroup?.selected;
+        const layoutSelected = layoutKey
+          ? tabs.cards.find((card) => agentCardKey(card) === layoutKey)
+          : undefined;
+        if (layoutSelected) {
+          restored.current = true;
+          void selectTab(layoutSelected);
+          return;
+        }
+        // A persisted empty group is an intentional new-chat pane. Preserve it
+        // even when other tabs are followed in another group. For a group whose
+        // membership has not been reconciled yet, keep listening: the split
+        // store will publish the selected key once the shared cards arrive.
+        if (activeGroup?.keepEmpty && !activeGroup.keys.length) {
+          restored.current = true;
+          return;
+        }
+        if (!activeGroup?.keys.length) return;
+        // A malformed persisted selection should not strand the user on the
+        // welcome screen when the group does contain cards. Pick its first
+        // exact key and let normal selection verify the history owner.
+        const first = activeGroup.keys
+          .map((key) => tabs.cards.find((card) => agentCardKey(card) === key))
+          .find((card): card is AgentCenterCard => Boolean(card));
+        if (first) {
+          restored.current = true;
+          void selectTab(first);
+          return;
+        }
+        // The persisted store can briefly report `sharedTabsInitialized` before
+        // the first server snapshot has populated cards. Keep listening in that
+        // transient empty state; otherwise the later snapshot cannot restore
+        // the layout selection and the centre remains on the welcome screen.
+        if (tabs.cards.length > 0) restored.current = true;
+      }
     };
     const unsubscribe = useAgentCenterStore.subscribe(restore);
+    const unsubscribeLayout = useSessionSplitStore.subscribe(restore);
     restore();
-    return unsubscribe;
+    return () => {
+      unsubscribe();
+      unsubscribeLayout();
+    };
   }, [selectTab]);
 }

@@ -19,6 +19,7 @@ import { useAgentSettingsStore } from "../stores/useAgentSettingsStore";
 import { useAcpStore } from "../stores/useAcpStore";
 import { useCodexStore } from "../components/codex/stores";
 import { useCCStore } from "../stores/cc";
+import { useSessionSplitStore } from "../stores/useSessionSplitStore";
 
 const a = {
   kind: "codex" as const,
@@ -29,10 +30,13 @@ const a = {
 const b = { kind: "codex" as const, id: "b", cwd: "/b" };
 beforeEach(() => {
   vi.clearAllMocks();
+  useSessionSplitStore.getState().reset();
   useAgentCenterStore.setState({
     cards: [a, b],
     currentAgentCardId: "a",
     currentAgentCardKind: "codex",
+    newChatIntent: false,
+    sharedTabsInitialized: true,
   });
   useWorkspaceStore.setState({ cwd: "/a" });
   useAgentSettingsStore.setState({ selectedAgent: "codex" });
@@ -92,6 +96,30 @@ it("restores the selected tab once, without reopening tabs on background state c
   expect(useAgentCenterStore.getState().cards).toEqual([b]);
   expect(selectCodex).toHaveBeenCalledTimes(1);
 });
+
+it("restores the split layout selection when the input target is missing after reload", async () => {
+  useAgentCenterStore.setState({
+    cards: [a, b],
+    currentAgentCardId: null,
+    currentAgentCardKind: null,
+    newChatIntent: false,
+    sharedTabsInitialized: true,
+  });
+  useSessionSplitStore.setState({
+    tree: {
+      type: "group",
+      id: "restored-group",
+      keys: ["codex:b"],
+      selected: "codex:b",
+    },
+    activeGroupId: "restored-group",
+  });
+
+  renderHook(useRestoreSessionTabs);
+
+  expect(selectCodex).toHaveBeenCalledExactlyOnceWith("b");
+  expect(useAgentCenterStore.getState().currentAgentCardId).toBe("b");
+});
 it("keeps ACP active instead of restoring a saved Codex tab over it", () => {
   useAcpStore.setState({ active: true });
   renderHook(useRestoreSessionTabs);
@@ -128,6 +156,7 @@ it("restores a saved selection when shared membership arrives after mount", asyn
     detachedCard: null,
     currentAgentCardId: "b",
     currentAgentCardKind: "codex",
+    newChatIntent: false,
     sharedTabsInitialized: false,
   });
   const { rerender } = renderHook(useRestoreSessionTabs);

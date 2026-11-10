@@ -91,6 +91,8 @@ interface AgentCenterState {
   updateCard: (card: AgentCenterCard) => void;
   currentAgentCardId: string | null;
   currentAgentCardKind: AgentCenterCard["kind"] | null;
+  /** True only after the user explicitly requested a blank new-chat composer. */
+  newChatIntent: boolean;
   setCurrentAgentCardId: (
     id: string | null,
     kind?: AgentCenterCard["kind"],
@@ -238,6 +240,7 @@ export const useAgentCenterStore = create<AgentCenterState>()(
                     detachedCard: null,
                     currentAgentCardId: card.id,
                     currentAgentCardKind: card.kind,
+                    newChatIntent: false,
                   }
                 : {}),
             };
@@ -251,6 +254,7 @@ export const useAgentCenterStore = create<AgentCenterState>()(
                   detachedCard: null,
                   currentAgentCardId: card.id,
                   currentAgentCardKind: card.kind,
+                  newChatIntent: false,
                 }
               : {}),
           };
@@ -272,6 +276,7 @@ export const useAgentCenterStore = create<AgentCenterState>()(
                 detachedCard: null,
                 currentAgentCardId: null,
                 currentAgentCardKind: null,
+                newChatIntent: true,
               };
             return state;
           }
@@ -291,6 +296,7 @@ export const useAgentCenterStore = create<AgentCenterState>()(
             cards,
             currentAgentCardId: next?.id ?? null,
             currentAgentCardKind: next?.kind ?? null,
+            newChatIntent: !next,
           };
         }),
 
@@ -337,6 +343,7 @@ export const useAgentCenterStore = create<AgentCenterState>()(
 
       currentAgentCardId: null,
       currentAgentCardKind: null,
+      newChatIntent: false,
       setCurrentAgentCardId: (id, kind) =>
         set((state) => ({
           detachedCard:
@@ -353,6 +360,7 @@ export const useAgentCenterStore = create<AgentCenterState>()(
               state.cards.find((c) => c.id === id)?.kind ??
               null)
             : null,
+          newChatIntent: id === null,
         })),
 
       cardsViewMode: "solo",
@@ -375,6 +383,7 @@ export const useAgentCenterStore = create<AgentCenterState>()(
         | "cards"
         | "currentAgentCardId"
         | "currentAgentCardKind"
+        | "newChatIntent"
         | "cardsViewMode"
         | "cardSizeMap"
       > => {
@@ -385,6 +394,7 @@ export const useAgentCenterStore = create<AgentCenterState>()(
           cards: [],
           currentAgentCardId: null,
           currentAgentCardKind: null,
+          newChatIntent: false,
           cardsViewMode:
             old?.cardsViewMode === "grid" || old?.cardsViewMode === "list"
               ? old.cardsViewMode
@@ -396,6 +406,7 @@ export const useAgentCenterStore = create<AgentCenterState>()(
         cards: state.cards,
         currentAgentCardId: state.currentAgentCardId,
         currentAgentCardKind: state.currentAgentCardKind,
+        newChatIntent: state.newChatIntent,
         cardsViewMode: state.cardsViewMode,
         cardSizeMap: state.cardSizeMap,
         // A remotely closed reading target is temporary, never a restorable tab.
@@ -410,6 +421,11 @@ export const useAgentCenterStore = create<AgentCenterState>()(
           ...current,
           ...(persisted as Partial<AgentCenterState>),
           detachedCard: null,
+          // Data written before the explicit new-chat marker was introduced
+          // must hydrate as a normal restorable selection, never as an
+          // accidental blank-composer intent.
+          newChatIntent: (persisted as Partial<AgentCenterState> | undefined)
+            ?.newChatIntent === true,
         };
         try {
           const snapshot = latestTabSnapshot();

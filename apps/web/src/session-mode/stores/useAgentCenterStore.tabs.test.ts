@@ -18,10 +18,35 @@ beforeEach(() => {
     cards: [],
     currentAgentCardId: null,
     currentAgentCardKind: null,
+    newChatIntent: false,
     cardsViewMode: "solo",
     cardSizeMap: {},
   });
 });
+
+it("records an intentional new-chat pane and clears it when a tab is selected", () => {
+  const store = useAgentCenterStore.getState();
+  store.addAgentCard(a, { activate: false });
+  store.setCurrentAgentCardId(null);
+  expect(useAgentCenterStore.getState().newChatIntent).toBe(true);
+
+  store.setCurrentAgentCardId("a", "codex");
+  expect(useAgentCenterStore.getState().newChatIntent).toBe(false);
+});
+
+it("activating a newly created or reopened tab clears a stale new-chat intent", () => {
+  const store = useAgentCenterStore.getState();
+  store.setCurrentAgentCardId(null);
+  expect(useAgentCenterStore.getState().newChatIntent).toBe(true);
+
+  store.addAgentCard(a);
+  expect(useAgentCenterStore.getState().newChatIntent).toBe(false);
+
+  store.setCurrentAgentCardId(null);
+  store.addAgentCard({ ...a, preview: "reopened" }, { activate: true });
+  expect(useAgentCenterStore.getState().newChatIntent).toBe(false);
+});
+
 it("appends opened sessions across projects and reopening activates without moving or duplicating", () => {
   const store = useAgentCenterStore.getState();
   store.addAgentCard(a);
@@ -79,6 +104,7 @@ it("closing selects the right neighbor, then the left, then a new chat", () => {
   expect(useAgentCenterStore.getState().currentAgentCardId).toBe("a");
   store.removeCard(a);
   expect(useAgentCenterStore.getState().currentAgentCardId).toBeNull();
+  expect(useAgentCenterStore.getState().newChatIntent).toBe(true);
 });
 it("closing a background tab does not switch selection; agent kind disambiguates IDs", () => {
   const store = useAgentCenterStore.getState();
