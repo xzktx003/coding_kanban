@@ -320,12 +320,12 @@ test("a project's history remains visible across composer provider changes and p
   useConfigStore.setState({ modelProvider: "openai" });
   useCodexStore.setState({ threads: [] });
   api.list.mockImplementation(async (params) => ({
-    data: params.modelProviders === null ? [{ ...row, id: "other-provider-thread", modelProvider: "other-provider", name: "后台运行会话" }] : [],
+    data: Array.isArray(params.modelProviders) && params.modelProviders.length === 0 ? [{ ...row, id: "other-provider-thread", modelProvider: "other-provider", name: "后台运行会话" }] : [],
     nextCursor: null,
   }));
   render(<ThreadList cwd="/fixture" />);
   expect(await screen.findByText("后台运行会话")).toBeTruthy();
-  expect(api.list).toHaveBeenCalledWith(expect.objectContaining({ cwd: "/fixture", modelProviders: null }));
+  expect(api.list).toHaveBeenCalledWith(expect.objectContaining({ cwd: "/fixture", modelProviders: [] }));
 });
 
 test("refreshes project history when leaving a project after a new thread reaches the database", async () => {

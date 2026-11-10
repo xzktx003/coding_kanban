@@ -13,6 +13,7 @@ import { useTranscriptVisibility } from "../hooks/useTranscriptVisibility";
 import { TranscriptDetailVisibility } from "../hooks/transcriptDetailVisibility";
 import { TranscriptInspectionContext } from "./inspection";
 import { CodexContentOwner } from "../presentation/ownerContext";
+import { recordWorkbenchCrash } from "@session/services/workbenchCrashDiagnostic";
 import { CodexTranscriptPreparing } from "./CodexTranscriptPreparing";
 
 // Rich tools, Markdown and on-demand details belong to this local boundary.
@@ -67,6 +68,7 @@ class TranscriptRendererBoundary extends Component<
     };
   }
   componentDidCatch(error: Error, info: ErrorInfo) {
+    recordWorkbenchCrash("会话正文", error, info);
     console.error("[CodexThread] Transcript renderer failed.", {
       threadId: this.props.threadId,
       error,

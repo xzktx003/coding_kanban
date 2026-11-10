@@ -199,12 +199,12 @@ function isUnsupportedQueueImageError(error: unknown): boolean {
   );
 }
 
-function buildFallbackImageMessage(message: string, imagePath: string): string {
+export function buildFallbackImageMessage(message: string, imagePath: string): string {
   return [
     message,
     "",
     "[Kanban 图片附件]",
-    "当前 Codex CLI 不支持通过 queue 直接附加图片。请先使用可用的图片查看工具读取以下本机文件，再结合图片回答：",
+    "请使用图片查看工具读取此附件，再结合图片回答上面的问题：",
     imagePath,
   ].join("\n");
 }

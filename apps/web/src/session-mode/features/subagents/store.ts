@@ -307,14 +307,26 @@ export function observeSubagentStatus(
   if (!status) return;
   const state = useSubagentStore.getState();
   const old = state.nodes[id];
-  if (!old || sameSubagentValue(old.thread.status, status)) return;
+  if (!old) return;
+  const thread = boundedSubagentThread({ ...old.thread, status });
+  const before = old.thread.status;
+  const next = thread.status;
+  // Compare the fields we actually retain. Native JSON property order and
+  // discarded extension fields must not turn each bounded write into another
+  // apparent change when the family hook observes its own update.
+  if (
+    before?.type === next?.type &&
+    sameSubagentValue(before?.activeFlags, next?.activeFlags)
+  ) {
+    return;
+  }
   useSubagentStore.setState({
     nodes: {
       ...state.nodes,
       [id]: {
         ...old,
         revision: state.revision + 1,
-        thread: boundedSubagentThread({ ...old.thread, status }),
+        thread,
       },
     },
     revision: state.revision + 1,

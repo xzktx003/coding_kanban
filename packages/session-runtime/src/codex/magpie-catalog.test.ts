@@ -14,6 +14,25 @@ test('never forwards credentials or follows external endpoints; bounds responses
   await assert.rejects(readMagpieCatalog({model_providers:{magpie:{base_url}}},async()=>{throw Error('must not fetch')}));
  await assert.rejects(readMagpieCatalog({model_providers:{magpie:{base_url:'http://127.0.0.1:3425/v1'}}},async()=>new Response('x'.repeat(1024*1024+1))));
 });
+test('retains advertised reasoning levels, including explicit empty and missing metadata',async()=>{
+ const result=await readMagpieCatalog({model_providers:{magpie:{base_url:'http://127.0.0.1:3425/v1'}}},async()=>
+  new Response(JSON.stringify({data:[
+   {id:'auto/sol',reasoning_levels:['low','medium','high','max','ultra','high']},
+   {id:'houmo/h200',reasoning_levels:[]},
+   {id:'legacy/model'},
+  ]})));
+ assert.deepEqual(result,{provider:'magpie',models:[
+  {id:'auto/sol',reasoningEfforts:['low','medium','high','max','ultra']},
+  {id:'houmo/h200',reasoningEfforts:[]},
+  {id:'legacy/model'},
+ ]});
+});
+test('rejects malformed, unknown or oversized reasoning-level metadata',async()=>{
+ for(const reasoning_levels of [null,'high',['unknown'],[1],Array(17).fill('high')]){
+  await assert.rejects(readMagpieCatalog({model_providers:{magpie:{base_url:'http://127.0.0.1:3425/v1'}}},async()=>
+   new Response(JSON.stringify({data:[{id:'auto/sol',reasoning_levels}]}))),/Invalid Magpie reasoning levels/);
+ }
+});
 test('gateway compatibility route reads local config and returns no source config',async(t)=>{
  const {default:Fastify}=await import('fastify');const {mkdtemp,writeFile,rm}=await import('node:fs/promises');const {tmpdir}=await import('node:os');const {join}=await import('node:path');
  const {registerLocalMagpieCatalog}=await import('./magpie-catalog.js');

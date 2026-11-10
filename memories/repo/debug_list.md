@@ -2264,3 +2264,16 @@ HistoryProjectsDialog 按需加载前，必须切断 browser-dialog/WorkspaceSwi
 - 2026-11-10：终端快捷链接改为服务端 `SESSION_DATA_HOME/terminal-quick-links.json` 持久化，避免浏览器 localStorage 导致换浏览器丢失；API 复用 durable JSON，限制无凭据 HTTP/HTTPS、40条及重复 URL，运行数据被 `.gitignore` 忽略。
 
 - 2026-11-10：终端 Codex 欢迎页尚无 thread ID，不能据此判定未启动；图片接口增加本机精确 live pane 输入路径，拒绝旧会话回退。核对 Codex PID/启动身份，前端允许无 threadId 回执；已建会话仍走 queue。见 `docs/debug_list.md` 与 `apps/server/src/services/codex-terminal-image.ts`。
+
+- 2026-11-11：WorkbenchBoundary 普通渲染错误新增显式局部重试及每标签单条有界诊断 `kanban:workbench:last-error`；真实浏览器注入失败后无刷新恢复、草稿保留。动态模块错误继续显式刷新。自然频发崩溃尚未复现，勿把恢复缺口当作最终触发根因。详见 docs/debug_list.md。
+
+- 2026-11-11：用户明确会话后台闲置后切回崩溃。补正文内层错误边界诊断，避免仅外层记录遗漏。真实隐藏/回收和冻结断网唤醒无自然错误；JS堆与RSS分开采样，后续RSS有回落，不能据短测判断最终泄漏。见 docs/session-background-wake-investigation.md。
+
+- 2026-11-11：用户所见“当前 Codex CLI 不支持通过 queue 直接附加图片”为 Kanban 自动构造的兼容提问。移除误导性实现限制文字，首轮与已有线程统一中性读图提示；不声称获得原生图片附件支持。见 codex-image-message-service.ts。
+
+2026-11-11：会话模式保留 Magpie reasoning_levels 为 reasoningEfforts，按模型目录显示推理强度；在模型菜单的选择模型列表下可直接选轻度、中、高等，以及模型提供的 Max/Ultra。空档位列表显示不支持调整，缺字段兼容旧网关并提示。复用已有强度保存与发送。前端52项、目录5项、浏览器4项通过，web/runtime类型检查与runtime构建通过。现场10.30.0.28:8484已回读档位；仅热更新gateway，未重启Agent或runtime，未发送生成请求。
+# 2026-11-11 子Agent状态同步导致会话React更新循环
+
+`observeSubagentStatus`过去用JSON字符串比较原生状态与有界缓存；字段换序、扩展字段或flags裁剪使同值状态始终不等，`useSubagentFamilySync`反复写nodes，触发 `Maximum update depth exceeded`，外层LayoutContent崩溃。修复先投影再按type/activeFlags比较；hook和真实Playwright工作台复现先红后绿，100次重复状态不通知而idle转换正常。详见docs/session-background-wake-investigation.md。
+
+2026-11-11：修复新建Magpie会话在左侧消失。ThreadList首屏/分页和codexService.loadThreads将modelProviders:null改为[]；原生null仅默认provider，显式[]才全部。现场只读对比null返回100条openai，[]含Magpie/Houmo/NewAPI。纠正旧测试把null模拟全部的错误契约。47项相关单测、web类型检查及session-provider-history浏览器回归通过；旧session-list-usability浏览器夹具因项目同步不匹配失败，未修改该夹具。未重启runtime/Agent，无生成请求。其他管理/归档/状态同步入口的同类筛选问题尚未纳入本次修复。

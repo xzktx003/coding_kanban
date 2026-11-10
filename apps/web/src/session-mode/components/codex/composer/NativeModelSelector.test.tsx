@@ -4,6 +4,8 @@ import { beforeEach, it, expect, vi } from "vitest";
 import { NativeModelSelector } from "./NativeModelSelector";
 import { useLayoutStore } from "@session/stores/useLayoutStore";
 const calls = vi.hoisted(() => ({
+  provider: "openai",
+  magpieRefresh: vi.fn(),
   model: vi.fn(),
   effort: vi.fn(),
   effortValue: "high",
@@ -15,9 +17,14 @@ const calls = vi.hoisted(() => ({
   reload: vi.fn(),
 }));
 const newChatCatalog = vi.hoisted(() => ({
-  magpieModels: [{ id: "kimi/k3" }],
+  magpieModels: [{ id: "kimi/k3" }] as {id:string;reasoningEfforts?:("low"|"medium"|"high"|"max"|"ultra")[]}[],
 }));
 beforeEach(() => {
+  newChatCatalog.magpieModels = [{id: "kimi/k3"}];
+  calls.effort.mockClear();
+  calls.provider = "openai";
+  calls.effort.mockClear();
+  calls.magpieRefresh.mockReset();
   useConfigStore.setState({modelSelectionMode:"manual"});
   calls.effortValue = "high";
   calls.options = ["low", "medium", "high"];
@@ -38,7 +45,7 @@ vi.mock("@session/components/codex/stores", () => ({
 vi.mock("@session/hooks/useThreadModelSettings", () => ({
   useThreadModelSettings: () => ({
     model: "model-one",
-    modelProvider: "openai",
+    modelProvider: calls.provider,
     reasoningEffort: calls.effortValue,
     setModel: calls.model,
     setReasoningEffort: calls.effort,
@@ -86,7 +93,7 @@ vi.mock("../hooks/useMagpieCatalog", () => ({
   useMagpieCatalog: () => ({
     models: newChatCatalog.magpieModels,
     loading: false,
-    refresh: vi.fn(),
+    refresh: calls.magpieRefresh,
   }),
 }));
 vi.mock("../hooks/useNewChatModelConfig", () => ({
@@ -133,6 +140,23 @@ it("retains the known model and offers retry when a refresh fails", async () => 
   expect(trigger.getAttribute("aria-label")).toContain("model-one");
   fireEvent.click(screen.getByRole("menuitem", { name: "重试" }));
   expect(calls.reload).toHaveBeenCalledTimes(1);
+});
+
+it("uses the live Magpie catalog in the model list instead of saved provider presets", async () => {
+  calls.provider = "magpie";
+  render(<NativeModelSelector threadId="original" />);
+  fireEvent.keyDown(screen.getByRole("button", { name: /^模型：/ }), { key: "ArrowDown" });
+  fireEvent.click(await screen.findByRole("menuitem", { name: "选择模型" }));
+  expect(await screen.findByRole("menuitemradio", { name: "kimi/k3" })).toBeDefined();
+  expect(screen.queryByRole("menuitemradio", { name: "原生模型二" })).toBeNull();
+});
+
+it("refreshes the live Magpie catalog together with new-chat configuration", async () => {
+  calls.currentThreadId = null;
+  render(<NativeModelSelector threadId={null} />);
+  fireEvent.keyDown(screen.getByRole("button", { name: /^模型：/ }), { key: "ArrowDown" });
+  fireEvent.click(await screen.findByRole("menuitem", { name: "刷新配置与模型" }));
+  expect(calls.magpieRefresh).toHaveBeenCalledTimes(1);
 });
 
 it.each(["Magpie catalog selection", "pinning the configured model"])(
@@ -348,4 +372,40 @@ it("rejects a replaced expanded draft owner even when both targets are new chats
   await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
   expect(editorFocus).not.toHaveBeenCalled();
   expect(triggerFocus).not.toHaveBeenCalled();
+});
+
+for (const threadId of [null, "original"]) {
+  it(`exposes explicit Magpie effort choices beside the model list (${threadId ?? "new chat"})`, async () => {
+    calls.provider = "magpie";
+    calls.currentThreadId = threadId;
+    calls.effort.mockClear();
+    render(<NativeModelSelector threadId={threadId} />);
+    fireEvent.keyDown(screen.getByRole("button", { name: /^模型：/ }), { key: "ArrowDown" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "选择模型" }));
+    const high = await screen.findByRole("menuitemradio", { name: "推理强度：高" });
+    expect(high.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "推理强度：轻度" }));
+    expect(calls.effort).toHaveBeenCalledWith("low");
+    expect(screen.getByRole("menuitemradio", { name: "kimi/k3" })).toBeDefined();
+  });
+}
+
+it('uses advertised Magpie efforts including Max and Ultra without generic extras', async () => {
+  calls.provider = 'magpie';
+  newChatCatalog.magpieModels = [{id:'model-one',reasoningEfforts:['low','medium','high','max','ultra']}];
+  render(<NativeModelSelector threadId='original' />);
+  fireEvent.keyDown(screen.getByRole('button', {name:/^模型：/}),{key:'ArrowDown'});
+  fireEvent.click(await screen.findByRole('menuitem',{name:'选择模型'}));
+  expect(screen.getByRole('menuitemradio',{name:'推理强度：Max'})).toBeDefined();
+  expect(screen.getByRole('menuitemradio',{name:'推理强度：Ultra'})).toBeDefined();
+  expect(screen.queryByRole('menuitemradio',{name:'推理强度：无'})).toBeNull();
+});
+it('does not invent effort levels for an empty Magpie capability list', async () => {
+  calls.provider = 'magpie';
+  newChatCatalog.magpieModels = [{id:'model-one',reasoningEfforts:[]}];
+  render(<NativeModelSelector threadId='original' />);
+  fireEvent.keyDown(screen.getByRole('button', {name:/^模型：/}),{key:'ArrowDown'});
+  expect(await screen.findByText('此模型不支持调整推理强度')).toBeDefined();
+  expect(screen.queryByRole('menuitemradio',{name:/推理强度：/})).toBeNull();
+  expect(calls.effort).not.toHaveBeenCalled();
 });

@@ -1,5 +1,7 @@
 # 外部 Codex 模型配置与新聊天
 
+2026-11-11：Magpie 提供商的通用“选择模型”列表使用实时 Magpie 目录，不再仅依赖本地保存的提供商预设；新聊天仍保留独立 Magpie 分组。“刷新配置与模型”同时刷新 Magpie 目录，已有 Magpie 会话打开菜单也读取目录。该读取不创建或恢复线程、不发送模型任务。正式入口现场返回19项，由当前 Magpie 开关决定。41项相关单测和4项浏览器回归通过，覆盖选择Magpie后再次进入通用列表仍有多个模型，以及375/1440px配置跟随。未重启runtime或Codex。
+
 2026-11-09。适用于会话模式，自有 Codex 模型选择器；独立 Codex 模式保持原生宿主行为。
 
 新设备的新聊天默认选择“跟随 Codex 配置”。旧设备只要保存过模型或提供商，缺少新意图标记时保守保留为手动模式。每个字段仍单独存储，不整表回写；已有线程继续使用独立线程设置，不因 Magpie 切换而更改。
@@ -28,3 +30,7 @@
 补充：server类型检查同样被HEAD已有 `codex-session-locator.test.ts:1455` 八进制转义错误阻塞。原运行runtime/native PID及10-31启动时间未变。
 
 后续现场复验：正式HTTPS入口目录返回40模型，原runtime/native未重启；隔离浏览器新增目录选择验收，与375px/1440px配置回归共3项通过。前次“没有接入完整目录”结论由本节限定的本机Magpie支持取代；实际上游生成调用未测试。
+
+2026-11-11：会话模式保留 Magpie reasoning_levels 为 reasoningEfforts，按模型目录显示推理强度；在模型菜单的选择模型列表下可直接选轻度、中、高等，以及模型提供的 Max/Ultra。空档位列表显示不支持调整，缺字段兼容旧网关并提示。复用已有强度保存与发送。前端52项、目录5项、浏览器4项通过，web/runtime类型检查与runtime构建通过。现场10.30.0.28:8484已回读档位；仅热更新gateway，未重启Agent或runtime，未发送生成请求。
+
+2026-11-11：修复新建Magpie会话在左侧消失。ThreadList首屏/分页和codexService.loadThreads将modelProviders:null改为[]；原生null仅默认provider，显式[]才全部。现场只读对比null返回100条openai，[]含Magpie/Houmo/NewAPI。纠正旧测试把null模拟全部的错误契约。47项相关单测、web类型检查及session-provider-history浏览器回归通过；旧session-list-usability浏览器夹具因项目同步不匹配失败，未修改该夹具。未重启runtime/Agent，无生成请求。其他管理/归档/状态同步入口的同类筛选问题尚未纳入本次修复。

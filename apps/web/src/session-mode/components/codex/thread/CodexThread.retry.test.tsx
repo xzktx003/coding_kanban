@@ -117,3 +117,17 @@ it("keeps refresh and error details available after a rejected lazy import", asy
   expect(screen.getByRole("button", { name: "刷新页面" })).toBeTruthy();
   expect(screen.getByText("查看错误详情")).toBeTruthy();
 });
+
+it("records the inner transcript crash even when the whole-workbench boundary is not reached", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  sessionStorage.removeItem("kanban:workbench:last-error");
+  render(<CodexThread threadId="retry-thread" />);
+  await screen.findByRole("alert");
+  const diagnostic = JSON.parse(
+    sessionStorage.getItem("kanban:workbench:last-error")!,
+  );
+  expect(diagnostic.message).toBe("fixture transcript render error");
+  expect(diagnostic.mode).toBe("会话正文");
+  expect(diagnostic.componentStack).toContain("default");
+  expect(diagnostic.visibility).toBe(document.visibilityState);
+});

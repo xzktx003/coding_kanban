@@ -956,3 +956,9 @@
 - 2026-11-09：按用户要求暂停第四 ChatGPT 模式开发，并从 `WorkbenchModeSwitch` 隐藏 ChatGPT 入口。实现代码、服务、数据和 `mode=chatgpt` 深链保留；8484 未重启。远程项目持久化、真实 SSH 模型收发和安全文件工具仍未验收，见[暂停进度](designs/chatgpt-desktop-mode-20261103/paused-progress-20261109.md)。
 
 - **终端 Codex 首轮图片提问**：本机 Codex 已启动但尚无会话 ID 时，可向已核实的可控制窗格提交说明和私有图片文件路径，由 Codex 图片工具读取；保留现有会话的图片队列方式。窗格或 Codex 进程身份变化时拒绝发送，不复用旧卡片会话。该首轮路径不适用于 SSH/只读终端。
+
+- **工作台错误恢复与诊断**：普通组件渲染错误可显式局部重试，保留独立 store 和设备草稿；模块加载错误保留显式刷新入口。每标签仅保存最近一条有界错误信息/组件栈供排查，不记录聊天正文，不自动刷新或操作 Agent。
+
+- 工作台最近错误诊断同时覆盖完整消息正文内层边界，保留当时 visibility/focus；后台闲置/冻结/断网唤醒的组合回归位于 `tests/e2e/session-background-wake.spec.ts`。
+
+2026-11-11：会话模式保留 Magpie reasoning_levels 为 reasoningEfforts，按模型目录显示推理强度；在模型菜单的选择模型列表下可直接选轻度、中、高等，以及模型提供的 Max/Ultra。空档位列表显示不支持调整，缺字段兼容旧网关并提示。复用已有强度保存与发送。前端52项、目录5项、浏览器4项通过，web/runtime类型检查与runtime构建通过。现场10.30.0.28:8484已回读档位；仅热更新gateway，未重启Agent或runtime，未发送生成请求。

@@ -123,7 +123,7 @@ export function NativeModelSelector({
   const { openAiModels, providerItems, loading, error, reload, modelStatus, hasModelSnapshot } =
     useModels();
   const [open, setOpen] = useState(false);
-  const magpie = useMagpieCatalog(open && threadId === null);
+  const magpie = useMagpieCatalog(open && (threadId === null || settings.modelProvider === "magpie"));
   const selectionMode = useConfigStore(s => s.modelSelectionMode);
   const willOpenOnMount =
     initiallyOpen &&
@@ -278,7 +278,9 @@ export function NativeModelSelector({
     () => isNativeModelProvider ? canonicalNativeItems(pickerModels) : null,
     [isNativeModelProvider, pickerModels],
   );
-  const items = nativeItems ?? providerItems(settings.modelProvider);
+  const items = settings.modelProvider === "magpie" && magpie.models.length > 0
+    ? magpie.models.map(item => ({ id: item.id, label: item.id, description: undefined }))
+    : nativeItems ?? providerItems(settings.modelProvider);
   const catalogOptions =
     settings.modelProvider === "openai"
       ? nativeReasoningOptions(model)
@@ -300,7 +302,10 @@ export function NativeModelSelector({
     settings.modelProvider === "openai" &&
     modelStatus === "success" &&
     !openAiModels?.length;
-  const options = loggedOutClosed
+  const magpieOptions = settings.modelProvider === "magpie"
+    ? magpie.models.find(item => item.id === settings.model)?.reasoningEfforts
+    : undefined;
+  const options = magpieOptions ?? (loggedOutClosed
     ? NATIVE_LOGGED_OUT_REASONING_OPTIONS
     : settings.modelProvider === "openai" && model
       ? catalogOptions
@@ -308,7 +313,7 @@ export function NativeModelSelector({
         ? hasModelSnapshot
           ? NATIVE_UNKNOWN_REASONING_OPTIONS
           : []
-        : GENERIC_REASONING_OPTIONS;
+        : GENERIC_REASONING_OPTIONS);
   // Existing ordinary native threads use the current canonical model's power
   // projection. New drafts retain their separate catalog-default initialization.
   const menuModel =
@@ -1006,7 +1011,7 @@ export function NativeModelSelector({
                 </>
               )}
               {configured.error && <p role="status">{configured.error}</p>}
-              <DropdownMenuItem onSelect={event => { event.preventDefault(); void configured.refresh(); void reload(); }}>刷新配置与模型</DropdownMenuItem>
+              <DropdownMenuItem onSelect={event => { event.preventDefault(); void configured.refresh(); void magpie.refresh(); void reload(); }}>刷新配置与模型</DropdownMenuItem>
             </div>
           )}
           {threadId === null && (magpie.models.length > 0 || magpie.error || magpie.loading) && (
@@ -1171,6 +1176,28 @@ export function NativeModelSelector({
                     <NativeComposerIcon name="check" />
                   </DropdownMenuItem>
                 )}
+              {settings.modelProvider === "magpie" && !followsConfig && (
+                <div role="group" aria-label="推理强度">
+                  <p className="session-native-model-heading">推理强度</p>
+                  {options.map((option, index) => (
+                    <DropdownMenuItem
+                      key={option}
+                      role="menuitemradio"
+                      aria-label={`推理强度：${nativeReasoningLabel(option)}`}
+                      aria-checked={option === effort}
+                      className="session-native-model-option"
+                      onSelect={(event) => {
+                        event.preventDefault();
+                        selectEffort(index);
+                      }}
+                    >
+                      <span>{nativeReasoningLabel(option)}</span>
+                      {option === effort && <NativeComposerIcon name="check" />}
+                    </DropdownMenuItem>
+                  ))}
+                  <p className="session-native-model-heading">{magpieOptions?.length === 0 ? "此模型不支持调整推理强度" : magpieOptions === undefined ? "网关未提供强度档位，实际支持由上游模型决定" : "按 Magpie 模型支持的档位选择"}</p>
+                </div>
+              )}
               {!canAdjust && (
                 <NativeServiceTierControl model={model} threadId={threadId} />
               )}
