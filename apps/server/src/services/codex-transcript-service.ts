@@ -133,6 +133,69 @@ function collectText(value: unknown): string {
   return "";
 }
 
+function copiedToolTranscriptEnd(
+  lines: string[],
+  start: number,
+): number | null {
+  if (
+    !/^\d{4}[/-]\d{1,2}[/-]\d{1,2}[ T]\d{1,2}:\d{2}:\d{2}$/.test(
+      lines[start] ?? "",
+    ) ||
+    !["折叠", "收起"].includes(lines[start + 1] ?? "") ||
+    lines[start + 2] !== "*** Begin Patch" ||
+    !/^\*\*\* (?:(?:Update|Add|Delete) File: |Move to: )/.test(
+      lines[start + 3] ?? "",
+    )
+  ) {
+    return null;
+  }
+
+  let sawHunk = false;
+  let sawChange = false;
+  let index = start + 4;
+  for (; index < lines.length; index += 1) {
+    const line = lines[index] ?? "";
+    if (line === "*** End Patch") {
+      return sawHunk && sawChange ? index + 1 : null;
+    }
+    if (line.startsWith("@@")) {
+      sawHunk = true;
+      continue;
+    }
+    if (
+      line.startsWith("*** ") ||
+      line.startsWith("+") ||
+      line.startsWith("-")
+    ) {
+      if (line.startsWith("+") || line.startsWith("-")) sawChange = true;
+      continue;
+    }
+    if (line.startsWith(" ")) continue;
+    break;
+  }
+  return sawHunk && sawChange ? index : null;
+}
+
+/** Remove a copied Kanban transcript card embedded in a user message. */
+export function stripCopiedToolCallTranscript(text: string): string {
+  const lines = text.split(/\r?\n/);
+  const visible: string[] = [];
+  let removed = false;
+  for (let index = 0; index < lines.length; ) {
+    const end = copiedToolTranscriptEnd(lines, index);
+    if (end !== null) {
+      index = end;
+      removed = true;
+      continue;
+    }
+    visible.push(lines[index] ?? "");
+    index += 1;
+  }
+  if (!removed) return text;
+  const result = visible.join("\n");
+  return result.trim() ? result : "";
+}
+
 function parseRecord(line: string): JsonRecord | null {
   try {
     const value = JSON.parse(line) as unknown;
@@ -612,7 +675,9 @@ function parseTranscriptGroup(
   let group: AgentTranscriptEntry[] | null = null;
   if (payloadType === "message") {
     const role = stringValue(payload.role);
-    const text = collectText(payload.content);
+    const rawText = collectText(payload.content);
+    const text =
+      role === "user" ? stripCopiedToolCallTranscript(rawText) : rawText;
     if ((role === "user" || role === "assistant") && text) {
       group = [
         {

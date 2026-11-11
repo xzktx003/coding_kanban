@@ -2278,3 +2278,4 @@ HistoryProjectsDialog 按需加载前，必须切断 browser-dialog/WorkspaceSwi
 
 2026-11-11：修复新建Magpie会话在左侧消失。ThreadList首屏/分页和codexService.loadThreads将modelProviders:null改为[]；原生null仅默认provider，显式[]才全部。现场只读对比null返回100条openai，[]含Magpie/Houmo/NewAPI。纠正旧测试把null模拟全部的错误契约。47项相关单测、web类型检查及session-provider-history浏览器回归通过；旧session-list-usability浏览器夹具因项目同步不匹配失败，未修改该夹具。未重启runtime/Agent，无生成请求。其他管理/归档/状态同步入口的同类筛选问题尚未纳入本次修复。
 - 2026-11-11（终端完整记录展示工具调用）：Codex rollout 中的 `apply_patch` 输入和输出此前作为非 `exec` 工具记录进入完整记录；Claude 记录也包含折叠工具块。现在两个读取器只投影用户/助手消息，前端再过滤 `kind=tool`，工具正文不进入完整记录 API/UI，Agent执行与独立完成通知不变。桌面/手机共用展示组件13项、Codex/Claude针对性回归各1项通过。
+- 2026-11-11 完整记录出现 `apply_patch` 正文的根因是用户消息中包含复制的终端工具卡片，不是原生工具事件泄漏。Codex/Claude transcript 投影现只剔除带时间戳、折叠控件及有效补丁 hunk 的工具卡片副本，普通代码保持；不修改原始历史。

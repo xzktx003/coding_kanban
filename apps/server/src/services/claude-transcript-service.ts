@@ -21,6 +21,7 @@ import type {
   ReadRemoteTranscriptInput,
   RemoteCodexFileAccess,
 } from "./codex-transcript-service.js";
+import { stripCopiedToolCallTranscript } from "./codex-transcript-service.js";
 
 const TRANSCRIPT_READ_BLOCK_BYTES = 64 * 1024;
 const DEFAULT_TRANSCRIPT_PAGE_LIMIT = 30;
@@ -255,7 +256,10 @@ function parseClaudeLine(line: string): ParsedClaudeLine {
   let sawToolUse = false;
 
   const pushText = (kind: "user" | "assistant", text: string) => {
-    const normalized = text.trim();
+    const normalized =
+      kind === "user"
+        ? stripCopiedToolCallTranscript(text).trim()
+        : text.trim();
     if (!normalized) {
       return;
     }
