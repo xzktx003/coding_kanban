@@ -130,7 +130,10 @@ export function AgentTranscriptEntries({
   const orderedEntries = useMemo(
     () =>
       [...transcript.entries].filter(
-        (entry) => entry.title !== "exec 调用" && entry.title !== "exec 输出",
+        (entry) =>
+          entry.kind !== "tool" &&
+          entry.title !== "exec 调用" &&
+          entry.title !== "exec 输出",
       ),
     [transcript.entries],
   );

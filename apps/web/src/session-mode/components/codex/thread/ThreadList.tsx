@@ -219,7 +219,7 @@ export const ThreadList = memo(function ThreadList({ cwd }: ThreadListProps) {
     const params: ThreadListParams = {
       limit: Math.max(PAGE_SIZE, loadedRef.current.count),
       sortKey,
-      modelProviders: null,
+      modelProviders: [], // An explicit empty filter includes every provider.
       cwd,
       useStateDbOnly: true,
     };
@@ -418,7 +418,7 @@ export const ThreadList = memo(function ThreadList({ cwd }: ThreadListProps) {
       const params: ThreadListParams = {
         cursor: nextCursor,
         limit: 20,
-        modelProviders: null,
+        modelProviders: [],
         useStateDbOnly: true,
         sortKey,
         cwd,

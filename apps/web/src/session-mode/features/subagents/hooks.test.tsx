@@ -3,7 +3,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 import { useCodexStore } from "@session/components/codex/stores";
 import { useAgentCenterStore } from "@session/stores/useAgentCenterStore";
 import { useSubagentFamily, useSubagentFamilySync } from "./hooks";
-import { observeSubagents, useSubagentStore } from "./store";
+import { observeSubagents, observeSubagentStatus, useSubagentStore } from "./store";
 import { subagentStorageKey } from "./scope";
 import { subagentScope } from "./scope";
 import { usePairingStore } from "@session/stores/usePairingStore";
@@ -396,4 +396,50 @@ it("keeps family history sync isolated from unrelated thread events", async () =
       "idle",
     ),
   );
+});
+
+it.each([
+  { activeFlags: [], type: "active" },
+  { type: "active", activeFlags: [], detail: "native-extension" },
+  {
+    type: "active",
+    activeFlags: Array.from({ length: 24 }, () => "waitingOnApproval"),
+  },
+])("settles bounded child status synchronization for %j", (status) => {
+  useSubagentStore.setState({
+    nodes: {
+      child: {
+        thread: { id: "child", parentThreadId: "root" },
+        parentId: "root",
+        verified: true,
+        revision: 1,
+      },
+    },
+  });
+  useCodexStore.setState({ threadStatusMap: { child: status as any } });
+  let renders = 0;
+  const view = renderHook(() => {
+    if (++renders > 80)
+      throw new Error("child status synchronization never settled");
+    useSubagentFamilySync();
+  });
+  expect(renders).toBeLessThan(10);
+  expect(useSubagentStore.getState().nodes.child.thread.status).toEqual({
+    type: "active",
+    activeFlags: status.activeFlags.slice(0, 20),
+  });
+  const stable = useSubagentStore.getState();
+  const notifications = vi.fn();
+  const stop = useSubagentStore.subscribe(notifications);
+  for (let i = 0; i < 100; i++) observeSubagentStatus("child", status as any);
+  expect(useSubagentStore.getState()).toBe(stable);
+  expect(notifications).not.toHaveBeenCalled();
+  stop();
+  act(() =>
+    useCodexStore.setState({ threadStatusMap: { child: { type: "idle" } } }),
+  );
+  expect(useSubagentStore.getState().nodes.child.thread.status).toEqual({
+    type: "idle",
+  });
+  view.unmount();
 });

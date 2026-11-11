@@ -13,6 +13,20 @@ beforeEach(() => {
   useCodexStore.setState({ threads: [], threadListNextCursor: null });
 });
 
+it("loads history from all providers, including newly created Magpie threads", async () => {
+  const magpie = { id: "magpie-new", modelProvider: "magpie", cwd: "/fixture" };
+  api.listThreads.mockImplementation(async (params) => ({
+    data: Array.isArray(params.modelProviders) && params.modelProviders.length === 0 ? [magpie] : [],
+    nextCursor: null,
+  }));
+  await codexService.loadThreads("/fixture");
+  expect(api.listThreads).toHaveBeenCalledWith(
+    expect.objectContaining({ modelProviders: [], cwd: "/fixture" }),
+    expect.anything(),
+  );
+  expect(useCodexStore.getState().threads).toEqual([magpie]);
+});
+
 it.each([false, true])(
   "an old runtime list response cannot replace current thread metadata (failure=%s)",
   async (failure) => {

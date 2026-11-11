@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -137,6 +137,86 @@ test("Claude transcript pages the full conversation newest-first with an older c
     ["第一个问题"],
   );
   assert.equal(older.hasMore, false);
+});
+
+test("Claude transcript omits tool calls and results", async () => {
+  const root = mkdtempSync(join(tmpdir(), "claude-transcript-hide-tools-"));
+  const cwd = "/workspace/project";
+  const project = join(root, "projects", encodeClaudeProjectDirectory(cwd));
+  const sessionId = "abababab-abab-4bab-8bab-abababababab";
+  mkdirSync(project, { recursive: true });
+  writeFileSync(
+    join(project, `${sessionId}.jsonl`),
+    [
+      {
+        type: "user",
+        uuid: "user-1",
+        timestamp: "2026-09-23T01:00:00.000Z",
+        sessionId,
+        cwd,
+        message: { content: "修复一下" },
+      },
+      {
+        type: "assistant",
+        uuid: "assistant-tool",
+        timestamp: "2026-09-23T01:00:01.000Z",
+        sessionId,
+        cwd,
+        message: {
+          content: [
+            { type: "text", text: "我先检查文件。" },
+            {
+              type: "tool_use",
+              id: "tool-1",
+              name: "Read",
+              input: { file_path: "/workspace/project/private.ts" },
+            },
+          ],
+          stop_reason: "tool_use",
+        },
+      },
+      {
+        type: "user",
+        uuid: "tool-result",
+        timestamp: "2026-09-23T01:00:02.000Z",
+        sessionId,
+        cwd,
+        message: {
+          content: [{ type: "tool_result", content: "private tool output" }],
+        },
+      },
+      {
+        type: "assistant",
+        uuid: "assistant-final",
+        timestamp: "2026-09-23T01:00:03.000Z",
+        sessionId,
+        cwd,
+        message: {
+          content: [{ type: "text", text: "已修复。" }],
+          stop_reason: "end_turn",
+        },
+      },
+    ]
+      .map((record) => JSON.stringify(record))
+      .join("\n") + "\n",
+  );
+
+  try {
+    const page = await new ClaudeTranscriptService({
+      projectsRoot: join(root, "projects"),
+      sessionsRoot: join(root, "sessions"),
+    }).read({ sessionId });
+    assert.deepEqual(
+      page.entries.map((entry) => [entry.kind, entry.text]),
+      [
+        ["user", "修复一下"],
+        ["assistant", "我先检查文件。"],
+        ["assistant", "已修复。"],
+      ],
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("Claude latest completion follows the final assistant response past tool use", async () => {

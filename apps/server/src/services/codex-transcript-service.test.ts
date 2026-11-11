@@ -750,6 +750,68 @@ test("CodexTranscriptService keeps exec calls hidden while filling a page", () =
   }
 });
 
+test("Codex transcript omits apply_patch calls and their outputs", () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-transcript-hide-tools-"));
+  const sessionId = "hidden-tools-session";
+  writeFileSync(
+    join(root, `rollout-${sessionId}.jsonl`),
+    [
+      line({
+        type: "session_meta",
+        payload: { id: sessionId, cwd: "/workspace/project" },
+      }),
+      line({
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "修复一下" }],
+        },
+      }),
+      line({
+        type: "response_item",
+        payload: {
+          type: "custom_tool_call",
+          name: "apply_patch",
+          call_id: "patch-1",
+          input: "*** Begin Patch\nprivate patch body\n*** End Patch",
+        },
+      }),
+      line({
+        type: "response_item",
+        payload: {
+          type: "custom_tool_call_output",
+          call_id: "patch-1",
+          output: "Success. Updated the file.",
+        },
+      }),
+      line({
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "已修复。" }],
+        },
+      }),
+    ].join(""),
+  );
+
+  try {
+    const response = new CodexTranscriptService({ sessionsRoot: root }).read({
+      sessionId,
+    });
+    assert.deepEqual(
+      response.entries.map((entry) => [entry.kind, entry.text]),
+      [
+        ["user", "修复一下"],
+        ["assistant", "已修复。"],
+      ],
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("CodexTranscriptService reads a remote Codex JSONL session by working directory", async () => {
   const remoteRoot = "/home/demo/.codex/sessions/2026/08/25";
   const olderPath = `${remoteRoot}/rollout-older.jsonl`;
@@ -779,6 +841,25 @@ test("CodexTranscriptService reads a remote Codex JSONL session by working direc
         timestamp: "2026-08-25T02:00:00.000Z",
         type: "session_meta",
         payload: { id: "remote-newer", cwd: "/home/demo/project" },
+      }),
+      line({
+        timestamp: "2026-08-25T02:00:00.500Z",
+        type: "response_item",
+        payload: {
+          type: "custom_tool_call",
+          name: "apply_patch",
+          call_id: "remote-patch",
+          input: "private remote patch",
+        },
+      }),
+      line({
+        timestamp: "2026-08-25T02:00:00.750Z",
+        type: "response_item",
+        payload: {
+          type: "custom_tool_call_output",
+          call_id: "remote-patch",
+          output: "remote patch success",
+        },
       }),
       line({
         timestamp: "2026-08-25T02:00:01.000Z",
@@ -867,6 +948,10 @@ test("CodexTranscriptService reads a remote Codex JSONL session by working direc
   assert.equal(response.available, true);
   assert.equal(response.sessionId, "remote-newer");
   assert.equal(response.matchedBy, "working-directory");
+  assert.deepEqual(
+    response.entries.map((entry) => entry.text),
+    ["remote history"],
+  );
   assert.equal(response.entries.at(-1)?.text, "remote history");
 
   const completion = await new CodexTranscriptService({

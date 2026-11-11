@@ -47,7 +47,10 @@ import {
   resolveCodexSessionIds,
   verifyBoundCodexQueueThread,
 } from "./services/active-codex-session-resolver.js";
-import { AgentSessionInputService } from "./services/agent-session-input-service.js";
+import {
+  AgentSessionInputService,
+  buildInteractivePromptInput,
+} from "./services/agent-session-input-service.js";
 import { createAgentSessionStreamEvent } from "./services/agent-session-stream.js";
 import {
   AgentCompletionFeishuNotifier,
@@ -651,6 +654,15 @@ export function buildServer(options: BuildServerOptions = {}): {
         registry,
         codexSessionLocator,
         codexImageMessageService,
+        submitTerminalPrompt: async (session, prompt, verify) => {
+          await verify();
+          await tmuxAdapter.writeInput(session, {
+            input: buildInteractivePromptInput(prompt),
+          });
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          await verify();
+          await tmuxAdapter.writeInput(session, { input: "\r" });
+        },
         claudeSessionLocator,
         claudeImageMessageService,
       });

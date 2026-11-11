@@ -1543,3 +1543,33 @@ test("read-only completion uses the only Codex-held rollout when launch birth is
     rmSync(f.root, { recursive: true, force: true });
   }
 });
+
+test("input pane proof identifies the actual Codex process before its first thread", async () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-input-pane-"));
+  const procRoot = join(root, "proc");
+  try {
+    exposeOpenFile(procRoot, 100, "/unused");
+    exposeCodexCommand(procRoot, 100);
+    exposeLinuxProcessStartTime(procRoot, 100, Date.now());
+    const locator = new CodexSessionLocator({
+      procRoot,
+      sessionsRoot: join(root, "sessions"),
+      resolveTmuxActivePanePid: async () => 100,
+      listTmuxPanes: async () => [{ paneId: "%8", processId: 100 }],
+    });
+    const pane = await locator.resolveInputPane("work");
+    assert.equal(pane?.paneId, "%8");
+    assert.equal(pane?.codexProcessId, 100);
+    assert.ok(pane?.codexStartTime);
+    for (const command of [
+      "/bin/bash\0",
+      "/usr/bin/codex\0app-server\0",
+      "/usr/bin/codex-relay\0",
+    ]) {
+      writeFileSync(join(procRoot, "100", "cmdline"), command);
+      assert.equal(await locator.resolveInputPane("work"), undefined);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

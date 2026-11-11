@@ -381,3 +381,13 @@ test("Feishu notification settings use the sanitized settings endpoint", async (
     },
   ]);
 });
+
+test("sendCodexImageMessage accepts a terminal submission before Codex creates a thread", async () => {
+  Object.defineProperty(globalThis, "fetch", {
+    configurable: true,
+    value: async () => Response.json({ ok: true }, { status: 202 }),
+  });
+  assert.deepEqual(await sendCodexImageMessage({
+    agentSessionId: "new-cli", image: new File(["png"], "a.png", { type: "image/png" }), message: "describe",
+  }), { ok: true });
+});

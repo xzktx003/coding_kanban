@@ -703,7 +703,7 @@ export const codexService = {
       const params: ThreadListParams = {
         cursor: null,
         limit: 20,
-        modelProviders: null,
+        modelProviders: [], // null selects the native default provider only.
         archived,
         sortKey,
         cwd,

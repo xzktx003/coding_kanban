@@ -100,7 +100,8 @@ test("send falls back to a queued local file reference when codex queue rejects 
     const fallbackMessage =
       invocations[1]!.args[invocations[1]!.args.indexOf("--message") + 1]!;
     assert.match(fallbackMessage, /Kanban 图片附件/);
-    assert.match(fallbackMessage, /请先使用.*图片查看工具/);
+    assert.match(fallbackMessage, /请使用图片查看工具读取此附件/);
+    assert.doesNotMatch(fallbackMessage, /不支持|queue|失败/);
     assert.ok(fallbackMessage.includes(invocations[0]!.imagePath));
     await access(invocations[0]!.imagePath);
     assert.ok(scheduled.cleanup);
@@ -368,7 +369,7 @@ test("send falls back to a queued remote file reference and delays SSH cleanup",
     "请分析图片",
     "",
     "[Kanban 图片附件]",
-    "当前 Codex CLI 不支持通过 queue 直接附加图片。请先使用可用的图片查看工具读取以下本机文件，再结合图片回答：",
+    "请使用图片查看工具读取此附件，再结合图片回答上面的问题：",
     "/home/demo/attachment.png",
   ].join("\n");
   assert.ok(

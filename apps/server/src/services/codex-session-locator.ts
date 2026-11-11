@@ -201,9 +201,9 @@ function isCodexProcess(procRoot: string, processId: number): boolean {
       join(procRoot, String(processId), "cmdline"),
       "utf8",
     );
-    return commandLine.split("\0").some((argument) =>
-      isCodexExecutable(argument.split("/").at(-1) ?? ""),
-    );
+    return commandLine
+      .split("\0")
+      .some((argument) => isCodexExecutable(argument.split("/").at(-1) ?? ""));
   } catch {
     return false;
   }
@@ -713,6 +713,36 @@ export class CodexSessionLocator {
     });
   }
 
+  /** Exact live pane proof for terminal input before a new CLI has a thread. */
+  async resolveInputPane(
+    sessionName: string,
+  ): Promise<
+    | (TmuxPaneProcess & { codexProcessId: number; codexStartTime: number })
+    | undefined
+  > {
+    const activePid = await this.resolveTmuxActivePanePid(sessionName);
+    if (!activePid) return undefined;
+    const pane = (await this.listTmuxPanes(sessionName)).find(
+      (p) => p.processId === activePid,
+    );
+    if (!pane) return undefined;
+    const live = collectProcessTree(this.procRoot, activePid).filter((pid) => {
+      const args = readProcessArguments(this.procRoot, pid);
+      return (
+        isCodexProcess(this.procRoot, pid) && args && !isCodexAppServer(args)
+      );
+    });
+    if (live.length !== 1) return undefined;
+    const codexStartTime = readProcessStartTime(
+      this.procRoot,
+      live[0]!,
+      this.clockTicksPerSecond,
+    );
+    return codexStartTime === null
+      ? undefined
+      : { ...pane, codexProcessId: live[0]!, codexStartTime };
+  }
+
   async resolve(input: ResolveCodexSessionInput): Promise<string | undefined> {
     const activePanePid = input.tmuxSession
       ? await this.resolveTmuxActivePanePid(
@@ -1004,7 +1034,6 @@ export class CodexSessionLocator {
 
     return undefined;
   }
-
 
   private hasFreshLaunch(codexProcessIds: readonly number[]): boolean {
     return codexProcessIds.some((processId) => {

@@ -5,13 +5,17 @@ import { isCodexSessionCandidate } from "@agent-orchestrator/shared";
 import type { AgentSessionRecord } from "@agent-orchestrator/shared";
 
 import type { AgentSessionRegistry } from "../services/agent-session-registry.js";
-import { resolveActiveCodexSessionId } from "../services/active-codex-session-resolver.js";
+import {
+  isRemoteAgentSession,
+  resolveActiveCodexSessionId,
+} from "../services/active-codex-session-resolver.js";
 import {
   ClaudeImageMessageUnavailableError,
   type ClaudeImageMessageService,
 } from "../services/claude-image-message-service.js";
 import type { ClaudeSessionLocator } from "../services/claude-session-locator.js";
 import type { CodexSessionLocator } from "../services/codex-session-locator.js";
+import { sendCodexTerminalImage } from "../services/codex-terminal-image.js";
 import {
   CodexImageMessageUnavailableError,
   detectCodexImageExtension,
@@ -25,7 +29,13 @@ const DEFAULT_CODEX_IMAGE_MESSAGE = "请查看这张图片。";
 
 interface CodexImageMessageRoutesOptions {
   registry: Pick<AgentSessionRegistry, "get" | "has" | "updateSession">;
-  codexSessionLocator: Pick<CodexSessionLocator, "resolve">;
+  codexSessionLocator: Pick<CodexSessionLocator, "resolve"> &
+    Partial<Pick<CodexSessionLocator, "resolveInputPane">>;
+  submitTerminalPrompt?: (
+    session: AgentSessionRecord,
+    prompt: string,
+    verify: () => Promise<void>,
+  ) => Promise<void>;
   codexImageMessageService: Pick<CodexImageMessageService, "send">;
   claudeSessionLocator: Pick<ClaudeSessionLocator, "resolve">;
   claudeImageMessageService: Pick<ClaudeImageMessageService, "send">;
@@ -182,8 +192,56 @@ export async function registerCodexImageMessageRoutes(
           codexSessionLocator: options.codexSessionLocator,
         });
         if (!threadId) {
+          const tmuxSession = agentSession.transportRef?.tmuxSession;
+          const pane =
+            !isRemoteAgentSession(agentSession) &&
+            tmuxSession &&
+            options.submitTerminalPrompt
+              ? await options.codexSessionLocator.resolveInputPane?.(
+                  tmuxSession,
+                )
+              : undefined;
+          if (pane && agentSession.controlMode === "control") {
+            await sendCodexTerminalImage(
+              image,
+              imageExtension,
+              message,
+              async (prompt) => {
+                const verify = async () => {
+                  const current =
+                    await options.codexSessionLocator.resolveInputPane?.(
+                      tmuxSession!,
+                    );
+                  if (
+                    current?.paneId !== pane.paneId ||
+                    current?.processId !== pane.processId ||
+                    current?.codexProcessId !== pane.codexProcessId ||
+                    current?.codexStartTime !== pane.codexStartTime
+                  )
+                    throw new CodexImageRequestError(
+                      "终端目标已变化，请重新发送图片",
+                      409,
+                    );
+                };
+                await verify();
+                await options.submitTerminalPrompt!(
+                  {
+                    ...agentSession,
+                    transportRef: {
+                      ...agentSession.transportRef,
+                      tmuxPane: pane.paneId,
+                    },
+                  },
+                  prompt,
+                  verify,
+                );
+              },
+            );
+            reply.code(202);
+            return { ok: true };
+          }
           throw new CodexImageRequestError(
-            "当前 tmux 窗格没有正在运行的 Codex 对话",
+            "无法确定当前 Codex 对话或可控制的终端窗格，图片未发送",
             409,
           );
         }

@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type ErrorInfo,
 } from "react";
 import { WorkbenchModeSwitch } from "./WorkbenchModeSwitch";
 import { WorkbenchUpdateNotice } from "./WorkbenchUpdateNotice";
@@ -21,6 +22,7 @@ import {
   type WorkbenchMode,
 } from "../lib/workbench-mode";
 import "../workbench.css";
+import { recordWorkbenchCrash } from "../session-mode/services/workbenchCrashDiagnostic";
 
 const TerminalApp = lazy(() => import("../App"));
 const SessionApp = lazy(loadSessionWorkbench);
@@ -34,9 +36,9 @@ export class WorkbenchBoundary extends Component<
     onTerminal: () => void;
     reloadPage?: () => void;
   },
-  { failed: boolean; errorMessage: string }
+  { failed: boolean; errorMessage: string; componentStack: string }
 > {
-  state = { failed: false, errorMessage: "" };
+  state = { failed: false, errorMessage: "", componentStack: "" };
   static getDerivedStateFromError(error: unknown) {
     // Retain only a small diagnostic, never an Error/stack or component payload.
     const message =
@@ -45,18 +47,33 @@ export class WorkbenchBoundary extends Component<
         : typeof error === "string"
           ? error
           : "未知界面错误";
-    return { failed: true, errorMessage: message.slice(0, 1000) };
+    return { failed: true, errorMessage: message.slice(0, 1000), componentStack: "" };
   }
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    recordWorkbenchCrash(this.props.modeName, error, info);
+    // Keep this available even when browser storage is disabled. Never retain
+    // the Error object, component props, or unbounded transcript data.
+    this.setState({ componentStack: (info.componentStack ?? "").slice(0, 3000) });
+  }
+
   render() {
     if (this.state.failed)
       return (
         <div className="workbench-state" role="alert">
           <h2>{this.props.modeName}界面加载失败</h2>
-          <p>可以重新加载本页，或切换到终端模式。</p>
+          <p>可以重试恢复界面，草稿会保留；反复失败时可重新加载本页。</p>
           <details className="workbench-error-details">
             <summary>错误详情</summary>
             <pre>{this.state.errorMessage}</pre>
+            {this.state.componentStack && (
+              <pre>组件调用栈{this.state.componentStack}</pre>
+            )}
           </details>
+          {!/(?:Failed to fetch dynamically imported module|Importing a module script failed|ChunkLoadError|Loading chunk .* failed)/i.test(this.state.errorMessage) && (
+            <button onClick={() => this.setState({ failed: false, errorMessage: "", componentStack: "" })}>
+              重试{this.props.modeName}界面
+            </button>
+          )}
           <button onClick={this.props.onTerminal}>切换到终端模式</button>
           <button
             onClick={() => {

@@ -25,7 +25,7 @@ for(const width of [375,1440])test(`new chat follows external configuration and 
 
 test('Magpie models absent from native catalog can be selected with their provider',async({page})=>{
  await installSessionUxFixture(page,0);
- await page.route('**/model-catalog/magpie',r=>r.fulfill({json:{provider:'magpie',models:[{id:'houmo/h200'},{id:'kimi/k3'}]}}));
+ await page.route('**/model-catalog/magpie',r=>r.fulfill({json:{provider:'magpie',models:[{id:'houmo/h200',reasoningEfforts:[]},{id:'kimi/k3',reasoningEfforts:['low','medium','high']}]}}));
  await page.goto('/?mode=session',{waitUntil:'domcontentloaded'});
  await page.locator('.session-mode [contenteditable=true]').first().waitFor();
  await seedSessionUx(page,0);
@@ -37,6 +37,18 @@ test('Magpie models absent from native catalog can be selected with their provid
   const {useConfigStore}=await import(performance.getEntriesByType('resource').findLast(e=>new URL(e.name).pathname===path)?.name??path);
   const s=useConfigStore.getState();return {model:s.model,provider:s.modelProvider,mode:s.modelSelectionMode};
  })).toEqual({model:'kimi/k3',provider:'magpie',mode:'manual'});
+ await page.getByRole('button',{name:/^模型：/}).first().click();
+ await page.getByRole('menuitem',{name:'选择模型',exact:true}).click();
+ await expect(page.getByRole('menuitemradio',{name:'houmo/h200',exact:true})).toBeVisible();
+ await expect(page.getByRole('menuitemradio',{name:'kimi/k3',exact:true})).toBeVisible();
+ await page.getByRole('menuitemradio',{name:'推理强度：轻度',exact:true}).click();
+ await expect.poll(()=>page.evaluate(async()=>{
+  const path='/src/session-mode/components/codex/stores/useConfigStore.ts';
+  const {useConfigStore}=await import(performance.getEntriesByType('resource').findLast(e=>new URL(e.name).pathname===path)?.name??path);
+  return useConfigStore.getState().reasoningEffort;
+ })).toBe('low');
+ await expect(page.getByRole('menuitemradio',{name:'推理强度：轻度',exact:true})).toHaveAttribute('aria-checked','true');
+ await expect(page.getByRole('menuitemradio',{name:'推理强度：无',exact:true})).toHaveCount(0);
 });
 
 test("new chat shows the native default when the configured model is null", async ({

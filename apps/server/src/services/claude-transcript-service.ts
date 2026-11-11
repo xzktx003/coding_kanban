@@ -29,7 +29,6 @@ const HEADER_SCAN_BYTES = 256 * 1024;
 const LATEST_COMPLETION_SCAN_BYTES = 1024 * 1024;
 const COMPLETION_QUESTION_RECOVERY_SCAN_BYTES = 8 * 1024 * 1024;
 const MAX_VISIBLE_TEXT_CHARS = 200_000;
-const MAX_TOOL_TEXT_CHARS = 8_000;
 const MAX_USER_QUESTION_CHARS = 8_000;
 const COMPLETION_STOP_REASONS = new Set([
   "end_turn",
@@ -290,34 +289,10 @@ function parseClaudeLine(line: string): ParsedClaudeLine {
       }
       if (block.type === "tool_use") {
         sawToolUse = true;
-        const name = stringValue(block.name) ?? "tool";
-        const input =
-          isRecord(block.input) || Array.isArray(block.input)
-            ? JSON.stringify(block.input, null, 2)
-            : (stringValue(block.input) ?? "");
-        entries.push({
-          id: `${uuid}:tool:${index}`,
-          timestamp,
-          kind: "tool",
-          title: `${name} 调用`,
-          text: capText(input, MAX_TOOL_TEXT_CHARS),
-          collapsedByDefault: true,
-        });
         continue;
       }
       if (block.type === "tool_result") {
-        const result = textFromBlock(block).trim();
-        if (!result) {
-          continue;
-        }
-        entries.push({
-          id: `${uuid}:result:${index}`,
-          timestamp,
-          kind: "tool",
-          title: "工具结果",
-          text: capText(result, MAX_TOOL_TEXT_CHARS),
-          collapsedByDefault: true,
-        });
+        continue;
       }
     }
   }
