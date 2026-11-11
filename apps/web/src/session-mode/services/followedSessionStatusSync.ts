@@ -114,7 +114,10 @@ export function startFollowedSessionStatusSync(fetcher: typeof fetch = fetch) {
               cursor,
               limit: 100,
               sortKey: "updated_at",
-              modelProviders: null,
+              // An explicit empty list includes every provider. `null` asks
+              // the native runtime for its default provider only, which can
+              // leave followed custom-provider sessions permanently unknown.
+              modelProviders: [],
               cwd: null,
               archived,
               useStateDbOnly: true,

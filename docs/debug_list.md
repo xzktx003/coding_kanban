@@ -4037,3 +4037,6 @@ resize 才回来。
 
 2026-11-11：修复新建Magpie会话在左侧消失。ThreadList首屏/分页和codexService.loadThreads将modelProviders:null改为[]；原生null仅默认provider，显式[]才全部。现场只读对比null返回100条openai，[]含Magpie/Houmo/NewAPI。纠正旧测试把null模拟全部的错误契约。47项相关单测、web类型检查及session-provider-history浏览器回归通过；旧session-list-usability浏览器夹具因项目同步不匹配失败，未修改该夹具。未重启runtime/Agent，无生成请求。其他管理/归档/状态同步入口的同类筛选问题尚未纳入本次修复。
 - 2026-11-11（终端完整记录展示工具调用）：Codex rollout 中的 `apply_patch` 输入和输出此前作为非 `exec` 工具记录进入完整记录；Claude 记录也包含折叠工具块。现在两个读取器只投影用户/助手消息，前端再过滤 `kind=tool`，工具正文不进入完整记录 API/UI，Agent执行与独立完成通知不变。桌面/手机共用展示组件13项、Codex/Claude针对性回归各1项通过。
+
+- 2026-11-11：后台冻结或正文回收后切回时，`SessionGroups` 外层懒加载 `CodexThread` 使缓存答复先出现而会话壳未及时挂载。现同步挂载 `CodexThread` 外层，富转录仍按需加载；唤醒浏览器回归通过，未发送任务。
+- 2026-11-11：跟随会话状态同步把 `modelProviders: null` 误用于全量查询，custom provider 会话因此长期 unknown。现改为 `modelProviders: []` 并补请求体契约回归；未知状态仍保留，不自动恢复或重发。

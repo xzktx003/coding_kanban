@@ -96,7 +96,9 @@ it("restores all followed statuses across projects and pages without changing na
   ]);
   expect(JSON.parse(fetcher.mock.calls[0][1].body)).toMatchObject({
     cwd: null,
-    modelProviders: null,
+    // An explicit empty list includes custom providers (Magpie and others).
+    // null asks the native runtime for its default provider only.
+    modelProviders: [],
     useStateDbOnly: true,
   });
   expect(JSON.parse(fetcher.mock.calls[1][1].body).cursor).toBe("page2");

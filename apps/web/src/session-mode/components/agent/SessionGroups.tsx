@@ -14,6 +14,7 @@ import {
 } from "@session/stores/useSessionSplitStore";
 import { codexService } from "@session/services/codexService";
 import { useCodexStore } from "../codex/stores";
+import { CodexThread } from "../codex/thread/CodexThread";
 import {
   ResizablePanel,
   ResizablePanelGroup,
@@ -30,11 +31,6 @@ import {
   placeSessionDrag,
   type SessionDropTarget,
 } from "./sessionTabDrag";
-const CodexThread = lazy(() =>
-  import("../codex/thread/CodexThread").then((m) => ({
-    default: m.CodexThread,
-  })),
-);
 const CCSession = lazy(() => import("../cc/session/CCSession"));
 
 function GroupView({
