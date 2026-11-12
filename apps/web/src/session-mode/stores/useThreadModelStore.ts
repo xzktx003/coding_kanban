@@ -29,6 +29,7 @@ import type {
   ApprovalsReviewer,
 } from "@session/bindings/v2";
 import { useConfigStore } from "@session/components/codex/stores/useConfigStore";
+import { rememberNativeModelBaseline } from "@session/features/model-change/modelChangeTranscript";
 
 export interface ThreadModelSettings {
   /** Durable setting provenance; never grants native operation authority. */
@@ -631,11 +632,15 @@ export type ThreadModelHydrateOptions = {
   notify?: boolean;
   initialOnly?: boolean;
   readToken?: ThreadModelReadToken;
+  /** Both model fields came from a native read, not request-value fallbacks. */
+  modelChangeBaseline?: boolean;
 };
 export type ThreadModelSelectionCapture = {
   threadId: string;
   settings: Readonly<Required<ThreadModelSettings>>;
   token: ThreadModelReadToken;
+  /** The queue settings RPC cannot change providers on an existing thread. */
+  pendingProviderChange: boolean;
 };
 type IntentPayload =
   | { kind: "edit"; patch: Partial<ThreadModelSettings> }
@@ -864,6 +869,11 @@ export function createThreadModelController(
       options.revision !== (store.getState().threads[id]?.revision ?? 0)
     )
       return;
+    // Use exactly the same read-token boundary as persistence before using a
+    // native read as a display baseline. A late read must not manufacture a
+    // model transition after a newer choice or another account/runtime.
+    const baselineCurrent = !options.readToken ||
+      sameThreadModelValue(options.readToken, persistence.token(id));
     persistence.enqueue(id, {
       kind,
       groups: affectedGroups(value),
@@ -874,9 +884,18 @@ export function createThreadModelController(
       },
       readToken: options.readToken,
     });
+    if (baselineCurrent && options.modelChangeBaseline && !options.initialOnly)
+      rememberNativeModelBaseline(id, value);
   }
   function capture(id: string): ThreadModelSelectionCapture {
     const value = structuredClone(settings(id));
+    const entry = store.getState().threads[id];
+    const pendingProviderChange = Boolean(
+      entry?.pending &&
+      (entry.pendingFields?.includes("modelProvider") ??
+        entry.nativeSettings?.modelProvider !== undefined) &&
+      entry.nativeSettings?.modelProvider !== value.modelProvider,
+    );
     // Values may contain nested sandbox policy/provider maps; freeze recursively.
     const freeze = (v: object) => {
       for (const x of Object.values(v))
@@ -888,6 +907,7 @@ export function createThreadModelController(
       threadId: id,
       settings: value,
       token: persistence.token(id),
+      pendingProviderChange,
     };
     const receipt = {
       saved: false,

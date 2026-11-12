@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { useCodexStore } from "../components/codex/stores";
 import { useAgentCenterStore } from "../stores/useAgentCenterStore";
+import { useSessionSyncStore } from "../stores/useSessionSyncStore";
 import { startFollowedSessionStatusSync } from "./followedSessionStatusSync";
 import { currentNativeExecutionTiming } from "./nativeTurnExecutionProof";
 import { invalidateCodexOperationScope } from "./codexOperationScope";
@@ -64,6 +65,7 @@ beforeEach(() => {
     events: {},
     turnTimingMap: {},
   });
+  useSessionSyncStore.setState({ statusCoverage: null });
 });
 afterEach(() => {
   stop?.();
@@ -85,7 +87,7 @@ it("restores all followed statuses across projects and pages without changing na
     )
     .mockResolvedValueOnce(response([{ id: "b", status: active }]));
   stop = startFollowedSessionStatusSync(statusesOnly(fetcher));
-  await vi.advanceTimersByTimeAsync(1);
+  await vi.advanceTimersByTimeAsync(10);
   expect(useCodexStore.getState().threadStatusMap).toEqual({
     a: idle,
     b: active,
@@ -244,6 +246,39 @@ it("checks archived history for missing followed threads and stops once all are 
   });
   expect(fetcher).toHaveBeenCalledTimes(2);
   expect(JSON.parse(fetcher.mock.calls[1][1].body).archived).toBe(true);
+});
+
+it("records coverage independently of stale status-map entries", async () => {
+  useCodexStore.setState({
+    threadStatusMap: { a: idle, b: active },
+  });
+  const fetcher = vi.fn().mockImplementation(async () => response([]));
+  stop = startFollowedSessionStatusSync(statusesOnly(fetcher));
+  await vi.advanceTimersByTimeAsync(10);
+  expect(useCodexStore.getState().threadStatusMap).toEqual({
+    a: { type: "notLoaded" },
+    b: { type: "notLoaded" },
+  });
+  expect(useSessionSyncStore.getState().statusCoverage).toMatchObject({
+    complete: true,
+    covered: { a: true, b: true },
+  });
+});
+
+it("keeps coverage incomplete when a page fails before the exhaustive scan", async () => {
+  useCodexStore.setState({
+    threadStatusMap: { a: idle, b: active },
+  });
+  const fetcher = vi.fn().mockRejectedValue(new Error("offline"));
+  stop = startFollowedSessionStatusSync(statusesOnly(fetcher));
+  await vi.advanceTimersByTimeAsync(10);
+  expect(useSessionSyncStore.getState().statusCoverage).toMatchObject({
+    complete: false,
+  });
+  expect(useCodexStore.getState().threadStatusMap).toEqual({
+    a: idle,
+    b: active,
+  });
 });
 
 it("aborts on cleanup and rejects late updates and reconnect callbacks", async () => {

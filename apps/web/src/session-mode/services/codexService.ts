@@ -612,6 +612,7 @@ function readInitialThreadMetadata(threadId: string) {
       };
       hydrateThreadModel(threadId, nativeThreadSettings(response, settings), {
         readToken,
+        modelChangeBaseline: true,
       });
       useCodexStore.setState((s) => {
         if (!isCurrent()) return s;
@@ -1225,6 +1226,7 @@ export const codexService = {
       hydrateThreadModel(threadId, nativeThreadSettings(response, settings), {
         readToken: modelReadToken,
         notify: !!baseline.historyLoadedMap[threadId],
+        modelChangeBaseline: true,
       });
       const itemPage = page && "itemPage" in page && page.itemPage;
       const historicalEvents = convertThreadHistoryToEvents(thread).filter(
@@ -1556,6 +1558,7 @@ export const codexService = {
       hydrateThreadModel(
         response.thread.id,
         nativeThreadSettings(response, response.thread),
+        { modelChangeBaseline: true },
       );
       return applyThreadMutation(
         set,

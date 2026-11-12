@@ -32,6 +32,7 @@ import {
   sessionKey,
   useSessionAttentionStore,
 } from "../stores/useSessionAttentionStore";
+import { useSessionSyncStore } from "../stores/useSessionSyncStore";
 import type { SessionState } from "../components/common/SessionStatus";
 export type FollowedSessionState = SessionState | "unknown";
 export type SessionConnectionState = "checking" | "ready" | "offline";
@@ -78,6 +79,7 @@ export function followedSessionRows(
   const elicitations = useElicitationStore.getState().pendingRequests;
   const subagents = useSubagentStore.getState().nodes;
   const families = useSubagentStore.getState().families;
+  const statusCoverage = useSessionSyncStore.getState().statusCoverage;
   const followedCodexIds = [
     ...new Set(
       cards
@@ -218,6 +220,16 @@ export function followedSessionRows(
     unknown: 0,
   };
   for (const row of rows) counts[row.state]++;
+  // `notLoaded` is an explicit native response: the read-only status query
+  // covered this thread but intentionally did not load its live execution
+  // state. Keep the row unknown so controls remain guarded, while allowing
+  // the aggregate to settle once every followed Codex id has a query result.
+  // A missing map entry still means that the current sync pass has not covered
+  // that card yet (or the query failed before it could mark it unknown).
+  const statusCoverageComplete = cards.every((card) => {
+    if (card.kind !== "codex") return true;
+    return Boolean(statusCoverage?.complete && statusCoverage.covered[card.id]);
+  });
   return {
     rows,
     counts,
@@ -225,7 +237,7 @@ export function followedSessionRows(
     complete:
       connection === "ready" &&
       sharedTabsInitialized &&
-      counts.unknown === 0 &&
+      statusCoverageComplete &&
       cards.every(
         (card) =>
           card.kind !== "codex" || families[card.id]?.complete !== false,
@@ -262,6 +274,7 @@ export function useFollowedSessionStates(
   useRequestUserInputStore((s) => s.pendingRequests);
   useElicitationStore((s) => s.pendingRequests);
   useSubagentStore((s) => s.families);
+  useSessionSyncStore((s) => s.statusCoverage);
   // Transcript deltas do not change navigation state. Subscribe only to the
   // root sessions' question counts; child requests use their metadata stores.
   // A primitive array also prevents selectors from retaining transcript bodies.

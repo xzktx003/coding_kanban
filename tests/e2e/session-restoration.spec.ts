@@ -63,6 +63,9 @@ async function state(page: Page) {
     const { useSessionSplitStore } = await import(
       url("/src/session-mode/stores/useSessionSplitStore.ts")
     );
+    const { useSessionSyncStore } = await import(
+      url("/src/session-mode/stores/useSessionSyncStore.ts")
+    );
     const s = useCodexStore.getState();
     return {
       loaded: s.historyLoadedMap,
@@ -75,6 +78,12 @@ async function state(page: Page) {
       eventCounts: Object.fromEntries(
         Object.entries(s.events).map(([id, events]) => [id, events.length]),
       ),
+      itemIds: Object.fromEntries(
+        Object.entries(s.events).map(([id, events]) => [id, [...new Set(events
+          .filter((event) => event.method === "item/started" || event.method === "item/completed")
+          .map((event) => event.params.item.id))]]),
+      ),
+      cursors: useSessionSyncStore.getState().cursors,
     };
   });
 }
@@ -212,7 +221,16 @@ for (const width of [375, 1440])
       2,
     );
     const beforeReload = await state(page);
-    expect(beforeReload.eventCounts["ux-1"]).toBeGreaterThanOrEqual(40);
+    // Recent history is intentionally bounded to ten turns. Assert the actual
+    // user and assistant items plus the older-page cursor; event deduplication
+    // can remove duplicate started events without losing any conversation.
+    expect(beforeReload.eventCounts["ux-1"]).toBeGreaterThanOrEqual(30);
+    expect(beforeReload.itemIds["ux-1"].sort()).toEqual(
+      Array.from({ length: 10 }, (_, n) => [
+        `ux-1-user-${n + 14}`, `ux-1-answer-${n + 14}`,
+      ]).flat().sort(),
+    );
+    expect(beforeReload.cursors["ux-1"]).toBe("10");
     expect(beforeReload).toMatchObject({
       current: "ux-0",
       selected: "ux-0",

@@ -97,6 +97,18 @@ function sameJson(a: unknown, b: unknown): boolean {
 function accept(id: string, data: FollowupThread) {
   if (!Array.isArray(data.items) || !Number.isInteger(data.revision))
     throw new Error("队列服务未返回有效状态");
+  // A mutation acceptance response is deliberately not a queue snapshot. Do
+  // not replace an existing queue view with its single bounded proof; the
+  // mounted observer will install the next complete read when it is ready.
+  if (data.snapshotComplete === false) {
+    reconcileDeliveryEchoes(id, data);
+    useFollowupStore.setState((s) =>
+      s.errors[id] === undefined
+        ? s
+        : { errors: { ...s.errors, [id]: undefined } },
+    );
+    return data;
+  }
   const current = useFollowupStore.getState().threads[id];
   const currentRevision = current?.revision ?? -1;
   if (currentRevision > data.revision) return data;
@@ -200,6 +212,10 @@ export const followupService = {
     // Only ordinary preference-based submissions participate in this local gate.
     const captured = settingsCapture ??
       (parameters === undefined ? captureThreadModelSelection(threadId) : undefined);
+    if (captured?.pendingProviderChange && mode !== "steer")
+      throw new MutationNotStartedError(
+        "当前会话的服务商更改尚未生效，消息未发送。请切回原服务商，或新建会话使用所选服务商；草稿已保留。",
+      );
     const capturedParameters = structuredClone(parameters ??
       followupParameters(threadId, captured!.settings));
     if (captured) {
@@ -302,10 +318,12 @@ export const followupService = {
           throw unconfirmed();
       }
       const item = result.items.find((m) => m.id === id || m.nativeClientUserMessageId === id);
-      if (!item) throw new Error("消息提交回执不完整");
-      if (item.status === "failed" || item.status === "uncertain")
+      const accepted = result.accepted?.id === id ? result.accepted : undefined;
+      if (!item && !accepted) throw new Error("消息提交回执不完整");
+      const status = item?.status ?? accepted?.status;
+      if (status === "failed" || status === "uncertain")
         throw new Error(
-          (item.error ?? "消息未确认送达") + "；内容已保留，请在队列中处理",
+          (item?.error ?? "消息未确认送达") + "；内容已保留，请在队列中处理",
         );
       // The message enters the transcript only after the server receipt confirms
       // it was accepted. During the occupancy check + submit the draft stays in

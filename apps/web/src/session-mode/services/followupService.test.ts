@@ -38,6 +38,54 @@ import {
   hydrateThreadModel,
   useThreadModelStore,
 } from "../stores/useThreadModelStore";
+
+it.each(["queue", "replace"] as const)(
+  "does not %s a message when a selected provider has not been confirmed by native settings",
+  async (mode) => {
+    hydrateThreadModel("provider-a", { model: "astra", modelProvider: "openai" });
+    changeThreadModel("provider-a", { model: "astra", modelProvider: "houmo_newapi" });
+    await expect(followupService.submit(
+      "codex:provider-a",
+      { revision: 1, writeId: "edit3_00000000-0000-4000-8000-000000000001" },
+      "provider-a", "继续", [], mode,
+    )).rejects.toThrow(/服务商.*尚未生效/);
+    expect(api.postJsonWithOptions).not.toHaveBeenCalled();
+    expect(Object.keys(useCodexDeliveryStore.getState().entries)).toHaveLength(0);
+  },
+);
+it("protects a legacy pending provider choice even without a field list", async () => {
+  hydrateThreadModel("legacy-provider", { model: "astra", modelProvider: "openai" });
+  changeThreadModel("legacy-provider", { modelProvider: "houmo_newapi" });
+  useThreadModelStore.setState((state) => ({ threads: {
+    ...state.threads,
+    "legacy-provider": { ...state.threads["legacy-provider"], pendingFields: undefined },
+  } }));
+  await expect(followupService.submit(
+    "codex:legacy-provider",
+    { revision: 1, writeId: "edit3_00000000-0000-4000-8000-000000000001" },
+    "legacy-provider", "继续", [], "queue",
+  )).rejects.toThrow(/服务商.*尚未生效/);
+  expect(api.postJsonWithOptions).not.toHaveBeenCalled();
+});
+it.each(["reverted", "confirmed", "steer"] as const)(
+  "allows a captured provider choice when it is %s",
+  async (state) => {
+    hydrateThreadModel("provider-a", { model: "astra", modelProvider: "openai" });
+    changeThreadModel("provider-a", { model: "astra", modelProvider: "houmo_newapi" });
+    if (state === "reverted") changeThreadModel("provider-a", { modelProvider: "openai" });
+    if (state === "confirmed") hydrateThreadModel("provider-a", { model: "astra", modelProvider: "houmo_newapi" });
+    api.postJsonWithOptions.mockImplementationOnce(async (_path, data) => ({
+      revision: 1, paused: null, items: [{ ...data, status: "queued" }],
+    }));
+    await followupService.submit(
+      "codex:provider-a",
+      { revision: 1, writeId: "edit3_00000000-0000-4000-8000-000000000001" },
+      "provider-a", "继续", [], state === "steer" ? "steer" : "queue",
+      state === "steer" ? "running-turn" : undefined,
+    );
+    expect(api.postJsonWithOptions).toHaveBeenCalledOnce();
+  },
+);
 beforeEach(() => {
   vi.clearAllMocks();
   api.postJsonWithOptions.mockReset();
@@ -110,6 +158,33 @@ it("keeps uncertain delivery after a generic 500 or missing acknowledgement", as
   expect(
     Object.values(useCodexDeliveryStore.getState().entries),
   ).toMatchObject([{ status: "uncertain" }]);
+});
+it("accepts a native fast receipt without waiting for the full queue snapshot", async () => {
+  api.postJsonWithOptions.mockImplementationOnce(async (_path, data) => ({
+    authority: "native",
+    revision: 0,
+    paused: null,
+    items: [],
+    accepted: { id: data.id, status: "queued", nativeQueuedSubmissionId: "native-1" },
+    snapshotComplete: false,
+  }));
+  const result = await followupService.submit(
+    "codex:a",
+    { revision: 1, writeId: "edit3_00000000-0000-4000-8000-000000000001" },
+    "a",
+    "fast receipt",
+    [],
+    "queue",
+    undefined,
+    {},
+  );
+  expect(result.accepted).toMatchObject({
+    status: "queued",
+    nativeQueuedSubmissionId: "native-1",
+  });
+  expect(Object.values(useCodexDeliveryStore.getState().entries)).toMatchObject([
+    { status: "queued", text: "fast receipt" },
+  ]);
 });
 it("keeps the last queue snapshot and records an unavailable read error", async () => {
   const lastKnown = {

@@ -644,7 +644,26 @@
   }
   .session-mode .session-tab-mobile-menu {
     align-self: flex-start;
+    box-sizing: border-box;
+    width: 44px;
+    min-width: 44px;
     height: 27px;
+  }
+  /* The project name is context on a narrow tab. Keep its full path and
+     actions in the 44px tag menu so a 23px text button is not a touch target. */
+  .session-mode
+    .session-tab
+    > .session-project-detail
+    .session-identity-project {
+    display: none;
+  }
+  .session-mode
+    .session-tab
+    > .session-project-detail
+    .session-identity-project-static {
+    display: flex;
+    pointer-events: none;
+    cursor: default;
   }
   .session-mode .session-card-header {
     padding: 4px 8px;

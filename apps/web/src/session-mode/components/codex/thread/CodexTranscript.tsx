@@ -115,6 +115,9 @@ import { goalCompletionFallbackSlot } from "@session/features/goals/goalCompleti
 import { useGoalAnnouncements } from "@session/features/goals/goalTranscript";
 import { projectGoalTranscriptSlots } from "@session/features/goals/goalTranscriptProjection";
 import { GoalTranscriptAnnouncements } from "@session/features/goals/GoalTranscriptAnnouncements";
+import { useModelChangeAnnouncements } from "@session/features/model-change/modelChangeTranscript";
+import { projectModelChangeSlots } from "@session/features/model-change/modelChangeProjection";
+import { ModelChangeAnnouncements } from "@session/features/model-change/ModelChangeAnnouncements";
 import {
   findTranscriptMatchRange,
   setTranscriptSearchHighlight,
@@ -260,6 +263,7 @@ const CodexTranscript = memo(function CodexTranscript({
   const historyError = useCodexStore((s) => s.historyErrorMap[activeThreadId]);
   const events = useCodexStore((s) => s.events[activeThreadId] ?? EMPTY_EVENTS);
   const goalAnnouncements = useGoalAnnouncements(activeThreadId);
+  const modelChanges = useModelChangeAnnouncements(activeThreadId);
   const completionTarget = useGoalCompletionTarget(activeThreadId);
   const closedRecordCount = useMemo(
     () => countClosedThreadRecords(events, activeThreadId),
@@ -494,6 +498,10 @@ const CodexTranscript = memo(function CodexTranscript({
         events,
       ),
     [activeThreadId, rows, goalAnnouncements, events],
+  );
+  const modelChangeSlots = useMemo(
+    () => projectModelChangeSlots(activeThreadId, rows, modelChanges),
+    [activeThreadId, rows, modelChanges],
   );
   const completionSlot = useMemo(
     () =>
@@ -1553,6 +1561,9 @@ const CodexTranscript = memo(function CodexTranscript({
                             row.key,
                           )}
                         />
+                        {modelChangeSlots.has(row.key) && (
+                          <ModelChangeAnnouncements changes={modelChangeSlots.get(row.key)} />
+                        )}
                         {completionSlot?.afterRow === row.key &&
                           completionTarget && (
                             <GoalCompletionFallback

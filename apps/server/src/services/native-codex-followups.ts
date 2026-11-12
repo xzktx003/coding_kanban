@@ -10,6 +10,7 @@ import { join } from "node:path";
 import {
   composeContextText,
   type FollowupAction,
+  type FollowupAcceptance,
   type FollowupMessage,
   type FollowupSubmit,
   type FollowupThread,
@@ -91,6 +92,11 @@ export class NativeCodexFollowups {
       paused: string | null;
       namespace?: string;
     }
+  >();
+  /** Keeps the revision of a fast mutation response stable until its first full read. */
+  private fastAccepted = new Map<
+    string,
+    { revision: number; id: string; nativeId?: string }
   >();
   private actions = new NativeQueueActions((id) => this.directory(id));
   private steerDisplay = new NativeSteerReceipts((id) => this.directory(id));
@@ -530,10 +536,20 @@ export class NativeCodexFollowups {
       : (stopped ??
         (legacy.length && !native.length ? "旧队列等待显式迁移" : null));
     const fingerprint = digest({ items, paused, review, undo: recovery.undo });
+    const fast = this.fastAccepted.get(id);
+    const fastMatches =
+      !!fast &&
+      items.some(
+        (item) =>
+          item.nativeClientUserMessageId === fast.id &&
+          (!fast.nativeId || item.nativeQueuedSubmissionId === fast.nativeId),
+      );
     const revision =
-      old?.fingerprint === fingerprint
-        ? old.revision
-        : Math.max((old?.revision ?? 0) + 1, Date.now());
+      fastMatches
+        ? fast!.revision
+        : old?.fingerprint === fingerprint
+          ? old.revision
+          : Math.max((old?.revision ?? 0) + 1, Date.now());
     const current = {
       revision,
       fingerprint,
@@ -545,6 +561,7 @@ export class NativeCodexFollowups {
     if (old?.fingerprint !== fingerprint && dir)
       await writeDurableJson(join(dir, "snapshot.json"), current);
     this.snapshots.set(id, current);
+    if (fastMatches) this.fastAccepted.delete(id);
     while (this.snapshots.size > 64)
       this.snapshots.delete(this.snapshots.keys().next().value!);
     return {
@@ -608,7 +625,7 @@ export class NativeCodexFollowups {
   private async submitOne(
     input: FollowupSubmit,
     legacyId?: string,
-  ): Promise<void> {
+  ): Promise<FollowupAcceptance | undefined> {
     if (this.runtime.context && !this.legacyFile)
       conflict("官方提交意图的持久存储不可用，消息尚未提交");
     const { expectedScope, ...content } = input;
@@ -620,7 +637,15 @@ export class NativeCodexFollowups {
         conflict("同一请求标识不能用于不同消息");
       if (previous.namespace !== currentContext?.namespace)
         conflict("该消息回执属于其他账号或历史范围");
-      return;
+      if (previous.status !== "accepted") return undefined;
+      return {
+        id: input.id,
+        status: previous.turnId ? "sent" : "queued",
+        ...(previous.nativeId
+          ? { nativeQueuedSubmissionId: previous.nativeId }
+          : {}),
+        ...(previous.turnId ? { turnId: previous.turnId } : {}),
+      };
     }
     const context = await this.context(expectedScope);
     const pending = await this.pending(input.threadId);
@@ -640,6 +665,7 @@ export class NativeCodexFollowups {
       ...(context ? { namespace: context.namespace } : {}),
     };
     await this.save(receipt); // A lost add or steer acknowledgement can never lead to replay.
+    let acceptance: FollowupAcceptance | undefined;
     try {
       const nativeInput = inputFor(input);
       if (input.mode === "replace") {
@@ -718,6 +744,11 @@ export class NativeCodexFollowups {
           throw new Error("引导回执待核对");
         receipt.turnId = result.turnId;
         receipt.status = "accepted";
+        acceptance = {
+          id: input.id,
+          status: "sent",
+          turnId: result.turnId,
+        };
         await this.save(receipt); // Preserve native ACK even if display settlement fails.
         await this.steerDisplay.accept(input.threadId, input.id);
       } else {
@@ -742,6 +773,11 @@ export class NativeCodexFollowups {
         )
           throw new Error("官方队列接收回执待核对");
         receipt.nativeId = result.queuedSubmission.id;
+        acceptance = {
+          id: input.id,
+          status: "queued",
+          nativeQueuedSubmissionId: receipt.nativeId,
+        };
         if (input.mode === "replace") {
           // Queue acceptance is already known. A lost start acknowledgement must
           // never cause another add or another interrupt of a later turn.
@@ -768,11 +804,79 @@ export class NativeCodexFollowups {
       receipt.error = error instanceof Error ? error.message : String(error);
     }
     await this.save(receipt);
+    return acceptance;
   }
   submit(input: FollowupSubmit) {
     return this.run(input.threadId, async () => {
-      await this.submitOne(input);
-      return this.snapshot(input.threadId);
+      const accepted = await this.submitOne(input);
+      if (!accepted) return this.snapshot(input.threadId);
+      // The mutation itself has an exact native acknowledgement. Do not make
+      // the composer wait for a second, potentially slow queue/history read.
+      // The regular GET observer will replace this bounded projection with a
+      // complete snapshot shortly afterwards.
+      const item: FollowupMessage = accepted.nativeQueuedSubmissionId
+        ? {
+            id: `native_${accepted.nativeQueuedSubmissionId}`,
+            threadId: input.threadId,
+            authority: "native",
+            nativeQueuedSubmissionId: accepted.nativeQueuedSubmissionId,
+            nativeClientUserMessageId: input.id,
+            text: input.text,
+            images: [...input.images],
+            ...(input.contexts ? { contexts: structuredClone(input.contexts) } : {}),
+            ...(input.mentions ? { mentions: structuredClone(input.mentions) } : {}),
+            parameters: {},
+            mode: input.mode,
+            ...(input.expectedTurnId ? { expectedTurnId: input.expectedTurnId } : {}),
+            status: accepted.status,
+            // Native queue rows do not expose a client timestamp. Keeping the
+            // provisional item identical to `project()` lets an immediate
+            // queue action validate the same revision while the full read is
+            // still in flight.
+            createdAt: 0,
+            fingerprint: digest(input),
+          }
+        : {
+            id: input.id,
+            threadId: input.threadId,
+            authority: "native",
+            receiptOnly: true,
+            text: "",
+            images: [],
+            parameters: {},
+            mode: input.mode,
+            status: accepted.status,
+            createdAt: 0,
+            fingerprint: digest(input),
+            ...(accepted.turnId ? { turnId: accepted.turnId } : {}),
+          };
+      const previousRevision = this.snapshots.get(input.threadId)?.revision ?? 0;
+      const revision = Math.max(previousRevision + 1, Date.now());
+      this.fastAccepted.set(input.threadId, {
+        revision,
+        id: accepted.id,
+        ...(accepted.nativeQueuedSubmissionId
+          ? { nativeId: accepted.nativeQueuedSubmissionId }
+          : {}),
+      });
+      this.snapshots.set(input.threadId, {
+        revision,
+        fingerprint: digest({
+          items: [item],
+          paused: null,
+          review: undefined,
+          undo: undefined,
+        }),
+        paused: null,
+      });
+      return {
+        authority: "native" as const,
+        revision,
+        paused: null,
+        items: [item],
+        accepted,
+        snapshotComplete: false,
+      };
     });
   }
   private actionResult(

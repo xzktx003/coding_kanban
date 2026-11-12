@@ -1,3 +1,7 @@
+- 2026-11-12：原生模型／提供商切换通知未投影到会话正文，配额错误后的切换过程缺少可见分隔行。现按同线程已观察的原生设置与现有轮次显示有界提示，去重并在运行范围失效时清除；不会把本地请求回退值当作确认，也不虚构刷新前的历史。桌面、手机浏览器使用隔离事件流验收，未向正式 Agent 发送消息。
+
+- 2026-11-12：已有会话的服务商本地选择未被原生设置更新接口接受，普通发送可能静默沿用旧服务商。现对尚未确认的显式服务商更改阻止普通排队／替换发送并保留草稿，引导消息仍属于原运行轮次；支持同一线程内实际切换服务商仍待原生协议和端到端验证。
+
 2026-11-09 终端工具栏整理：合并文件与 VS Code 到“侧边内容”，增加可保存的快捷链接；URL 仅接受无内嵌凭据的 HTTP/HTTPS，防止危险协议，存储失败显示错误而不假报保存成功。
 2026-11-10 快捷链接从浏览器 localStorage 迁移到会话本机数据目录 `SESSION_DATA_HOME/terminal-quick-links.json`，通过服务端 durable JSON API 读写；跨浏览器共享、Kanban 重启保留且不进入 Git，保留 HTTP/HTTPS、无凭据、最多40条校验。
 
@@ -4042,3 +4046,5 @@ resize 才回来。
 - 2026-11-11：跟随会话状态同步把 `modelProviders: null` 误用于全量查询，custom provider 会话因此长期 unknown。现改为 `modelProviders: []` 并补请求体契约回归；未知状态仍保留，不自动恢复或重发。
 2026-11-11 完整记录出现 `apply_patch` 正文：原生工具事件已由服务端过滤，现场内容实际来自用户粘贴进消息的终端工具卡片副本（时间戳、“折叠”、补丁 hunk 和后续提问同处一个 user message）。现仅在 Codex/Claude 完整记录投影中移除这类有界匹配的复制卡片，保留后续提问和普通代码块；原始历史不改。两类 transcript 回归和服务端 TypeScript 检查通过。
 - 2026-11-12（会话模式终端运行 `codex` 报 command not found）：实际活跃的 Session runtime PTY 继承了 `npm_config_prefix`，导致 `~/.bashrc` 中的 `nvm use default` 拒绝执行；错误被静默后，NVM bin 没有进入 PATH，`codex` shell function 内部的 `command codex` 因此失败。已在用户 `.bashrc` 的 nvm 初始化前清理两种大小写形式的 `npm_config_prefix`，并在 `runtime-compat` / `session-runtime-manager` 中清理 `npm_config_*`、让登录 shell 的 PATH/NVM_BIN 优先于原服务环境；新增回归覆盖。定向 runtime 测试 17 项通过；同一活跃 runtime 的真实临时 PTY 已验证 NVM_BIN、`command -v codex` 和 `codex-cli 0.167.1`。未重启 runtime、gateway、官方 daemon 或 Agent。
+
+- 2026-11-11（后端退出导致页面重连）：系统日志显示原网关与会话运行层随其临时 `dsh-subprocess` 作用域收到终止信号，前端 8484 仍存活但 4000 已无监听。恢复时仅启动网关；原运行层已退出，因此启动新运行层并重新连接共享 Codex 服务。随后将本次网关、运行层及其现有终端连接迁入独立的临时用户服务，保留已有 watcher 的有限自动恢复；此服务不保证机器重启或用户管理器退出后自动启动。局域网 HTTPS 代理、网关和会话健康、76 个关注标签及含 11 个终端会话的 WebSocket 快照均已核对。恢复前后的共享服务版本分别为 0.167.1 和 0.167.0；尚未核实中断时各任务的执行结果，不自动重发。

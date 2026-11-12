@@ -12,6 +12,12 @@ import {
 import { authHeaders, buildUrl } from "../hooks/runtime";
 import { openEventStream, reconcileEventStream } from "../lib/eventStream";
 import { useAgentCenterStore } from "../stores/useAgentCenterStore";
+import {
+  beginSessionStatusCoverage,
+  finishSessionStatusCoverage,
+  markSessionStatusCoverage,
+  sessionStatusMembershipKey,
+} from "../stores/useSessionSyncStore";
 import { openedCodexIds } from "./openedSessions";
 import { acceptTurnStart } from "../utils/codexRuntimeState";
 import {
@@ -91,6 +97,8 @@ export function startFollowedSessionStatusSync(fetcher: typeof fetch = fetch) {
     if (stopped || busy) return;
     const remaining = followedIds();
     if (!remaining.size) return;
+    const coverageMembersKey = sessionStatusMembershipKey(remaining);
+    const coverageGeneration = beginSessionStatusCoverage(coverageMembersKey);
     busy = true;
     requested = false;
     controller = new AbortController();
@@ -152,6 +160,11 @@ export function startFollowedSessionStatusSync(fetcher: typeof fetch = fetch) {
             )
               updatedThreads.set(thread.id, thread.updatedAt);
           }
+          markSessionStatusCoverage(
+            coverageGeneration,
+            coverageMembersKey,
+            Object.keys(statuses),
+          );
           const reconcile = new Set<string>();
           const recoverActive = new Set<string>();
           useCodexStore.setState((state) => {
@@ -350,6 +363,54 @@ export function startFollowedSessionStatusSync(fetcher: typeof fetch = fetch) {
           if (cursor) cursors.add(cursor);
         } while (cursor && remaining.size);
         if (!remaining.size) break;
+      }
+      // A successful exhaustive pass can also prove that a followed card is
+      // not present in either the active or archived list. Keep that row
+      // explicitly unknown so controls remain guarded, but record the
+      // coverage result. Without this marker a stale local card leaves the
+      // aggregate banner in "状态待同步" forever even though every page was
+      // read successfully.
+      if (remaining.size && !stopped && !signal.aborted) {
+        const currentMembers = followedIds();
+        const missing = [...remaining].filter((id) => currentMembers.has(id));
+        if (missing.length) {
+          useCodexStore.setState((state) => {
+            const threadStatusMap = { ...state.threadStatusMap };
+            let changed = false;
+            for (const id of missing) {
+              if (
+                state.threadStatusMap[id] !== baseline.threadStatusMap[id] ||
+                state.turnTimingMap[id] !== baseline.turnTimingMap[id]
+              )
+                continue;
+              const status = { type: "notLoaded" } as const;
+              if (JSON.stringify(threadStatusMap[id]) === JSON.stringify(status))
+                continue;
+              // The exhaustive active+archived query is the authority for
+              // membership. Replace a stale local idle/active value with an
+              // explicit unknown result, but never overwrite a newer event.
+              threadStatusMap[id] = status;
+              changed = true;
+            }
+            return changed ? { threadStatusMap } : state;
+          });
+        }
+      }
+      const currentMembers = followedIds();
+      if (
+        !stopped &&
+        !signal.aborted &&
+        sessionStatusMembershipKey(currentMembers) === coverageMembersKey
+      ) {
+        // This proof is intentionally separate from threadStatusMap. A stale
+        // map entry may come from an earlier page, an SSE event, or a previous
+        // account; only this exhaustive active+archived pass can settle the
+        // aggregate banner.
+        finishSessionStatusCoverage(
+          coverageGeneration,
+          coverageMembersKey,
+          currentMembers,
+        );
       }
     } catch {
       // Keep existing state during outages; retry without repeated error toasts.

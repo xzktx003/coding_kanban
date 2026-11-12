@@ -50,6 +50,7 @@ import {
 } from "./serverRequests";
 import { useRequestUserInputStore } from "../stores/useRequestUserInputStore";
 import { hydrateThreadModel } from "@session/stores/useThreadModelStore";
+import { recordNativeModelChange } from "@session/features/model-change/modelChangeTranscript";
 import { isDeltaEvent, type DeltaEvent } from "../stores/eventUtils";
 import {
   notifyGoalCompletionAutoClear,
@@ -412,7 +413,13 @@ export function useServerNotificationHandler(
         }
         if (method === "thread/settings/updated" && known) {
           const settings = payload.params.threadSettings;
-          hydrateThreadModel(threadId, nativeThreadSettings(settings), {
+          const normalized = nativeThreadSettings(settings);
+          recordNativeModelChange(
+            threadId,
+            normalized,
+            useCodexStore.getState().events[threadId] ?? [],
+          );
+          hydrateThreadModel(threadId, normalized, {
             notify: !!useCodexStore.getState().historyLoadedMap?.[threadId],
           });
           return;

@@ -57,8 +57,23 @@ export interface FollowupMessage {
   createdAt: number;
   fingerprint: string;
 }
+/**
+ * A mutation acceptance proof that can be returned before a complete queue
+ * snapshot is available.  It is keyed by the exact client submission ID and
+ * never claims that the model has started or completed the turn.
+ */
+export interface FollowupAcceptance {
+  id: string;
+  status: "queued" | "sending" | "sent";
+  nativeQueuedSubmissionId?: string;
+  turnId?: string;
+}
 export interface FollowupThread {
   authority?: "native";
+  /** Present when the queue accepted this submission before snapshot reading finished. */
+  accepted?: FollowupAcceptance;
+  /** A fast acceptance response intentionally omits the complete queue snapshot. */
+  snapshotComplete?: boolean;
   operation?: {
     id: string;
     status: "accepted" | "rejected" | "unknown";

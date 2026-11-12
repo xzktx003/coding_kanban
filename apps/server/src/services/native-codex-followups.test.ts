@@ -88,6 +88,38 @@ test("official queue is authoritative; captured settings apply before add and ti
   assert.deepEqual(result.items[0].parameters, {});
 });
 
+test("returns the exact queue acceptance before a slow queue snapshot is readable", async () => {
+  const f = fixture();
+  const original = f.runtime.call;
+  let releaseList!: () => void;
+  const listBlocked = new Promise<void>((resolve) => {
+    releaseList = resolve;
+  });
+  f.runtime.call = async (method, params) => {
+    if (method === "thread/queue/list") {
+      await listBlocked;
+    }
+    return original(method, params);
+  };
+  const pending = f.queue.submit(message);
+  // The submit path must not wait for the follow-up snapshot read. The native
+  // queue/add response already proves this exact clientUserMessageId was
+  // accepted and is sufficient for the composer to clear its captured draft.
+  const result = await Promise.race([
+    pending,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("fast receipt timed out")), 250),
+    ),
+  ]);
+  assert.deepEqual(result.accepted, {
+    id: message.id,
+    status: "queued",
+    nativeQueuedSubmissionId: "official-1",
+  });
+  assert.equal(result.snapshotComplete, false);
+  releaseList();
+});
+
 test("unknown add is reconciled against native client ID and never duplicated after restart", async () => {
   const dir = await mkdtemp(join(tmpdir(), "native-outbox-"));
   try {

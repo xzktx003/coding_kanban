@@ -6,6 +6,7 @@ import {
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
+import { Check, Mic, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { composeContextText } from "@agent-orchestrator/shared";
 import {
@@ -439,6 +440,7 @@ export function ResponseSelectionAnnotations({
             aria-label="选区评论"
             placeholder="添加可选评论…"
             maxLength={10000}
+            rows={2}
             value={editable.annotation ?? ""}
             onChange={(event) =>
               composerDrafts.replace(owner, editable.id, {
@@ -450,12 +452,23 @@ export function ResponseSelectionAnnotations({
           <div>
             <button
               type="button"
+              className="session-response-annotation-remove"
               onClick={() => {
                 composerDrafts.remove(owner, editable.id);
                 setEditing(null);
               }}
             >
-              移除
+              <Trash2 aria-hidden="true" />
+              <span>移除</span>
+            </button>
+            <button
+              type="button"
+              className="session-response-annotation-mic"
+              aria-label="语音输入"
+              title="语音输入"
+              disabled
+            >
+              <Mic aria-hidden="true" />
             </button>
             <button type="button" onClick={() => setEditing(null)}>
               完成
@@ -463,10 +476,20 @@ export function ResponseSelectionAnnotations({
             <button
               type="button"
               className="session-response-annotation-send"
+              aria-label="发送"
               disabled={sendingIds.has(editing.id)}
               onClick={() => void sendAnnotation(editing.id)}
             >
-              {sendingIds.has(editing.id) ? "正在提交…" : "发送"}
+              {sendingIds.has(editing.id) ? (
+                "正在提交…"
+              ) : (
+                <>
+                  <span className="session-response-annotation-send-label">
+                    发送
+                  </span>
+                  <Check aria-hidden="true" />
+                </>
+              )}
             </button>
           </div>
         </div>

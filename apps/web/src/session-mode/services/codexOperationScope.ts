@@ -5,8 +5,14 @@ import { subscribeGoalCompletionScopeReset } from "./goalCompletionAutoClear";
 // not a server-side ownership token or a cross-client CAS guarantee.
 const lifetime: { revision: number } = import.meta.hot?.data
   ?.codexOperationScope ?? { revision: 0 };
+const invalidationListeners = new Set<() => void>();
 export function invalidateCodexOperationScope() {
   lifetime.revision++;
+  for (const listener of [...invalidationListeners]) listener();
+}
+export function onCodexOperationScopeInvalidated(listener: () => void) {
+  invalidationListeners.add(listener);
+  return () => { invalidationListeners.delete(listener); };
 }
 export function captureCodexOperationScope() {
   const state = useCodexStore.getState();

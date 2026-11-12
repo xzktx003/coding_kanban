@@ -202,6 +202,37 @@
   align-items: center;
   gap: 6px;
 }
+.session-mode .session-model-transcript-change {
+  padding-top: 16px;
+}
+.session-mode .session-model-transcript-change .codex-native-divider-message {
+  min-width: 0;
+  max-width: min(100%, 720px);
+}
+.session-mode .session-model-transcript-change .codex-native-divider-message > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+.session-mode .session-model-transcript-change svg,
+.session-mode .session-model-transcript-change button {
+  flex-shrink: 0;
+}
+.session-mode .session-model-change-tooltip {
+  padding: 8px 12px;
+  border: 1px solid var(--codex-border);
+  background: var(--codex-secondary);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 22%);
+  font-size: 12px;
+}
+@media (max-width: 600px) {
+  .session-mode .session-model-transcript-change button {
+    width: 44px;
+    height: 44px;
+    align-items: center;
+    justify-content: center;
+  }
+}
 .session-mode .codex-image-limit-message {
   min-width: 0;
   text-align: center;

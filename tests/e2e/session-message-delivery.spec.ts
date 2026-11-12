@@ -226,6 +226,65 @@ test("a completed turn with a lost submit response releases send after receipt r
   await expect(editor(page)).toHaveText("");
 });
 
+test("clears the captured draft from an exact queue receipt when working events arrive first", async ({
+  page,
+}) => {
+  test.setTimeout(45000);
+  await installSessionUxFixture(page, 2);
+  let submitted: any;
+  await page.route("**/api/session/followups/submit", async (route) => {
+    submitted = route.request().postDataJSON();
+    const turn = {
+      id: "fast-receipt-turn",
+      status: "inProgress",
+      items: [],
+      startedAt: 1,
+      durationMs: null,
+      error: null,
+    };
+    // The work notification is allowed to reach the UI before the complete
+    // queue read. It is not itself the acceptance proof.
+    await push(page, [
+      { method: "turn/started", params: { threadId: "ux-0", turn } },
+    ]);
+    await route.fulfill({
+      json: {
+        authority: "native",
+        revision: 1,
+        paused: null,
+        snapshotComplete: false,
+        accepted: {
+          id: submitted.id,
+          status: "queued",
+          nativeQueuedSubmissionId: "native-fast-receipt",
+        },
+        items: [
+          {
+            ...submitted,
+            authority: "native",
+            nativeQueuedSubmissionId: "native-fast-receipt",
+            nativeClientUserMessageId: submitted.id,
+            status: "queued",
+            createdAt: 0,
+            fingerprint: "fixture-fast-receipt",
+          },
+        ],
+      },
+    });
+  });
+  await page.goto("/?mode=session", { waitUntil: "domcontentloaded" });
+  await editor(page).waitFor();
+  await seedSessionUx(page, 2);
+  await selectFirst(page);
+  await editor(page).fill("工作事件先到但准确回执已到");
+  await page.getByRole("button", { name: "发送消息", exact: true }).click();
+  await expect.poll(() => submitted?.text).toBe("工作事件先到但准确回执已到");
+  // The exact native queue/add receipt settles only the captured version. A
+  // complete queue snapshot may arrive later without holding the composer.
+  await expect(editor(page)).toHaveText("");
+  await expect(page.locator("[data-delivery-echo]")).toHaveCount(0);
+});
+
 for (const width of [375, 1440])
   test(`Codex send stays visible through slow ACK, delayed/repeated events and refresh (${width}px)`, async ({
     page,

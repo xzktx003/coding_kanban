@@ -14,6 +14,7 @@ import { useAsyncQuestionStore } from "../features/async-questions/store";
 import { useCCStore } from "../stores/cc";
 import { useSessionAttentionStore } from "../stores/useSessionAttentionStore";
 import { useSubagentStore } from "../features/subagents/store";
+import { useSessionSyncStore } from "../stores/useSessionSyncStore";
 it("counts asynchronous questions separately without making a running session blocked", () => {
   useCodexStore.setState({
     events: {
@@ -129,6 +130,7 @@ beforeEach(() => {
   });
   useElicitationStore.setState({ pendingRequests: [] });
   useSessionAttentionStore.setState({ receipts: {} });
+  useSessionSyncStore.setState({ statusCoverage: null });
 });
 it("aggregates child execution and requests once per followed family after parent completion", () => {
   useSubagentStore.getState().apply(
@@ -250,6 +252,61 @@ it("keeps unknown and offline separate from a confirmed empty pending set", () =
   rerender({ status: "offline" });
   expect(result.current.counts.unknown).toBe(3);
   expect(result.current.counts.idle).toBe(0);
+});
+
+it("settles the aggregate after an explicit notLoaded status is covered", () => {
+  useAgentCenterStore.setState({
+    cards: [
+      { kind: "codex", id: "loaded" },
+      { kind: "codex", id: "unloaded" },
+    ],
+  });
+  useCodexStore.setState({
+    threadStatusMap: {
+      loaded: { type: "idle" },
+      unloaded: { type: "notLoaded" },
+    },
+    threads: [],
+  });
+  useSessionSyncStore.setState({
+    statusCoverage: {
+      generation: 1,
+      membersKey: JSON.stringify(["loaded", "unloaded"]),
+      covered: { loaded: true, unloaded: true },
+      complete: true,
+    },
+  });
+  const { result } = renderHook(() => useFollowedSessionStates("ready"));
+  expect(result.current.rows.map((row) => row.state)).toEqual([
+    "idle",
+    "unknown",
+  ]);
+  expect(result.current.counts.unknown).toBe(1);
+  expect(result.current.complete).toBe(true);
+});
+
+it("keeps the aggregate pending when a followed status has no query result", () => {
+  useAgentCenterStore.setState({
+    cards: [
+      { kind: "codex", id: "loaded" },
+      { kind: "codex", id: "missing" },
+    ],
+  });
+  useCodexStore.setState({
+    threadStatusMap: { loaded: { type: "idle" } },
+    threads: [],
+  });
+  useSessionSyncStore.setState({
+    statusCoverage: {
+      generation: 1,
+      membersKey: JSON.stringify(["loaded", "missing"]),
+      covered: { loaded: true },
+      complete: false,
+    },
+  });
+  const { result } = renderHook(() => useFollowedSessionStates("ready"));
+  expect(result.current.counts.unknown).toBe(1);
+  expect(result.current.complete).toBe(false);
 });
 it("updates unread and Claude permission state without opening or adding sessions", () => {
   const { result } = renderHook(() => useFollowedSessionStates("ready"));

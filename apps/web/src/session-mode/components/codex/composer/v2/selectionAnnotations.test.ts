@@ -72,6 +72,36 @@ describe("selected response annotations", () => {
     });
   });
 
+  it("keeps the trimmed anchor when the user selects surrounding whitespace", () => {
+    const root = document.createElement("div");
+    root.innerHTML = "<p>  选中的内容  </p><p>下一段</p>";
+    const text = root.querySelector("p")!.firstChild!;
+    const range = document.createRange();
+    range.setStart(text, 0);
+    range.setEnd(text, text.textContent!.length);
+    const selection = captureResponseSelection(root, range);
+    expect(selection).toEqual({ text: "选中的内容", start: 2, end: 7 });
+    expect(findResponseSelection(root, selection!)?.toString()).toBe(
+      "选中的内容",
+    );
+  });
+
+  it("restores a selection that crosses formatted block nodes", () => {
+    const root = document.createElement("div");
+    root.innerHTML = "<p>第一段</p><p><strong>第二段</strong></p>";
+    const first = root.querySelector("p")!.firstChild!;
+    const second = root.querySelectorAll("p")[1].firstElementChild!
+      .firstChild!;
+    const range = document.createRange();
+    range.setStart(first, 1);
+    range.setEnd(second, 2);
+    const selection = captureResponseSelection(root, range);
+    expect(selection?.text).toContain("一段");
+    expect(findResponseSelection(root, selection!)?.toString()).toBe(
+      selection?.text,
+    );
+  });
+
   it("freezes selected text and its comment in the existing queue protocol", () => {
     const draft = {
       id: "ref-1",

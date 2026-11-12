@@ -55,6 +55,36 @@ export function reconcileDeliveryEchoes(
   useCodexDeliveryStore.setState((s) => {
     let entries = s.entries;
     let changed = false;
+    // Native queue mutations can return an exact acceptance proof before a
+    // complete queue snapshot is readable.  The proof is enough to settle the
+    // local submitting echo; the native queue/history remains authoritative for
+    // the eventual visible message.
+    if (receipt.accepted?.id === undefined) {
+      // Keep the hot path below branch-free for ordinary snapshots.
+    } else {
+      const acceptedKey = key(threadId, receipt.accepted.id);
+      const acceptedEntry = entries[acceptedKey];
+      if (acceptedEntry) {
+        if (receipt.authority === "native" && receipt.snapshotComplete !== false) {
+          if (!changed) entries = { ...entries };
+          delete entries[acceptedKey];
+          changed = true;
+        } else {
+          const next = {
+            ...acceptedEntry,
+            status: receipt.accepted.status,
+            ...(receipt.accepted.turnId
+              ? { turnId: receipt.accepted.turnId }
+              : {}),
+          };
+          if (!sameEcho(acceptedEntry, next)) {
+            if (!changed) entries = { ...entries };
+            entries[acceptedKey] = next;
+            changed = true;
+          }
+        }
+      }
+    }
     for (const message of receipt.items) {
       const logicalId = message.nativeClientUserMessageId ?? message.id;
       const id = key(threadId, logicalId);
