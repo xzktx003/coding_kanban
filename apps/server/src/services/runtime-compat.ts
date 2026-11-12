@@ -78,6 +78,28 @@ interface ResolveShellStartupEnvOptions {
   timeoutMs?: number;
 }
 
+export function stripNpmConfigEnv(
+  env: NodeJS.ProcessEnv,
+): Record<string, string | undefined> {
+  const nextEnv = { ...(env as Record<string, string | undefined>) };
+
+  for (const key of Object.keys(nextEnv)) {
+    if (/^npm_config_/i.test(key)) delete nextEnv[key];
+  }
+
+  return nextEnv;
+}
+
+export function mergeShellStartupEnv(
+  baseEnv: NodeJS.ProcessEnv,
+  shellEnv: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  return {
+    ...stripNpmConfigEnv(baseEnv),
+    ...stripNpmConfigEnv(shellEnv),
+  };
+}
+
 function buildShellStartupEnvArgs(
   shellPath: string,
   command: string,
@@ -175,7 +197,7 @@ export async function resolveShellStartupEnv(
 ): Promise<Record<string, string>> {
   const shellPath = options.shellPath ?? resolvePreferredShell(env);
   const shellEnv: NodeJS.ProcessEnv = {
-    ...env,
+    ...stripNpmConfigEnv(env),
     SHELL: env.SHELL ?? shellPath,
   };
   const marker =
