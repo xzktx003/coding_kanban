@@ -101,40 +101,18 @@
   width: 15px;
   height: 15px;
 }
-.session-mode .session-response-annotation-editor .session-response-annotation-remove {
+.session-mode
+  .session-response-annotation-editor
+  .session-response-annotation-remove {
   padding-inline: 4px;
   color: color-mix(in srgb, var(--foreground) 58%, transparent);
 }
-.session-mode .session-response-annotation-editor .session-response-annotation-mic {
+.session-mode
+  .session-response-annotation-editor
+  .session-response-annotation-mic {
   width: 28px;
   padding-inline: 0;
   color: color-mix(in srgb, var(--foreground) 46%, transparent);
-}
-.session-mode
-  .session-response-annotation-editor
-  .session-response-annotation-send {
-  min-width: 72px;
-  color: var(--primary-foreground, #fff);
-  background: var(--primary, #2563eb);
-  border-radius: 9px;
-}
-.session-mode .session-response-annotation-send-label {
-  line-height: 1;
-}
-.session-mode
-  .session-response-annotation-editor
-  .session-response-annotation-send:hover:not(:disabled) {
-  background: color-mix(
-    in srgb,
-    var(--primary, #2563eb) 85%,
-    var(--foreground)
-  );
-}
-.session-mode
-  .session-response-annotation-editor
-  .session-response-annotation-send:disabled {
-  opacity: 0.55;
-  cursor: wait;
 }
 .session-mode .session-response-selection-toolbar button:focus-visible,
 .session-mode .session-response-annotation-marker:focus-visible,

@@ -2290,3 +2290,4 @@ HistoryProjectsDialog 按需加载前，必须切断 browser-dialog/WorkspaceSwi
 - 2026-11-12：会话模式终端找不到 `codex` 的根因是 runtime 继承 `npm_config_prefix`，使 nvm 初始化失败并让登录 PTY 丢失 NVM bin；runtime manager 还会覆盖登录 shell 的 PATH。`.bashrc` 已清理该变量，runtime 环境合并已保留登录 PATH/NVM_BIN，并增加回归。17 项定向测试通过，活跃 runtime 的真实 PTY 已验证 `codex-cli 0.167.1`；未重启 runtime、gateway、daemon 或 Agent。
 
 2026-11-11：网关及会话运行层随临时 `dsh-subprocess` 作用域被终止，8484 前端仍在但 4000 不再监听。恢复网关后因原运行层已退出而启动新运行层；将本次进程迁入独立临时用户服务，保留既有 watcher 的有限自动恢复。HTTPS 代理、会话健康、76 个关注标签和 11 项终端会话 WebSocket 快照通过只读核对。当前共享服务版本 0.167.0，退出前观察为 0.167.1；中断任务结果未核实，服务不保证重启后自动启动。
+- 2026-11-12（回复选区标注误触发发送）：批注编辑器的独立发送按钮和 Ctrl/Cmd+Enter 路径让“添加到对话”绕过公共输入栏，无法连续累积多个标注。现移除直接发送实现，选区和评论只写入当前会话 composer 草稿，由公共发送/加入队列统一提交；新增无请求及多批注一起入队回归。

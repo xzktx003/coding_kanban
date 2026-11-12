@@ -250,10 +250,10 @@ test("a selection and its comment stay attached while the response continues", a
   }
 });
 
-test("directly sending a response annotation keeps the other composer draft and annotation", async ({
+test("response annotations accumulate in the composer until the public queue action", async ({
   page,
-}, info) => {
-  test.setTimeout(240_000);
+}) => {
+  test.setTimeout(180_000);
   const fixture = await setup(page, true, async (data) => {
     const turn = data.threads[0].turns[0];
     turn.status = "completed";
@@ -268,94 +268,53 @@ test("directly sending a response annotation keeps the other composer draft and 
     });
   });
   try {
-    // This functional fixture uses Vite's lazy modules; warm the same module
-    // URLs before exercising selection, without claiming a cold-load SLA.
-    await page.evaluate(async () => {
-      for (const path of [
-        "/src/session-mode/components/agent/SessionGroups.tsx",
-        "/src/session-mode/components/codex/thread/CodexThread.tsx",
-        "/src/session-mode/components/codex/thread/CodexTranscript.tsx",
-      ]) {
-        const entry = performance
-          .getEntriesByType("resource")
-          .findLast((resource) => new URL(resource.name).pathname === path);
-        await import(/* @vite-ignore */ (entry?.name ?? path));
-      }
-    });
-    const composer = page
-      .locator(".session-codex-composer [contenteditable=true]")
-      .first();
-    await composer.fill("保留这段尚未发送的草稿");
     await selectText(page, "事件同步", false, 120_000);
     await page.getByRole("button", { name: "添加到对话", exact: true }).click();
     await page
       .getByRole("textbox", { name: "选区评论" })
-      .fill("保留的另一条批注");
+      .fill("保留第一条批注");
     await page.getByRole("button", { name: "完成", exact: true }).click();
+    await expect(
+      page.getByRole("button", { name: "编辑批注 1" }),
+    ).toBeVisible();
+
     await selectText(page, "状态恢复");
     await page.getByRole("button", { name: "添加到对话", exact: true }).click();
     await page
       .getByRole("textbox", { name: "选区评论" })
-      .fill("这条批注直接发送");
-    await page.screenshot({ path: info.outputPath("direct-annotation.png") });
-    let releaseRequest!: () => void;
-    let requestStarted = false;
-    let holdFirst = true;
-    const heldRequest = new Promise<void>((resolve) => { releaseRequest = resolve; });
-    await page.route("**/api/session/followups/submit", async (route) => {
-      if (holdFirst) {
-        holdFirst = false;
-        requestStarted = true;
-        await heldRequest;
-      }
-      await route.fallback();
-    });
-    await page
-      .getByRole("dialog", { name: "选区批注" })
-      .getByRole("button", { name: "发送", exact: true })
-      .click();
-    try {
-      await expect.poll(() => requestStarted).toBe(true);
-      await page.getByRole("button", { name: "加入队列", exact: true }).click();
-      await expect(page.getByText("当前会话正在发送，请稍后再试")).toBeVisible();
-      expect((await fixture.queue.get("ux-0")).items).toHaveLength(0);
-    } finally {
-      releaseRequest();
-    }
+      .fill("保留第二条批注");
+    await page.getByRole("button", { name: "完成", exact: true }).click();
+    await expect(
+      page.getByRole("button", { name: "编辑批注 2" }),
+    ).toBeVisible();
+
+    expect(
+      fixture.calls.filter(
+        (call) =>
+          call.method === "turn/start" || call.method === "followups/submit",
+      ),
+    ).toEqual([]);
+    await expect(page.locator(".session-context-chip")).toHaveCount(2);
+    await expect(
+      page.getByRole("button", { name: "编辑批注 1" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "编辑批注 2" }),
+    ).toBeVisible();
+
+    await page.getByRole("button", { name: "加入队列", exact: true }).click();
     await expect
       .poll(async () => (await fixture.queue.get("ux-0")).items.length)
       .toBe(1);
     const item = (await fixture.queue.get("ux-0")).items[0];
-    expect(item.contexts).toHaveLength(1);
-    expect(item.contexts?.[0]).toMatchObject({
-      sourceThreadId: "ux-0",
-      sourceItemId: "preview-agent",
-      text: "所选文本：\n状态恢复\n\n用户评论：\n这条批注直接发送",
-    });
-    await expect(composer).toContainText("保留这段尚未发送的草稿");
-    await expect(page.locator(".session-context-chip")).toHaveCount(1);
-    await expect(
-      page.getByRole("button", { name: "编辑批注 1" }),
-    ).toBeVisible();
-    await expect(page.getByRole("button", { name: "编辑批注 2" })).toHaveCount(
-      0,
+    expect(item.contexts).toHaveLength(2);
+    expect(item.contexts?.[0]?.text).toBe(
+      "所选文本：\n事件同步\n\n用户评论：\n保留第一条批注",
     );
-    await page.getByRole("button", { name: "编辑批注 1" }).click();
-    await page
-      .getByRole("textbox", { name: "选区评论" })
-      .press("Control+Enter");
-    await expect
-      .poll(async () => (await fixture.queue.get("ux-0")).items.length)
-      .toBe(2);
-    const keyboardItem = (await fixture.queue.get("ux-0")).items[1];
-    expect(keyboardItem.contexts?.[0]?.text).toContain("保留的另一条批注");
-    await expect(composer).toContainText("保留这段尚未发送的草稿");
-    await expect(page.locator(".session-context-chip")).toHaveCount(0);
+    expect(item.contexts?.[1]?.text).toBe(
+      "所选文本：\n状态恢复\n\n用户评论：\n保留第二条批注",
+    );
     expect(fixture.errors).toEqual([]);
-  } catch (error) {
-    await page.screenshot({ path: info.outputPath("direct-annotation-failure.png") }).catch(() => {});
-    console.log("direct annotation fixture errors", JSON.stringify(fixture.errors));
-    throw error;
   } finally {
     await fixture.close();
   }

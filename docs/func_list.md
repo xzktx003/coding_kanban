@@ -39,7 +39,7 @@
 - 第四模式独立 LAN 候选可显式使用私有 fragment 登录链接，兑换限期安全 Cookie；匿名 HTTP、资源与 WSS 在访问 native 前拒绝。入口、命令和真实证据见[候选访问认证](designs/chatgpt-desktop-mode-20261103/candidate-access.md)。Mac 原资源已完成真实同线程两轮，重开队列满仍在修复，不能据此宣称完整一期交付。
 - 第四模式独立候选在未认证时显示固定同源的“登录工作台”入口，工作台口令与 ChatGPT 登录分开；[前端配置生成脚本](../scripts/prepare-chatgpt-candidate-web-env.mjs)复用主看板的 `WEB_BACKEND_HOST`/`WEB_BACKEND_PORT`，候选资源和登录仍走固定本机网关。
 
-- 会话回复和代码选区可添加到对话并附评论；回复显示可编辑的选区标记，文件选区保留来源及行号。回复批注可单独发送，也可与输入区一起发送；多选区、刷新、会话切换和排队发送沿用原会话草稿与捕获版本，见[选区与评论](session-selection-annotations.md)。
+- 会话回复和代码选区可添加到对话并附评论；回复显示可编辑的选区标记，文件选区保留来源及行号。回复批注只加入当前输入草稿，不会因添加动作立即发送；可连续添加多个选区，最后由公共输入区统一发送或加入队列。多选区、刷新和会话切换沿用原会话草稿与捕获版本，见[选区与评论](session-selection-annotations.md)。
 
 - 同一条 Codex 连接、同一次账号代际里，只读 `account/read`（`refreshToken: false`）合成一次发现并共用快照；`account/updated` 或 `account/login/completed` 后丢弃。工作区路由发现超时按可重试处理，不把授权绑定作废，也不当成账号身份缺失。刷新宿主绑定超时默认 45 秒，两次确认读仍各自发出。卡住的 app-server 守护进程不由看板重启。
 
