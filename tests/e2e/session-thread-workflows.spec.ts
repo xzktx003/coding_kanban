@@ -140,6 +140,59 @@ async function menu(page: Page, label: string) {
   await conversation.click();
   await page.getByRole("menuitem", { name: label, exact: true }).click();
 }
+for (const width of [1440, 700, 390]) {
+  test.describe(`navigation gutter ${width}px`, () => {
+    test.use({ hasTouch: width === 390, isMobile: width === 390 });
+    test("message rail leaves the full text and selection area unobstructed", async ({
+      page,
+    }) => {
+      const fixture = await installSessionUxFixture(page, 2);
+      const turns = history();
+      fixture.threads[0].turns = turns;
+      await page.setViewportSize({ width, height: 844 });
+      await page.goto("/?mode=session");
+      await page
+        .locator(".session-codex-composer [contenteditable=true]")
+        .first()
+        .waitFor();
+      await seedSessionUx(page, 2);
+      await configure(page, turns, "dark");
+      const rail = page.locator(".codex-thread-user-rail");
+      const surface = page.locator(".codex-transcript-surface");
+      await expect(surface).toBeVisible();
+      if (width === 390) {
+        await expect(rail).toBeHidden();
+        expect(
+          await surface.evaluate(
+            (el) =>
+              el.getBoundingClientRect().left -
+              el.closest(".codex-presentation")!.getBoundingClientRect().left,
+          ),
+        ).toBeLessThan(32);
+      } else {
+        await expect(rail).toBeVisible();
+        const check = async () => {
+          const markerBounds = await rail.boundingBox();
+          const textBounds = await surface.boundingBox();
+          const gap = textBounds!.x - markerBounds!.x - markerBounds!.width;
+          expect(gap).toBeGreaterThanOrEqual(6);
+          expect(gap).toBeLessThanOrEqual(6);
+        };
+        await check();
+        const marker = rail.locator("button").nth(30);
+        await marker.hover({ timeout: 5000 });
+        await check();
+        await marker.focus();
+        await check();
+        await page.screenshot({
+          path: `.dev-runtime/session-rail-${width}.png`,
+        });
+        await marker.click({ timeout: 5000 });
+      }
+    });
+  });
+}
+
 for (const width of [1440, 390])
   test.describe(`${width}px workflow`, () => {
     test.use({ hasTouch: width === 390, isMobile: width === 390 });

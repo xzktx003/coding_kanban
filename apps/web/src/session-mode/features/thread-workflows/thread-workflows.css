@@ -183,6 +183,16 @@
   animation-fill-mode: both;
   animation-timeline: scroll(self y);
 }
+/* Keep the entire 36px navigation hit area (12px from the edge) outside
+ * readable/selectable text, including expanded hover and focus markers.
+ * Short threads and touch layouts without a visible rail keep normal padding. */
+@media (pointer: fine) and (hover: hover) {
+  .session-mode
+    .codex-presentation:has(> .codex-thread-user-rail)
+    .codex-transcript-scroll-area {
+    padding-inline-start: 54px;
+  }
+}
 .session-mode .codex-thread-user-rail::-webkit-scrollbar {
   display: none;
 }

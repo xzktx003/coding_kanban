@@ -1461,7 +1461,10 @@ const CodexTranscript = memo(function CodexTranscript({
         disabled={inspection}
       />
       <div className="flex-1 min-h-0 overflow-hidden">
-        <ScrollArea ref={rootRef} className="h-full px-4 pb-4">
+        <ScrollArea
+          ref={rootRef}
+          className="codex-transcript-scroll-area h-full px-4 pb-4"
+        >
           <div
             ref={contentRef}
             className="codex-transcript-surface thread-surface mx-auto py-4"
