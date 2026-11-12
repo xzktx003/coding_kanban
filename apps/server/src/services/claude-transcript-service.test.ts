@@ -219,6 +219,57 @@ test("Claude transcript omits tool calls and results", async () => {
   }
 });
 
+test("Claude transcript removes a copied tool record wrapper while keeping the user's question", async () => {
+  const root = mkdtempSync(
+    join(tmpdir(), "claude-transcript-copied-tool-record-"),
+  );
+  const cwd = "/workspace/project";
+  const project = join(root, "projects", encodeClaudeProjectDirectory(cwd));
+  const sessionId = "cdcdcdcd-cdcd-4cdc-8dcd-cdcdcdcdcdcd";
+  mkdirSync(project, { recursive: true });
+  writeFileSync(
+    join(project, `${sessionId}.jsonl`),
+    JSON.stringify({
+      type: "user",
+      uuid: "user-copied-tool-record",
+      timestamp: "2026-09-23T01:00:00.000Z",
+      sessionId,
+      cwd,
+      message: {
+        content: [
+          {
+            type: "text",
+            text: [
+              "2026/11/11 00:55:04",
+              "折叠",
+              "*** Begin Patch",
+              "*** Update File: /workspace/example.py",
+              "@@",
+              "-    need(old_condition, 'quality protocol binding mismatch')",
+              "+    need(new_condition, 'quality protocol binding mismatch')",
+              "*** End Patch",
+              "为什么完整记录显示了这段？",
+            ].join("\n"),
+          },
+        ],
+      },
+    }) + "\n",
+  );
+
+  try {
+    const page = await new ClaudeTranscriptService({
+      projectsRoot: join(root, "projects"),
+      sessionsRoot: join(root, "sessions"),
+    }).read({ sessionId });
+    assert.deepEqual(
+      page.entries.map((entry) => entry.text),
+      ["为什么完整记录显示了这段？"],
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("Claude latest completion follows the final assistant response past tool use", async () => {
   const root = mkdtempSync(join(tmpdir(), "claude-transcript-completion-"));
   const cwd = "/workspace/completion";

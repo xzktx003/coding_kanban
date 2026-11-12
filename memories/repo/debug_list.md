@@ -2282,3 +2282,5 @@ HistoryProjectsDialog 按需加载前，必须切断 browser-dialog/WorkspaceSwi
 
 2026-11-11：后台冻结或正文回收后切回时，`SessionGroups` 外层懒加载 `CodexThread` 使缓存答复先出现而会话壳未及时挂载。现同步挂载 `CodexThread` 外层，富转录仍按需加载；唤醒浏览器回归通过，未发送任务。
 2026-11-11：跟随会话状态同步把 `modelProviders: null` 误用于全量查询，custom provider 会话因此长期 unknown。现改为 `modelProviders: []` 并补请求体契约回归；未知状态仍保留，不自动恢复或重发。
+- 2026-11-11 完整记录出现 `apply_patch` 正文的根因是用户消息中包含复制的终端工具卡片，不是原生工具事件泄漏。Codex/Claude transcript 投影现只剔除带时间戳、折叠控件及有效补丁 hunk 的工具卡片副本，普通代码保持；不修改原始历史。
+- 2026-11-12：会话模式终端找不到 `codex` 的根因是 runtime 继承 `npm_config_prefix`，使 nvm 初始化失败并让登录 PTY 丢失 NVM bin；runtime manager 还会覆盖登录 shell 的 PATH。`.bashrc` 已清理该变量，runtime 环境合并已保留登录 PATH/NVM_BIN，并增加回归。17 项定向测试通过，活跃 runtime 的真实 PTY 已验证 `codex-cli 0.167.1`；未重启 runtime、gateway、daemon 或 Agent。

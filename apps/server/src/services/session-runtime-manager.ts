@@ -1,5 +1,8 @@
 import { resolveSessionDataHome } from "./session-data-home.js";
-import { resolveShellStartupEnv } from "./runtime-compat.js";
+import {
+  mergeShellStartupEnv,
+  resolveShellStartupEnv,
+} from "./runtime-compat.js";
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
@@ -203,8 +206,7 @@ export class SessionRuntimeManager {
         cwd: resolve(this.sourceRoot, "packages/session-runtime"),
         detached: true,
         env: {
-          ...shellEnv,
-          ...this.env,
+          ...mergeShellStartupEnv(this.env, shellEnv),
           SESSION_DATA_HOME: dataHome,
           SESSION_RUNTIME_INSTANCE: instance,
           CODEXIA_NO_BROWSER: "1",

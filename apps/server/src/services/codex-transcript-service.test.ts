@@ -13,11 +13,104 @@ import test from "node:test";
 import {
   CodexTranscriptService,
   summarizeCodexTranscript,
+  stripCopiedToolCallTranscript,
 } from "./codex-transcript-service.js";
 
 function line(value: unknown): string {
   return `${JSON.stringify(value)}\n`;
 }
+
+test("transcript projection removes a copied tool record wrapper but keeps the user's question", () => {
+  const copiedToolRecord = [
+    "2026/11/11 00:55:04",
+    "折叠",
+    "*** Begin Patch",
+    "*** Update File: /workspace/example.py",
+    "@@",
+    "-    need(old_condition, 'quality protocol binding mismatch')",
+    "+    need(new_condition, 'quality protocol binding mismatch')",
+    "*** End Patch",
+    "weishen  为什么现在终端的完整记录会有这种记录呢？",
+  ].join("\n");
+
+  assert.equal(
+    stripCopiedToolCallTranscript(copiedToolRecord),
+    "weishen  为什么现在终端的完整记录会有这种记录呢？",
+  );
+  assert.equal(
+    stripCopiedToolCallTranscript(
+      "*** Begin Patch\nordinary user code\n*** End Patch",
+    ),
+    "*** Begin Patch\nordinary user code\n*** End Patch",
+  );
+});
+
+test("Codex full transcript strips a copied tool card but preserves surrounding user text", () => {
+  const root = mkdtempSync(
+    join(tmpdir(), "codex-transcript-copied-tool-record-"),
+  );
+  const sessionId = "copied-tool-record-session";
+  const copiedToolRecord = [
+    "2026/11/11 00:55:04",
+    "折叠",
+    "*** Begin Patch",
+    "*** Update File: /workspace/example.py",
+    "@@",
+    "-    need(old_condition, 'quality protocol binding mismatch')",
+    "+    need(new_condition, 'quality protocol binding mismatch')",
+    "*** End Patch",
+  ].join("\n");
+  writeFileSync(
+    join(root, `rollout-${sessionId}.jsonl`),
+    [
+      line({
+        type: "session_meta",
+        payload: { id: sessionId, cwd: "/workspace/project" },
+      }),
+      line({
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: `前文\n${copiedToolRecord}\n后续问题？`,
+            },
+          ],
+        },
+      }),
+      line({
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: "普通代码：\n*** Begin Patch\nplain example\n*** End Patch",
+            },
+          ],
+        },
+      }),
+    ].join(""),
+  );
+
+  try {
+    const transcript = new CodexTranscriptService({ sessionsRoot: root }).read({
+      sessionId,
+    });
+    assert.deepEqual(
+      transcript.entries.map((entry) => entry.text),
+      [
+        "前文\n后续问题？",
+        "普通代码：\n*** Begin Patch\nplain example\n*** End Patch",
+      ],
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("completion questions stay turn-bound and skip Goal continuation context", () => {
   const root = mkdtempSync(join(tmpdir(), "codex-completion-question-"));

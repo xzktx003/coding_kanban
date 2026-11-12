@@ -4040,3 +4040,5 @@ resize 才回来。
 
 - 2026-11-11：后台冻结或正文回收后切回时，`SessionGroups` 外层懒加载 `CodexThread` 使缓存答复先出现而会话壳未及时挂载。现同步挂载 `CodexThread` 外层，富转录仍按需加载；唤醒浏览器回归通过，未发送任务。
 - 2026-11-11：跟随会话状态同步把 `modelProviders: null` 误用于全量查询，custom provider 会话因此长期 unknown。现改为 `modelProviders: []` 并补请求体契约回归；未知状态仍保留，不自动恢复或重发。
+2026-11-11 完整记录出现 `apply_patch` 正文：原生工具事件已由服务端过滤，现场内容实际来自用户粘贴进消息的终端工具卡片副本（时间戳、“折叠”、补丁 hunk 和后续提问同处一个 user message）。现仅在 Codex/Claude 完整记录投影中移除这类有界匹配的复制卡片，保留后续提问和普通代码块；原始历史不改。两类 transcript 回归和服务端 TypeScript 检查通过。
+- 2026-11-12（会话模式终端运行 `codex` 报 command not found）：实际活跃的 Session runtime PTY 继承了 `npm_config_prefix`，导致 `~/.bashrc` 中的 `nvm use default` 拒绝执行；错误被静默后，NVM bin 没有进入 PATH，`codex` shell function 内部的 `command codex` 因此失败。已在用户 `.bashrc` 的 nvm 初始化前清理两种大小写形式的 `npm_config_prefix`，并在 `runtime-compat` / `session-runtime-manager` 中清理 `npm_config_*`、让登录 shell 的 PATH/NVM_BIN 优先于原服务环境；新增回归覆盖。定向 runtime 测试 17 项通过；同一活跃 runtime 的真实临时 PTY 已验证 NVM_BIN、`command -v codex` 和 `codex-cli 0.167.1`。未重启 runtime、gateway、官方 daemon 或 Agent。

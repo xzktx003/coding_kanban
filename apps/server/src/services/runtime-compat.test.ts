@@ -8,8 +8,10 @@ import test from "node:test";
 import {
   buildInteractiveShellCommand,
   buildTmuxCommand,
+  mergeShellStartupEnv,
   resolveTmuxBinary,
   resolveShellStartupEnv,
+  stripNpmConfigEnv,
 } from "./runtime-compat.js";
 
 function createShellStub(
@@ -219,5 +221,35 @@ test("resolveShellStartupEnv rejects a login shell that never returns", async ()
         },
       ),
     /shell startup aborted/,
+  );
+});
+
+test("shell launch environments drop npm config overrides and keep login PATH", () => {
+  const result = mergeShellStartupEnv(
+    {
+      PATH: "/server/bin",
+      npm_config_prefix: "/workspace/apps/server",
+      NPM_CONFIG_USERCONFIG: "/private/npmrc",
+      KEEP: "base",
+    },
+    {
+      PATH: "/login/bin",
+      NVM_BIN: "/home/user/.nvm/versions/node/v24/bin",
+      KEEP: "login",
+    },
+  );
+
+  assert.equal(result.PATH, "/login/bin");
+  assert.equal(result.NVM_BIN, "/home/user/.nvm/versions/node/v24/bin");
+  assert.equal(result.KEEP, "login");
+  assert.equal(result.npm_config_prefix, undefined);
+  assert.equal(result.NPM_CONFIG_USERCONFIG, undefined);
+  assert.deepEqual(
+    stripNpmConfigEnv({
+      npm_config_prefix: "removed",
+      NPM_CONFIG_CACHE: "removed",
+      PATH: "/kept",
+    }),
+    { PATH: "/kept" },
   );
 });
