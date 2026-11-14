@@ -13,13 +13,17 @@ export const PHONE_TERMINAL_MAX_WIDTH = 480;
 export const PHONE_TERMINAL_SHORT_HEIGHT = 500;
 export const PHONE_TERMINAL_SHORT_WIDTH = 1024;
 
-export function isPhoneTerminalViewport(width: number, height: number): boolean {
+export function isPhoneTerminalViewport(
+  width: number,
+  height: number,
+): boolean {
   if (!(width > 0) || !(height > 0)) {
     return false;
   }
   return (
     width <= PHONE_TERMINAL_MAX_WIDTH ||
-    (height <= PHONE_TERMINAL_SHORT_HEIGHT && width <= PHONE_TERMINAL_SHORT_WIDTH)
+    (height <= PHONE_TERMINAL_SHORT_HEIGHT &&
+      width <= PHONE_TERMINAL_SHORT_WIDTH)
   );
 }
 
@@ -42,6 +46,9 @@ export function shouldUsePhoneTerminal({
   workbenchMode: WorkbenchMode;
   coarsePointer?: boolean;
 }): boolean {
+  if (new URLSearchParams(location.search).get("desktop") === "1") {
+    return false;
+  }
   if (isMobileWorkbenchLocation(location)) {
     return true;
   }

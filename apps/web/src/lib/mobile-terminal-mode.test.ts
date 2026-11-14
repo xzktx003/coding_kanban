@@ -95,4 +95,38 @@ describe("mobile terminal mode", () => {
       true,
     );
   });
+
+  it("keeps a wide mobile route in the latest workbench path", () => {
+    assert.equal(
+      shouldUsePhoneTerminal({
+        location: {
+          hash: "",
+          pathname: "/",
+          search: "?view=mobile&layout=wide",
+        },
+        viewportWidth: 390,
+        viewportHeight: 844,
+        workbenchMode: "terminal",
+        coarsePointer: true,
+      }),
+      true,
+    );
+  });
+
+  it("honors the explicit desktop escape from a narrow phone page", () => {
+    assert.equal(
+      shouldUsePhoneTerminal({
+        location: {
+          hash: "",
+          pathname: "/",
+          search: "?mode=terminal&desktop=1",
+        },
+        viewportWidth: 390,
+        viewportHeight: 844,
+        workbenchMode: "terminal",
+        coarsePointer: true,
+      }),
+      false,
+    );
+  });
 });

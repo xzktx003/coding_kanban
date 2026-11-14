@@ -38,6 +38,7 @@ import {
 import { HiddenSessionsDrawer } from "./components/HiddenSessionsDrawer";
 import type { NewSessionHost, SelectedHost } from "./components/HostDropdown";
 import { MobileWorkbenchPage } from "./components/MobileWorkbenchPage";
+import { NarrowMobileWorkbenchPage } from "./components/NarrowMobileWorkbenchPage";
 import { NewSessionDialog } from "./components/NewSessionDialog";
 import { QuickTmuxConnect } from "./components/QuickTmuxConnect";
 import { SidePanelView } from "./components/SidePanelView";
@@ -143,7 +144,10 @@ import {
   loadSessionGroups,
   type SessionGroupState,
 } from "./lib/session-groups";
-import { startSessionGroupsSync, type GroupAction } from "./lib/session-groups-sync";
+import {
+  startSessionGroupsSync,
+  type GroupAction,
+} from "./lib/session-groups-sync";
 import { isVsCodeAvailable } from "./lib/side-panel-availability";
 import {
   loadTerminalPreviewLightweightMode,
@@ -154,7 +158,16 @@ import {
   loadTerminalFontSize,
   saveTerminalFontSize,
 } from "./lib/terminal-font-size";
-import { shouldEnableMobileTerminalTouchMode, shouldUsePhoneTerminal } from "./lib/mobile-terminal-mode";
+import {
+  shouldEnableMobileTerminalTouchMode,
+  shouldUsePhoneTerminal,
+} from "./lib/mobile-terminal-mode";
+import {
+  isMobileWorkbenchLocation,
+  mobileWorkbenchLayoutUrl,
+  readMobileWorkbenchLayout,
+  type MobileWorkbenchLayout,
+} from "./lib/mobile-workbench-route";
 import { readWorkbenchMode } from "./lib/workbench-mode";
 import {
   MAX_CACHED_VSCODE_IFRAMES,
@@ -171,6 +184,36 @@ import { copyTextToClipboard } from "./lib/clipboard";
 import "./app.css";
 
 type SidePanelTool = "files" | "vscode" | "changes" | "transcript";
+
+function MobileLayoutChooser({
+  showBrand,
+  onChoose,
+}: {
+  showBrand: boolean;
+  onChoose: (layout: MobileWorkbenchLayout) => void;
+}) {
+  return (
+    <main className="mobile-layout-chooser">
+      <div className="mobile-layout-chooser-card">
+        {showBrand && (
+          <div className="mobile-layout-chooser-brand">Coding Kanban</div>
+        )}
+        <h1>选择手机看板界面</h1>
+        <p>宽屏保留最新的手机工作台，窄屏保留原来的手机终端操作。</p>
+        <div className="mobile-layout-chooser-actions">
+          <button type="button" onClick={() => onChoose("wide")}>
+            <strong>宽屏界面</strong>
+            <span>使用最新手机看板与全屏终端布局</span>
+          </button>
+          <button type="button" onClick={() => onChoose("narrow")}>
+            <strong>窄屏界面</strong>
+            <span>使用原来的手机终端、输入框和快捷键</span>
+          </button>
+        </div>
+      </div>
+    </main>
+  );
+}
 
 const FILE_BROWSER_UI_STORAGE_KEY = "file-browser-ui-state";
 const SIDE_PANEL_SESSION_STORAGE_KEY = "side-panel-session-state";
@@ -382,8 +425,12 @@ export default function App({
   const [layoutState, setLayoutState] = useState<LayoutState>(loadLayoutState);
   const [sessionGroups, setSessionGroups] =
     useState<SessionGroupState>(loadSessionGroups);
-  const [sessionGroupsSyncError, setSessionGroupsSyncError] = useState<string | null>(null);
-  const sessionGroupsSyncRef = useRef<ReturnType<typeof startSessionGroupsSync> | null>(null);
+  const [sessionGroupsSyncError, setSessionGroupsSyncError] = useState<
+    string | null
+  >(null);
+  const sessionGroupsSyncRef = useRef<ReturnType<
+    typeof startSessionGroupsSync
+  > | null>(null);
   const [sshHosts, setSshHosts] = useState<SshHostPreset[]>([]);
   const [discoveryState, setDiscoveryState] = useState<{
     open: boolean;
@@ -580,7 +627,9 @@ export default function App({
         }
       },
       (chime) => {
-        if (!claimTerminalCompletionChime(chime.sessionId, chime.completionId)) {
+        if (
+          !claimTerminalCompletionChime(chime.sessionId, chime.completionId)
+        ) {
           return;
         }
         if (
@@ -710,7 +759,10 @@ export default function App({
   }, []);
 
   useEffect(() => {
-    const sync = startSessionGroupsSync(setSessionGroups, setSessionGroupsSyncError);
+    const sync = startSessionGroupsSync(
+      setSessionGroups,
+      setSessionGroupsSyncError,
+    );
     sessionGroupsSyncRef.current = sync;
     return () => {
       sessionGroupsSyncRef.current = null;
@@ -718,7 +770,8 @@ export default function App({
     };
   }, []);
   const dispatchSessionGroup = useCallback((action: GroupAction) => {
-    if (sessionGroupsSyncRef.current) sessionGroupsSyncRef.current.dispatch(action);
+    if (sessionGroupsSyncRef.current)
+      sessionGroupsSyncRef.current.dispatch(action);
     else setSessionGroupsSyncError("会话分组同步尚未就绪，请重试");
   }, []);
 
@@ -813,7 +866,10 @@ export default function App({
       window.removeEventListener("orientationchange", refresh);
       window.removeEventListener("resize", refreshPhoneTerminal);
       window.removeEventListener("popstate", refreshPhoneTerminal);
-      window.removeEventListener("workbench-mode-changed", refreshPhoneTerminal);
+      window.removeEventListener(
+        "workbench-mode-changed",
+        refreshPhoneTerminal,
+      );
     };
   }, []);
 
@@ -1039,6 +1095,8 @@ export default function App({
     viewportWidth: phoneViewport.width,
     workbenchMode,
   });
+  const mobileRoute = isMobileWorkbenchLocation(window.location);
+  const mobileLayout = readMobileWorkbenchLayout(window.location);
   const mobileActiveSessionId = phoneTerminal
     ? (visibleSessions.find(
         (session) =>
@@ -1138,7 +1196,11 @@ export default function App({
 
   const handleLaunched = useCallback(
     (session: AgentSessionRecord, groupId: string | null) => {
-      dispatchSessionGroup({ type: "assign", sessionKeys: getSessionGroupKeys(session), groupId });
+      dispatchSessionGroup({
+        type: "assign",
+        sessionKeys: getSessionGroupKeys(session),
+        groupId,
+      });
       listAgentSessions()
         .then(setSnapshot)
         .catch(() => {});
@@ -1283,8 +1345,14 @@ export default function App({
         globalThis.crypto?.randomUUID?.() ??
         `${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const groupId = `group-${randomId}`;
-      const session = sessionId ? rawSessionsRef.current.find((item) => item.id === sessionId) : undefined;
-      dispatchSessionGroup({ type: "add", group: { id: groupId, name }, ...(session ? { sessionKeys: getSessionGroupKeys(session) } : {}) });
+      const session = sessionId
+        ? rawSessionsRef.current.find((item) => item.id === sessionId)
+        : undefined;
+      dispatchSessionGroup({
+        type: "add",
+        group: { id: groupId, name },
+        ...(session ? { sessionKeys: getSessionGroupKeys(session) } : {}),
+      });
     },
     [sessionGroups.groups, dispatchSessionGroup],
   );
@@ -1342,7 +1410,11 @@ export default function App({
       );
       if (!session) return;
 
-      dispatchSessionGroup({ type: "assign", sessionKeys: getSessionGroupKeys(session), groupId });
+      dispatchSessionGroup({
+        type: "assign",
+        sessionKeys: getSessionGroupKeys(session),
+        groupId,
+      });
     },
     [dispatchSessionGroup],
   );
@@ -1350,7 +1422,11 @@ export default function App({
   const handleToggleSessionGroup = useCallback(
     (groupId: string, scope?: string) => {
       const current = sessionGroupsSyncRef.current?.getState() ?? sessionGroups;
-      dispatchSessionGroup({ type: "setCollapsed", key: getSessionGroupCollapseKey(groupId, scope), collapsed: !isSessionGroupCollapsed(current, groupId, scope) });
+      dispatchSessionGroup({
+        type: "setCollapsed",
+        key: getSessionGroupCollapseKey(groupId, scope),
+        collapsed: !isSessionGroupCollapsed(current, groupId, scope),
+      });
     },
     [dispatchSessionGroup, sessionGroups],
   );
@@ -1783,30 +1859,83 @@ export default function App({
     handleFocusSession(lastFocusedId);
   }, [lastFocusedId]);
 
+  if (phoneTerminal && mobileLayout === null) {
+    const chooseMobileLayout = (layout: MobileWorkbenchLayout) => {
+      history.replaceState(
+        null,
+        "",
+        mobileWorkbenchLayoutUrl(window.location, layout),
+      );
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    };
+    return (
+      <MobileLayoutChooser
+        showBrand={!embedded}
+        onChoose={chooseMobileLayout}
+      />
+    );
+  }
+
+  if (mobileRoute && mobileLayout === "narrow") {
+    return (
+      <>
+        {sessionGroupsSyncError && (
+          <div className="session-group-sync-error" role="status">
+            {sessionGroupsSyncError}
+          </div>
+        )}
+        <NarrowMobileWorkbenchPage
+          showBrand={!embedded}
+          activeSessionId={mobileActiveSessionId}
+          isLoading={isLoading}
+          sessions={sessions}
+          sessionGroups={sessionGroups}
+          terminalFontSize={terminalFontSize}
+          useLightweightTerminalPreview={useLightweightTerminalPreview}
+          agentCompletionNotificationsEnabled={
+            agentCompletionNotificationsEnabled
+          }
+          agentCompletionNotificationPermission={
+            agentCompletionNotificationPermission
+          }
+          onSwitchSession={handleMobileSwitchSession}
+          onTerminalFontSizeChange={handleTerminalFontSizeChange}
+          onToggleAgentCompletionNotifications={
+            handleToggleAgentCompletionNotifications
+          }
+        />
+      </>
+    );
+  }
+
   if (phoneTerminal) {
     return (
       <>
-      {sessionGroupsSyncError && <div className="session-group-sync-error" role="status">{sessionGroupsSyncError}</div>}
-      <MobileWorkbenchPage
-        showBrand={!embedded}
-        activeSessionId={mobileActiveSessionId}
-        isLoading={isLoading}
-        sessions={sessions}
-        sessionGroups={sessionGroups}
-        terminalFontSize={terminalFontSize}
-        useLightweightTerminalPreview={useLightweightTerminalPreview}
-        agentCompletionNotificationsEnabled={
-          agentCompletionNotificationsEnabled
-        }
-        agentCompletionNotificationPermission={
-          agentCompletionNotificationPermission
-        }
-        onSwitchSession={handleMobileSwitchSession}
-        onTerminalFontSizeChange={handleTerminalFontSizeChange}
-        onToggleAgentCompletionNotifications={
-          handleToggleAgentCompletionNotifications
-        }
-      />
+        {sessionGroupsSyncError && (
+          <div className="session-group-sync-error" role="status">
+            {sessionGroupsSyncError}
+          </div>
+        )}
+        <MobileWorkbenchPage
+          showBrand={!embedded}
+          activeSessionId={mobileActiveSessionId}
+          isLoading={isLoading}
+          sessions={sessions}
+          sessionGroups={sessionGroups}
+          terminalFontSize={terminalFontSize}
+          useLightweightTerminalPreview={useLightweightTerminalPreview}
+          agentCompletionNotificationsEnabled={
+            agentCompletionNotificationsEnabled
+          }
+          agentCompletionNotificationPermission={
+            agentCompletionNotificationPermission
+          }
+          onSwitchSession={handleMobileSwitchSession}
+          onTerminalFontSizeChange={handleTerminalFontSizeChange}
+          onToggleAgentCompletionNotifications={
+            handleToggleAgentCompletionNotifications
+          }
+        />
       </>
     );
   }
@@ -1828,7 +1957,11 @@ export default function App({
   );
   return (
     <main className={`app-shell-v2 layout-${layoutMode}`}>
-      {sessionGroupsSyncError && <div className="session-group-sync-error" role="status">{sessionGroupsSyncError}</div>}
+      {sessionGroupsSyncError && (
+        <div className="session-group-sync-error" role="status">
+          {sessionGroupsSyncError}
+        </div>
+      )}
       {!updateIndicatorInToolbar && updateNotification}
       <TopBar
         navigation={navigation}

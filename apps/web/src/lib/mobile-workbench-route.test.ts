@@ -1,7 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { isMobileWorkbenchLocation } from "./mobile-workbench-route.js";
+import {
+  isMobileWorkbenchLocation,
+  mobileWorkbenchLayoutUrl,
+  readMobileWorkbenchLayout,
+} from "./mobile-workbench-route.js";
 
 describe("mobile workbench route", () => {
   it("accepts history routes when the server supports SPA fallback", () => {
@@ -45,6 +49,28 @@ describe("mobile workbench route", () => {
         search: "",
       }),
       false,
+    );
+  });
+
+  it("reads explicit wide and narrow mobile layouts", () => {
+    assert.equal(
+      readMobileWorkbenchLayout({ search: "?view=mobile&layout=wide" }),
+      "wide",
+    );
+    assert.equal(
+      readMobileWorkbenchLayout({ search: "?view=mobile&layout=narrow" }),
+      "narrow",
+    );
+    assert.equal(readMobileWorkbenchLayout({ search: "?view=mobile" }), null);
+  });
+
+  it("builds a stable mobile layout URL without dropping existing parameters", () => {
+    assert.equal(
+      mobileWorkbenchLayoutUrl(
+        { pathname: "/", search: "?view=mobile&session=s-1", hash: "" },
+        "narrow",
+      ),
+      "/?view=mobile&session=s-1&layout=narrow",
     );
   });
 });

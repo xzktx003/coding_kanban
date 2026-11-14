@@ -4,6 +4,28 @@ export interface MobileWorkbenchLocation {
   search: string;
 }
 
+export type MobileWorkbenchLayout = "wide" | "narrow";
+
+export function readMobileWorkbenchLayout(
+  location: Pick<MobileWorkbenchLocation, "search">,
+): MobileWorkbenchLayout | null {
+  const layout = new URLSearchParams(location.search).get("layout");
+  return layout === "wide" || layout === "narrow" ? layout : null;
+}
+
+export function mobileWorkbenchLayoutUrl(
+  location: Pick<MobileWorkbenchLocation, "pathname" | "search" | "hash">,
+  layout: MobileWorkbenchLayout,
+): string {
+  const url = new URL(
+    `${location.pathname}${location.search}${location.hash}`,
+    "http://workbench.local",
+  );
+  url.searchParams.set("view", "mobile");
+  url.searchParams.set("layout", layout);
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
 export function isMobileWorkbenchLocation({
   hash,
   pathname,
